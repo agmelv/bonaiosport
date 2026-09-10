@@ -4,6 +4,12 @@ const { prewarmMatch } = require('./streams');
 const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const teamLogoService = require('./services/TeamLogoService');
+const homeAway = require('./services/HomeAwayService');
+
+// Titles that already name the visiting side first: "Rockies @ Yankees",
+// "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
+// the host first and needs swapping to put the visitor on the left.
+const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
  * Accurately determines if an event is currently live right now.
@@ -103,7 +109,34 @@ function mapMatchToMetaPreview(match, config = {}) {
   // Resolve both sides of the fixture to ESPN crests where we confidently can.
   // Returns null for a non-fixture title (a 24/7 channel), and either logo may
   // be null on its own — TeamLogoService declines rather than guessing.
-  const matchup = teamLogoService.resolveMatchup(match);
+  let matchup = teamLogoService.resolveMatchup(match);
+
+  // Put the visiting side on the left and name it first, the way a scoreboard
+  // reads. ESPN's scoreboards are the source; when they don't list a fixture,
+  // the title's own separator is the fallback — "A at B" and "A @ B" name the
+  // visitor first, while "A vs B" and "A - B" conventionally name the host
+  // first. That fallback is a convention, not a fact, which is exactly why the
+  // scoreboard is consulted first: the feeds write "Florida A&M Rattlers vs
+  // Miami Hurricanes" for a game Miami host.
+  let orientedByEspn = false;
+  if (matchup) {
+    const known = homeAway.orient(matchup.a, matchup.b, matchup.aLogo, matchup.bLogo);
+    let flip;
+    if (known) {
+      orientedByEspn = true;
+      flip = known.away !== matchup.a;
+    } else {
+      flip = !VISITOR_FIRST.test(match.title || '');
+    }
+    if (flip) {
+      matchup = {
+        ...matchup,
+        a: matchup.b, b: matchup.a,
+        aLogos: matchup.bLogos, bLogos: matchup.aLogos,
+        aLogo: matchup.bLogo, bLogo: matchup.aLogo
+      };
+    }
+  }
 
   // Generate a clean, readable fallback poster using the match title.
   // NOTE: never substitute match.category here. Replacing the teams with
@@ -111,7 +144,7 @@ function mapMatchToMetaPreview(match, config = {}) {
   // category cards; svgPlaceholder word-wraps, so long names are fine.
   let posterText = match.title;
   if (matchup) {
-      posterText = `${matchup.a}\nvs\n${matchup.b}`;
+      posterText = `${matchup.a}\n@\n${matchup.b}`;
   } else if (match.team1 && match.team2 && match.team1.name && match.team2.name) {
       posterText = `${match.team1.name}\nvs\n${match.team2.name}`;
   } else {
@@ -210,11 +243,20 @@ function mapMatchToMetaPreview(match, config = {}) {
      }
   }
 
+  // The card title follows the same orientation as the artwork: visitor first,
+  // "@" between. Only a real two-sided fixture is rewritten — a 24/7 channel or
+  // a title we couldn't split keeps whatever the provider called it.
+  const displayTitle = matchup ? `${matchup.a} @ ${matchup.b}` : match.title;
+
   const is247 = match.category === 'networks' || !match.date;
   const prefix = isLive ? (is247 ? '📺 ' : '🔴 LIVE: ') : '⏱️ ';
   const cast = [];
-  if (match.team1 && match.team1.name) cast.push(match.team1.name);
-  if (match.team2 && match.team2.name) cast.push(match.team2.name);
+  if (matchup) {
+    cast.push(matchup.a, matchup.b);
+  } else {
+    if (match.team1 && match.team1.name) cast.push(match.team1.name);
+    if (match.team2 && match.team2.name) cast.push(match.team2.name);
+  }
 
   const leagueStr = match.league ? `🏆 League: ${match.league}\n` : '';
   const statusStr = is247 
@@ -225,7 +267,7 @@ function mapMatchToMetaPreview(match, config = {}) {
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
     type: 'tv',
-    name: `${prefix}${match.title}`,
+    name: `${prefix}${displayTitle}`,
     genres: [match.category.toUpperCase()],
     poster: poster,
     posterShape: 'landscape',
@@ -249,6 +291,10 @@ function mapMatchToMetaPreview(match, config = {}) {
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 async function handleCatalog(type, id, extra, config) {
+  // Warm the home/away index before mapping. Blocks only on a cold start; once
+  // an index exists a stale one is served while the refresh runs behind it, so
+  // a slow or dead ESPN costs orientation rather than the catalog.
+  await homeAway.ensureFresh().catch(() => {});
   if (type !== 'tv' || !id.startsWith('nuvio_sports_')) {
     return { metas: [] };
   }
@@ -350,6 +396,7 @@ async function handleCatalog(type, id, extra, config) {
 }
 
 async function handleMeta(type, id, config) {
+  await homeAway.ensureFresh().catch(() => {});
   if (type !== 'tv' || !id.startsWith('nuvio_sport_')) {
     return { meta: null };
   }

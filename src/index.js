@@ -115,6 +115,12 @@ app.get('/api/matches', (req, res) => {
 // /img/placeholder?...  → generated poster card. Replaces the external
 //                         placehold.co dependency.
 const imageService = require('./services/ImageService');
+const homeAwayService = require('./services/HomeAwayService');
+
+// Prime the home/away index at boot so the first catalog request finds it warm
+// rather than paying the cold-start wait. Failure is silent by design: the
+// catalog falls back to reading orientation off the title separator.
+homeAwayService.ensureFresh().catch(() => {});
 
 app.get('/img/placeholder', (req, res) => {
   const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333');
