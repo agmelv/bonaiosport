@@ -167,7 +167,10 @@ app.get('/img/matchup', async (req, res) => {
   }
 
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(imageService.svgMatchup(a, b, aEntry, bEntry, color));
+  res.send(imageService.svgMatchup(a, b, aEntry, bEntry, color, {
+    aUrl: req.query.al || null,
+    bUrl: req.query.bl || null
+  }));
 });
 
 // ─── Shared safe HTTP client (impit + undici fallback) ───────────────────────

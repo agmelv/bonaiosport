@@ -145,7 +145,15 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   let logo = matchLogo || team1Logo || channelLogo || null;
 
-  if (matchPoster) {
+  // A generated card wins whenever both crests resolved. Provider artwork is
+  // inconsistent — a handful of fixtures ship a designed poster and most ship
+  // nothing — so one house style across the catalog reads better than a mix.
+  // A half-resolved matchup still loses to real provider art.
+  const fullMatchup = matchupPoster && matchup && matchup.aLogo && matchup.bLogo;
+
+  if (fullMatchup) {
+    poster = matchupPoster;
+  } else if (matchPoster) {
     poster = buildImg(matchPoster, posterText, color) || fallbackPoster;
   } else if (matchupPoster) {
     poster = matchupPoster;

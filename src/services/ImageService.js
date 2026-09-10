@@ -17,7 +17,14 @@
  * No new dependencies: fetches use undici (already in the dependency tree).
  */
 
-const { request } = require('undici');
+const { request, Agent, interceptors } = require('undici');
+
+// The soccer feeds serve every crest as a 302 to their CDN. Plain request()
+// hands back the redirect itself, the 200-only check in getImage() rejects it,
+// and the card falls back to a name plate — which is why no soccer fixture had
+// a crest. undici 8 dropped the maxRedirections option in favour of this.
+const redirectAgent = new Agent().compose(interceptors.redirect({ maxRedirections: 3 }));
+const crestColor = require('./CrestColorService');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -116,54 +123,150 @@ function svgPlaceholder(text, color, w = 800, h = 450) {
 }
 
 /**
- * Two-crest matchup card. Logos arrive as { buffer, contentType } entries from
- * getImage() and are inlined as data URIs — an SVG that referenced them by URL
- * would render blank in clients that refuse external refs inside SVG.
+ * Mix two hex colours. t=0 returns a, t=1 returns b.
+ */
+function mixHex(a, b, t) {
+  const pa = [a.slice(0, 2), a.slice(2, 4), a.slice(4, 6)].map(h => parseInt(h, 16));
+  const pb = [b.slice(0, 2), b.slice(2, 4), b.slice(4, 6)].map(h => parseInt(h, 16));
+  return pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+
+function shade(hex, amount) {
+  return amount < 0 ? mixHex(hex, '000000', -amount) : mixHex(hex, 'ffffff', amount);
+}
+
+function luminance(hex) {
+  const [r, g, b] = [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map(h => parseInt(h, 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Pick the pair of colours the card is painted in.
+ *
+ * Crests are drawn on top, and most of them are mostly white, so a light half
+ * would swallow its own logo — every side gets pulled into a band dark enough
+ * to sit a crest on. When both sides land on the same colour (two red teams)
+ * the split stops reading as two halves, so one side is pushed darker.
+ */
+function cardColors(aStats, bStats, fallback) {
+  const hexOk = v => (/^([0-9a-fA-F]{6})$/.test(String(v)) ? String(v) : null);
+  const base = hexOk(fallback) || '1f2430';
+  const read = st => {
+    if (!st) return { colors: [], light: 0 };
+    if (Array.isArray(st)) return { colors: st.map(hexOk).filter(Boolean), light: 1 };
+    return { colors: (st.colors || []).map(hexOk).filter(Boolean), light: st.light || 0 };
+  };
+  const A = read(aStats);
+  const B = read(bStats);
+
+  const spread = (x, y) => [0, 1, 2].reduce((acc, i) =>
+    acc + Math.abs(parseInt(x.slice(i * 2, i * 2 + 2), 16) - parseInt(y.slice(i * 2, i * 2 + 2), 16)), 0);
+
+  // A crest with no colour at all (a black-and-white badge) has no half of its
+  // own. A dark shade of the opponent's colour keeps the card coherent; the
+  // category colour nudged lighter produced washed-out pinks.
+  let a = A.colors[0] || (B.colors.length ? shade(B.colors[0], -0.55) : base);
+  // Two teams that both come back orange stop reading as two halves. Prefer a
+  // colour the crest actually wears over distorting its primary one.
+  let b = B.colors.find(c => spread(c, a) >= 90) || B.colors[0] ||
+    (A.colors.length ? shade(A.colors[0], -0.55) : base);
+
+  // Crests sit on top of this, most of them white-heavy, so a very light half
+  // would swallow its own logo. Only the genuinely light colours get pulled
+  // down, and gently: darkening an orange toward black turns it to mud.
+  //
+  // The opposite failure needs the crest's own make-up to spot: a dark crest
+  // WITH a white outline reads fine on a dark half, while one without it
+  // (Richmond's solid navy spider) disappears — so only that second kind gets
+  // its half lifted.
+  const seat = (c, stats, derived) => {
+    const l = luminance(c);
+    if (l > 0.75) return shade(c, -0.38);
+    if (l > 0.45) return shade(c, -0.26);
+    if (l > 0.20) return shade(c, -0.16);
+    if (!derived && l < 0.15 && stats.light < 0.12) return shade(c, 0.32);
+    if (l < 0.04) return shade(c, 0.10);
+    return c;
+  };
+  a = seat(a, A, !A.colors.length);
+  b = seat(b, B, !B.colors.length);
+
+  // Still colliding (one crest, or a crest with a single colour): nudge rather
+  // than leave a card that looks like one flat panel.
+  if (spread(a, b) < 90) b = luminance(b) > 0.35 ? shade(b, -0.28) : shade(b, 0.24);
+
+  return { a, b };
+}
+
+/**
+ * Matchup card: each half painted in that team's colour, blending through a
+ * darkened seam, with the crests inlined as data URIs. Modelled on the artwork
+ * the streaming providers ship for their own fixtures, so a generated card and
+ * a provider card sit next to each other without looking like two designs.
+ *
+ * The crests come from getImage() and are inlined as data URIs — an SVG that
+ * referenced them by URL would render blank in clients that refuse external
+ * refs.
  *
  * A missing logo degrades to the team's name in that half, so a one-sided
  * resolve still produces a better card than the plain placeholder.
  */
-function svgMatchup(aName, bName, aEntry, bEntry, color, w = 800, h = 450) {
-  const bg = accentColor(color);
+function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
+  const { w = 800, h = 450, aUrl = null, bUrl = null } = opts;
+  const { a: colA, b: colB } = cardColors(
+    crestColor.paletteForCrest(aUrl, aEntry),
+    crestColor.paletteForCrest(bUrl, bEntry),
+    color
+  );
+
   const cx = [w * 0.27, w * 0.73];
-  const crest = 240;
-  const crestMid = h * 0.44;
+  const crest = 250;
+  const crestMid = h * 0.5;
   const crestY = crestMid - crest / 2;
+  const seam = shade(mixHex(colA, colB, 0.5), -0.55);
 
   const half = (name, entry, i) => {
     const centerX = cx[i];
     if (entry && entry.buffer) {
       const uri = `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`;
-      return `<image x="${(centerX - crest / 2).toFixed(1)}" y="${crestY.toFixed(1)}" width="${crest}" height="${crest}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"/>`;
+      return `<image x="${(centerX - crest / 2).toFixed(1)}" y="${crestY.toFixed(1)}" width="${crest}" height="${crest}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}" filter="url(#drop)"/>`;
     }
-    const lines = wrapLines(name, 14, 3);
-    const fs = 30;
-    const y0 = crestY + crest / 2 - ((lines.length - 1) * (fs + 6)) / 2;
+    // No crest for this side: its name carries the half instead.
+    const lines = wrapLines(name, 13, 3);
+    const fs = 34;
+    const y0 = crestMid - ((lines.length - 1) * (fs + 8)) / 2;
     return lines.map((l, j) =>
-      `<text x="${centerX.toFixed(1)}" y="${(y0 + j * (fs + 6)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${fs}" font-weight="700" fill="#e8eaed" text-anchor="middle" dominant-baseline="middle">${escapeXml(l)}</text>`
-    ).join('\n  ');
-  };
-
-  // The caption repeats the name under the crest. When a half already fell back
-  // to showing the name in place of a crest, printing it twice just looks broken.
-  const caption = (name, entry, i) => {
-    if (!entry || !entry.buffer) return '';
-    const lines = wrapLines(name, 20, 2);
-    const fs = 26;
-    return lines.map((l, j) =>
-      `<text x="${cx[i].toFixed(1)}" y="${(h * 0.82 + j * (fs + 4)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${fs}" font-weight="600" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${escapeXml(l)}</text>`
+      `<text x="${centerX.toFixed(1)}" y="${(y0 + j * (fs + 8)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${fs}" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${escapeXml(l)}</text>`
     ).join('\n  ');
   };
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-  <rect width="${w}" height="${h}" fill="#111111"/>
-  <rect x="0" y="0" width="${w}" height="10" fill="${bg}"/>
-  <rect x="0" y="${h - 10}" width="${w}" height="10" fill="${bg}"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#${shade(colA, 0.06)}"/>
+      <stop offset="32%" stop-color="#${colA}"/>
+      <stop offset="50%" stop-color="#${seam}"/>
+      <stop offset="68%" stop-color="#${colB}"/>
+      <stop offset="100%" stop-color="#${shade(colB, 0.06)}"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="27%" cy="50%" r="27%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="73%" cy="50%" r="27%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="drop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#bg)"/>
+  <rect width="${w}" height="${h}" fill="url(#glowA)"/>
+  <rect width="${w}" height="${h}" fill="url(#glowB)"/>
   ${half(aName, aEntry, 0)}
   ${half(bName, bEntry, 1)}
-  <text x="50%" y="${crestMid.toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="44" font-weight="300" fill="#6b7075" text-anchor="middle" dominant-baseline="middle">vs</text>
-  ${caption(aName, aEntry, 0)}
-  ${caption(bName, bEntry, 1)}
+  <text x="50%" y="${crestMid.toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="52" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#drop)">VS</text>
 </svg>`;
 }
 
@@ -207,6 +310,7 @@ async function getImage(rawUrl) {
         headers: { 'User-Agent': UA, 'Accept': 'image/*,*/*;q=0.8' },
         headersTimeout: FETCH_TIMEOUT_MS,
         bodyTimeout: FETCH_TIMEOUT_MS,
+        dispatcher: redirectAgent,
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 1000)
       });
 
@@ -285,6 +389,7 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, color = '333333' }) {
 
 module.exports = {
   svgPlaceholder,
+  cardColors,
   svgMatchup,
   wrapLines,
   getImage,
