@@ -63,6 +63,14 @@ function pairKey(a, b) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+/** UTC calendar day of an ISO timestamp, as YYYYMMDD. */
+function dayOf(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
 /**
  * A crest URL reduced to league + file, so ESPN's two spellings of the same
  * asset agree: the scoreboard serves .../teamlogos/nfl/500/scoreboard/lar.png
@@ -175,7 +183,7 @@ async function fetchBoard(board, dates) {
   return Array.isArray(json?.events) ? json.events : [];
 }
 
-function addEvent(map, event) {
+function addEvent(map, event, board) {
   const comp = event?.competitions?.[0];
   const competitors = comp?.competitors;
   if (!Array.isArray(competitors) || competitors.length !== 2) return 0;
@@ -189,6 +197,18 @@ function addEvent(map, event) {
   // fixture, including a regular-season NFL game ESPN flags neutralSite.
   // "@" in a listing means the designated visitor, not the deed to the stadium.
 
+  // Board and day are part of every key, and both are load-bearing.
+  //
+  // Without the day, the two legs of a tie share one key and the first one
+  // indexed decides both — so the return fixture is served the exact inverse of
+  // its true orientation. Any home-and-home pair inside the horizon does this.
+  //
+  // Without the board, the same two universities meeting in another sport share
+  // a key too: Tennessee host Vanderbilt at basketball, Vanderbilt host
+  // Tennessee at baseball, and whichever is indexed first speaks for both.
+  const day = dayOf(event.date);
+  if (!day) return 0;
+  const scope = `${board}:${day}`;
   let added = 0;
 
   // Crest pair first — the strongest key, since both sides of the comparison
@@ -196,7 +216,7 @@ function addEvent(map, event) {
   const hLogo = logoKey(home.team && home.team.logo);
   const aLogo = logoKey(away.team && away.team.logo);
   if (hLogo && aLogo && hLogo !== aLogo) {
-    const key = `L:${pairKey(hLogo, aLogo)}`;
+    const key = `L:${scope}:${pairKey(hLogo, aLogo)}`;
     if (!map.has(key)) { map.set(key, hLogo); added++; }
   }
 
@@ -205,9 +225,8 @@ function addEvent(map, event) {
   for (const h of homeNames) {
     for (const a of awayNames) {
       if (h === a) continue;
-      const key = `N:${pairKey(h, a)}`;
-      // First writer wins: an earlier board is no less authoritative, and a
-      // later duplicate would only ever restate the same orientation.
+      const key = `N:${scope}:${pairKey(h, a)}`;
+      // Within one board on one day, a duplicate really is the same event.
       if (!map.has(key)) { map.set(key, h); added++; }
     }
   }
@@ -228,7 +247,7 @@ async function rebuild() {
     if (r.value.length >= REQUEST_LIMIT) stats.capped.push(`${jobs[i].board}@${jobs[i].dates}`);
     for (const ev of r.value) {
       stats.events++;
-      stats.keys += addEvent(next, ev);
+      stats.keys += addEvent(next, ev, jobs[i].board);
     }
   });
 
@@ -266,30 +285,60 @@ async function ensureFresh() {
 /**
  * Orientation for a fixture, or null when ESPN doesn't list it.
  *
- * Crest URLs are tried first when the caller has them: the feed's team names
- * and ESPN's rarely agree letter-for-letter, but a resolved crest is the same
- * asset on both sides. Names are the fallback for teams with no crest.
+ * Scoped to the boards that answer for this category and to the fixture's own
+ * day (±1, since the provider's clock and ESPN's can straddle midnight). Both
+ * are what keep a second meeting between the same two teams from inheriting the
+ * first meeting's answer.
+ *
+ * Crest URLs are tried before names: the feed's team names and ESPN's rarely
+ * agree letter-for-letter, but a resolved crest is the same asset on both
+ * sides.
  *
  * Returns { away, home } as the caller's own strings, not normalized ones.
  */
-function orient(a, b, aLogo = null, bLogo = null) {
+function orient(a, b, aLogo = null, bLogo = null, category = null, dateMs = null) {
   if (!a || !b || !index.size) return null;
   if (Date.now() - fetchedAt > STALE_SERVE_MS) return null;
 
+  const t = Number(dateMs);
+  // No date means no safe key: an undated fixture could be either leg of a tie,
+  // and guessing between them is the failure this scoping exists to prevent.
+  if (!Number.isFinite(t) || t <= 0) return null;
+
+  // A category with no scoreboard has no evidence to offer, and searching every
+  // board for it would only invite a cross-sport coincidence — a boxing card
+  // matching two universities' names. Better to decline and let the caller fall
+  // back to the title.
+  const boards = CATEGORY_BOARDS[category];
+  if (!boards) return null;
+  const days = [0, -1, 1].map(off => {
+    const d = new Date(t + off * 86400000);
+    return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+  });
+
   const la = logoKey(aLogo);
   const lb = logoKey(bLogo);
-  if (la && lb && la !== lb) {
-    const homeLogo = index.get(`L:${pairKey(la, lb)}`);
-    if (homeLogo === la) return { away: b, home: a };
-    if (homeLogo === lb) return { away: a, home: b };
-  }
-
   const na = normalize(a);
   const nb = normalize(b);
-  if (!na || !nb || na === nb) return null;
-  const homeName = index.get(`N:${pairKey(na, nb)}`);
-  if (homeName === na) return { away: b, home: a };
-  if (homeName === nb) return { away: a, home: b };
+  const logoPair = la && lb && la !== lb ? pairKey(la, lb) : null;
+  const namePair = na && nb && na !== nb ? pairKey(na, nb) : null;
+  if (!logoPair && !namePair) return null;
+
+  for (const board of boards) {
+    for (const day of days) {
+      const scope = `${board}:${day}`;
+      if (logoPair) {
+        const homeLogo = index.get(`L:${scope}:${logoPair}`);
+        if (homeLogo === la) return { away: b, home: a };
+        if (homeLogo === lb) return { away: a, home: b };
+      }
+      if (namePair) {
+        const homeName = index.get(`N:${scope}:${namePair}`);
+        if (homeName === na) return { away: b, home: a };
+        if (homeName === nb) return { away: a, home: b };
+      }
+    }
+  }
   return null;
 }
 

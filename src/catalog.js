@@ -118,23 +118,32 @@ function mapMatchToMetaPreview(match, config = {}) {
   // first. That fallback is a convention, not a fact, which is exactly why the
   // scoreboard is consulted first: the feeds write "Florida A&M Rattlers vs
   // Miami Hurricanes" for a game Miami host.
+  // Whether this is a two-team fixture at all — and only evidence counts.
+  // resolveMatchup() splits on any separator, so "UFC 319: Du Plessis vs
+  // Chimaev" and "Spain GP - Formula 1 2026" come back looking like fixtures.
+  // Rewriting those produced "Conor Benn @ Ryan Garcia" for a neutral-site
+  // fight and "Spain GP @ Formula 1 2026" for a race. ESPN listing the fixture,
+  // or both sides resolving to a real crest, is evidence. A separator is not.
   let orientedByEspn = false;
+  let isFixture = false;
   if (matchup) {
-    const known = homeAway.orient(matchup.a, matchup.b, matchup.aLogo, matchup.bLogo);
-    let flip;
-    if (known) {
-      orientedByEspn = true;
-      flip = known.away !== matchup.a;
-    } else {
-      flip = !VISITOR_FIRST.test(match.title || '');
-    }
-    if (flip) {
-      matchup = {
-        ...matchup,
-        a: matchup.b, b: matchup.a,
-        aLogos: matchup.bLogos, bLogos: matchup.aLogos,
-        aLogo: matchup.bLogo, bLogo: matchup.aLogo
-      };
+    const known = homeAway.orient(matchup.a, matchup.b, matchup.aLogo, matchup.bLogo, match.category, match.date);
+    orientedByEspn = !!known;
+    isFixture = orientedByEspn || (matchup.aLogos.length > 0 && matchup.bLogos.length > 0);
+
+    if (isFixture) {
+      // Visitor on the left, the way a scoreboard reads. ESPN is the source;
+      // without it the title's own separator is the fallback — "A at B" and
+      // "A @ B" name the visitor first, "A vs B" and "A - B" the host.
+      const flip = known ? known.away !== matchup.a : !VISITOR_FIRST.test(match.title || '');
+      if (flip) {
+        matchup = {
+          ...matchup,
+          a: matchup.b, b: matchup.a,
+          aLogos: matchup.bLogos, bLogos: matchup.aLogos,
+          aLogo: matchup.bLogo, bLogo: matchup.aLogo
+        };
+      }
     }
   }
 
@@ -143,8 +152,10 @@ function mapMatchToMetaPreview(match, config = {}) {
   // "AMERICAN_FOOTBALL" on long titles is what produced the blank-looking
   // category cards; svgPlaceholder word-wraps, so long names are fine.
   let posterText = match.title;
-  if (matchup) {
+  if (matchup && isFixture) {
       posterText = `${matchup.a}\n@\n${matchup.b}`;
+  } else if (matchup) {
+      posterText = `${matchup.a}\nvs\n${matchup.b}`;
   } else if (match.team1 && match.team2 && match.team1.name && match.team2.name) {
       posterText = `${match.team1.name}\nvs\n${match.team2.name}`;
   } else {
@@ -246,12 +257,12 @@ function mapMatchToMetaPreview(match, config = {}) {
   // The card title follows the same orientation as the artwork: visitor first,
   // "@" between. Only a real two-sided fixture is rewritten — a 24/7 channel or
   // a title we couldn't split keeps whatever the provider called it.
-  const displayTitle = matchup ? `${matchup.a} @ ${matchup.b}` : match.title;
+  const displayTitle = isFixture ? `${matchup.a} @ ${matchup.b}` : match.title;
 
   const is247 = match.category === 'networks' || !match.date;
   const prefix = isLive ? (is247 ? '📺 ' : '🔴 LIVE: ') : '⏱️ ';
   const cast = [];
-  if (matchup) {
+  if (matchup && isFixture) {
     cast.push(matchup.a, matchup.b);
   } else {
     if (match.team1 && match.team1.name) cast.push(match.team1.name);
