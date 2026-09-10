@@ -145,22 +145,30 @@ function keysFor(team) {
 function addTeams(candidates, teams, slug) {
   for (const team of teams) {
     const logo = logoFor(team, slug);
-    if (!logo) continue;
+    // A team with no published logo still takes part in the ambiguity check
+    // below, it just can't be the answer. Skipping it outright would let a key
+    // two clubs answer to resolve to whichever of them happens to have a crest
+    // — silently un-dropping keys the builder had always refused ("hurricanes",
+    // "jayhawks", "raiders"), which is exactly the confident-wrong-crest
+    // outcome the matcher exists to avoid.
     const id = String(team.id);
     const canonical = normalize(team.displayName);
     for (const k of keysFor(team)) {
       if (!candidates.has(k)) {
-        candidates.set(k, { ids: new Set(), logos: new Set(), logo, primaries: new Set(), primaryLogo: null });
+        candidates.set(k, { ids: new Set(), logos: new Set(), logo: null, primaries: new Set(), primaryLogo: null });
       }
       const entry = candidates.get(k);
       entry.ids.add(id);
-      entry.logos.add(logo);
+      // Logo-less teams get a unique sentinel so they count as a distinct
+      // crest for ambiguity, never as a usable one.
+      entry.logos.add(logo || `none:${id}`);
+      if (logo && !entry.logo) entry.logo = logo;
       // A key that IS this team's canonical display name outranks the same key
       // reached via someone else's location. Without this, "South Korea U17"
       // (location "South Korea") makes the senior side's key ambiguous.
       if (k === canonical) {
         entry.primaries.add(id);
-        if (!entry.primaryLogo) entry.primaryLogo = logo;
+        if (logo && !entry.primaryLogo) entry.primaryLogo = logo;
       }
     }
   }
@@ -175,9 +183,13 @@ function finish(candidates) {
     // Keep the key when every candidate is the same team, or when they all
     // render the same crest anyway (ESPN duplicates some clubs across
     // competitions under different ids). Either way the outcome is unambiguous.
-    if (entry.ids.size === 1 || entry.logos.size === 1) map[k] = entry.logo;
-    else if (entry.primaries.size === 1) map[k] = entry.primaryLogo;
-    else dropped++;
+    // `logo` is null when every candidate for this key lacked a published
+    // crest: unambiguous, but nothing to show, so it isn't an entry.
+    if (entry.ids.size === 1 || entry.logos.size === 1) {
+      if (entry.logo) map[k] = entry.logo; else dropped++;
+    } else if (entry.primaries.size === 1 && entry.primaryLogo) {
+      map[k] = entry.primaryLogo;
+    } else dropped++;
   }
   return { map, dropped };
 }

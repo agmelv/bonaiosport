@@ -104,7 +104,20 @@ function accentColor(color) {
  * title word-wrapped across centered lines. Replaces placehold.co.
  */
 function svgPlaceholder(text, color, w = 800, h = 450) {
-  const bg = accentColor(color);
+  // Painted like the matchup card so a fixture with no crests still belongs to
+  // the same catalog: same gradient, same seam, same backlights. There are no
+  // team colours to use here — nothing resolved — so the category colour
+  // carries it, seated dark enough for white text and split light-to-dark so
+  // the card has depth instead of reading as a flat panel.
+  const base = accentColor(color).slice(1);
+  const seated = luminance(base) > 0.55 ? shade(base, -0.45)
+    : luminance(base) > 0.32 ? shade(base, -0.28)
+    : luminance(base) < 0.05 ? shade(base, 0.16)
+    : base;
+  const left = shade(seated, 0.10);
+  const right = shade(seated, -0.22);
+  const seam = shade(seated, -0.42);
+
   const lines = wrapLines(text, 24, 5);
   const fontSize = lines.length >= 5 ? 34 : lines.length === 4 ? 40 : lines.length === 3 ? 44 : lines.length === 2 ? 52 : 58;
   const lead = fontSize + 12;
@@ -112,12 +125,26 @@ function svgPlaceholder(text, color, w = 800, h = 450) {
   const textEls = lines.map((line, i) => {
     const y = startY + i * lead;
     const isVs = /^(vs|v|at|-)$/i.test(line);
-    return `<text x="50%" y="${y.toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${isVs ? Math.round(fontSize * 0.6) : fontSize}" font-weight="${isVs ? 400 : 700}" fill="${isVs ? '#9aa0a6' : '#ffffff'}" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`;
+    return `<text x="50%" y="${y.toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${isVs ? Math.round(fontSize * 0.6) : fontSize}" font-weight="${isVs ? 400 : 700}" fill="${isVs ? 'rgba(255,255,255,0.62)' : '#ffffff'}" text-anchor="middle" dominant-baseline="middle" filter="url(#pdrop)">${escapeXml(line)}</text>`;
   }).join('\n  ');
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-  <rect width="${w}" height="${h}" fill="#111111"/>
-  <rect x="0" y="0" width="${w}" height="10" fill="${bg}"/>
-  <rect x="0" y="${h - 10}" width="${w}" height="10" fill="${bg}"/>
+  <defs>
+    <linearGradient id="pbg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#${left}"/>
+      <stop offset="50%" stop-color="#${seam}"/>
+      <stop offset="100%" stop-color="#${right}"/>
+    </linearGradient>
+    <radialGradient id="pglow" cx="50%" cy="50%" r="42%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="pdrop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#pbg)"/>
+  <rect width="${w}" height="${h}" fill="url(#pglow)"/>
   ${textEls}
 </svg>`;
 }

@@ -155,30 +155,22 @@ function lookupTeam(side, category, leaguesOverride = null) {
 }
 
 /**
- * Leagues in which `side` is an outright (exact or de-spaced) hit. Used to
- * resolve a fixture jointly: "NC State vs Richmond" has one league in common
- * (college-football), so Richmond is the Spiders there — while "Richmond vs
- * Collingwood" shares only the AFL and gets the Tigers.
+ * Leagues in which `side` resolves at all. Used to resolve a fixture jointly:
+ * "NC State vs Richmond" has one league in common (college-football), so
+ * Richmond is the Spiders there — while "Richmond vs Collingwood" shares only
+ * the AFL and gets the Tigers.
+ *
+ * This runs the full ladder per league rather than checking for an exact key,
+ * because a side ESPN stores as "Essendon" arrives from the providers as
+ * "Essendon Bombers" and only the multi-word stage matches it. An exact-key
+ * test left those fixtures with no common league, which fell back to category
+ * order and handed Richmond the wrong crest. lookupTeam() memoises per
+ * (leagues, key), so the repeated calls cost one pass each per catalog build.
  */
 function resolvingLeagues(side, leagues) {
-  const key = normalize(side);
-  if (!key || key.length < 2) return [];
-  const variants = new Set([key]);
-  if (ALIASES[key]) variants.add(ALIASES[key]);
-  const bare = stripAffix(key);
-  if (bare && bare.length >= 4) variants.add(bare);
   const out = [];
   for (const lg of leagues) {
-    const map = TEAMS[lg];
-    if (!map) continue;
-    for (const v of variants) {
-      const squashed = '~' + v.replace(/ /g, '');
-      if (Object.prototype.hasOwnProperty.call(map, v) ||
-          (squashed.length >= 7 && Object.prototype.hasOwnProperty.call(map, squashed))) {
-        out.push(lg);
-        break;
-      }
-    }
+    if (lookupTeam(side, null, [lg])) out.push(lg);
   }
   return out;
 }
@@ -269,9 +261,19 @@ function resolveMatchup(match) {
   const common = leagues.filter(lg => inA.includes(lg) && inB.includes(lg));
   const scope = common.length ? common : null;
 
+  // A name that answers in more than one league of the same category is a
+  // genuine collision — "richmond" is the NCAA Spiders and the AFL Tigers, and
+  // the providers file both under american_football. With a common league the
+  // opponent settles it. Without one there is no evidence, and league order
+  // would just be a coin flip dressed up as an answer, so the table declines
+  // and the provider's own URL (which knows which club it meant) gets its turn.
+  const undecidable = side => !common.length && side.length > 1;
+  const fromTable = (side, ambiguous) =>
+    ambiguous ? null : lookupTeam(side, match.category, scope);
+
   const dedupe = list => [...new Set(list.filter(Boolean))];
-  const aLogos = dedupe([lookupTeam(a, match.category, scope), providedLogo(match.team1)]);
-  const bLogos = dedupe([lookupTeam(b, match.category, scope), providedLogo(match.team2)]);
+  const aLogos = dedupe([fromTable(a, undecidable(inA)), providedLogo(match.team1)]);
+  const bLogos = dedupe([fromTable(b, undecidable(inB)), providedLogo(match.team2)]);
 
   return {
     a,
