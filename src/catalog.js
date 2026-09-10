@@ -127,11 +127,6 @@ function mapMatchToMetaPreview(match, config = {}) {
   const buildImg = (sourceUrl, fbText, c) =>
     imageService.proxyUrl(BASE_URL, sourceUrl, { text: fbText, color: c });
 
-  // Matchup card built from the resolved crests, when we have at least one.
-  const matchupPoster = matchup
-    ? imageService.matchupUrl(BASE_URL, { ...matchup, color })
-    : null;
-
   let poster = fallbackPoster;
 
   // Channel logos are keyed by naive substring, so "<Team> vs <Team> | ESPN"
@@ -145,13 +140,20 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   let logo = matchLogo || team1Logo || channelLogo || null;
 
-  // A generated card wins whenever both crests resolved. Provider artwork is
+  // Matchup card from the resolved crest candidates. The provider's poster
+  // rides along as the fallback, so /img/matchup can degrade to it when a
+  // candidate turns out not to exist — that decision belongs at fetch time.
+  const matchupPoster = matchup
+    ? imageService.matchupUrl(BASE_URL, { ...matchup, color, fallback: matchPoster })
+    : null;
+
+  // A generated card whenever both sides have a candidate. Provider artwork is
   // inconsistent — a handful of fixtures ship a designed poster and most ship
   // nothing — so one house style across the catalog reads better than a mix.
-  // A half-resolved matchup still loses to real provider art.
-  const fullMatchup = matchupPoster && matchup && matchup.aLogo && matchup.bLogo;
+  // A side with no candidate at all still loses to real provider art.
+  const bothSides = matchup && matchup.aLogos.length > 0 && matchup.bLogos.length > 0;
 
-  if (fullMatchup) {
+  if (bothSides && matchupPoster) {
     poster = matchupPoster;
   } else if (matchPoster) {
     poster = buildImg(matchPoster, posterText, color) || fallbackPoster;

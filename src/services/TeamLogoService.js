@@ -28,7 +28,10 @@ const TEAMS = require('./data/espn-teams.json');
 // Ordering matters: "kansas city chiefs" must hit the NFL before the
 // college-football table gets a chance at "kansas".
 const CATEGORY_LEAGUES = {
-  american_football: ['nfl', 'cfl', 'afl', 'college-football'],
+  // AFL last: the providers file Australian rules under american_football, but
+  // a bare "richmond" in that feed is the Spiders far more often than the
+  // Tigers. resolveMatchup() still finds the Tigers when the opponent is AFL.
+  american_football: ['nfl', 'cfl', 'college-football', 'afl'],
   basketball: ['nba', 'wnba', 'mens-college-basketball'],
   baseball: ['mlb'],
   hockey: ['nhl', 'mens-college-hockey', 'womens-college-hockey'],
@@ -124,11 +127,11 @@ function leaguesFor(category) {
  * Resolve one side of a fixture to a logo URL, or null.
  * Returns null rather than guessing whenever confidence is low.
  */
-function lookupTeam(side, category) {
+function lookupTeam(side, category, leaguesOverride = null) {
   const key = normalize(side);
   if (!key || key.length < 2) return null;
 
-  const leagues = leaguesFor(category);
+  const leagues = leaguesOverride || leaguesFor(category);
   const cacheKey = `${leagues.join(',')}|${key}`;
   if (cache.has(cacheKey)) return cache.get(cacheKey);
 
@@ -149,6 +152,35 @@ function lookupTeam(side, category) {
   if (cache.size >= CACHE_MAX) cache.clear();
   cache.set(cacheKey, result);
   return result;
+}
+
+/**
+ * Leagues in which `side` is an outright (exact or de-spaced) hit. Used to
+ * resolve a fixture jointly: "NC State vs Richmond" has one league in common
+ * (college-football), so Richmond is the Spiders there — while "Richmond vs
+ * Collingwood" shares only the AFL and gets the Tigers.
+ */
+function resolvingLeagues(side, leagues) {
+  const key = normalize(side);
+  if (!key || key.length < 2) return [];
+  const variants = new Set([key]);
+  if (ALIASES[key]) variants.add(ALIASES[key]);
+  const bare = stripAffix(key);
+  if (bare && bare.length >= 4) variants.add(bare);
+  const out = [];
+  for (const lg of leagues) {
+    const map = TEAMS[lg];
+    if (!map) continue;
+    for (const v of variants) {
+      const squashed = '~' + v.replace(/ /g, '');
+      if (Object.prototype.hasOwnProperty.call(map, v) ||
+          (squashed.length >= 7 && Object.prototype.hasOwnProperty.call(map, squashed))) {
+        out.push(lg);
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 function resolve(key, leagues) {
@@ -202,12 +234,21 @@ function providedLogo(team) {
  * Prefers the structured team names the provider supplied and falls back to
  * splitting the title, which is all most providers give us.
  *
- * A provider that already supplies crest URLs (the soccer feeds hand us ESPN's
- * own soccer logos) always wins over the bundled table: it knows which team it
- * meant, and the table has no soccer coverage at all.
+ * Each side gets an ordered list of candidate crest URLs rather than a single
+ * guess, because a URL's existence can only be known by fetching it and that
+ * happens later, in /img/matchup. The bundled ESPN table comes first: its URLs
+ * are stable CDN paths. A provider's own logo URL comes second — one feed
+ * hands out image-proxy links that have all gone dead, and treating those as
+ * authoritative is what produced crest cards with no crests on them.
  *
- * Returns { a, b, aLogo, bLogo } where a/b are display names (always present
- * when the title splits) and the logos may be null independently.
+ * The two sides are resolved jointly. When both are outright hits in a common
+ * league, both are looked up in that league only, so a name that exists in two
+ * leagues of the same category ("richmond": NCAA Spiders, AFL Tigers) follows
+ * its opponent.
+ *
+ * Returns { a, b, aLogos, bLogos, aLogo, bLogo } where a/b are display names
+ * (always present when the title splits), aLogos/bLogos are the candidate
+ * lists (possibly empty) and aLogo/bLogo are their first entries or null.
  */
 function resolveMatchup(match) {
   if (!match) return null;
@@ -222,16 +263,29 @@ function resolveMatchup(match) {
     b = b || sides[1];
   }
 
+  const leagues = leaguesFor(match.category);
+  const inA = resolvingLeagues(a, leagues);
+  const inB = resolvingLeagues(b, leagues);
+  const common = leagues.filter(lg => inA.includes(lg) && inB.includes(lg));
+  const scope = common.length ? common : null;
+
+  const dedupe = list => [...new Set(list.filter(Boolean))];
+  const aLogos = dedupe([lookupTeam(a, match.category, scope), providedLogo(match.team1)]);
+  const bLogos = dedupe([lookupTeam(b, match.category, scope), providedLogo(match.team2)]);
+
   return {
     a,
     b,
-    aLogo: providedLogo(match.team1) || lookupTeam(a, match.category),
-    bLogo: providedLogo(match.team2) || lookupTeam(b, match.category)
+    aLogos,
+    bLogos,
+    aLogo: aLogos[0] || null,
+    bLogo: bLogos[0] || null
   };
 }
 
 module.exports = {
   resolveMatchup,
+  resolvingLeagues,
   lookupTeam,
   splitSides,
   normalize,

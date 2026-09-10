@@ -143,33 +143,67 @@ app.get('/img', async (req, res) => {
   res.send(svg);
 });
 
-// /img/matchup?a=&b=&al=&bl=&color=  -> two-crest "A vs B" card.
+// /img/matchup?a=&b=&al=&al2=&bl=&bl2=&fb=&color=  -> two-crest "A vs B" card.
 // The crests are fetched server-side and inlined as data URIs: an SVG that
 // referenced them by URL renders blank in clients that block external refs.
+//
+// This route owns the fallback ladder, because only it knows which URLs
+// actually exist: each side tries its candidates in order; if a side is still
+// missing and the provider shipped a poster (fb), that poster is served; if
+// nothing at all resolves, a name card. The catalog no longer has to guess.
+// Every candidate is fetched at once and the FIRST that resolved wins, so a
+// dead first choice costs nothing: the worst case for the whole card is one
+// FETCH_TIMEOUT_MS, not one per candidate. The extra requests are cheap — the
+// usual second candidate is a dead provider URL that 404s instantly and then
+// sits in getImage()'s negative cache.
+const firstImage = async (urls) => {
+  const entries = await Promise.all(urls.map(url => imageService.getImage(url)));
+  const i = entries.findIndex(e => e && e.buffer);
+  return i === -1 ? null : { entry: entries[i], url: urls[i] };
+};
+
 app.get('/img/matchup', async (req, res) => {
   const a = req.query.a || '';
   const b = req.query.b || '';
   const color = req.query.color || '333333';
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Content-Type', 'image/svg+xml');
 
-  const [aEntry, bEntry] = await Promise.all([
-    req.query.al ? imageService.getImage(req.query.al) : null,
-    req.query.bl ? imageService.getImage(req.query.bl) : null
+  // The poster is fetched alongside the crests rather than after they fail:
+  // it is only ever needed on the failure path, but waiting to find that out
+  // would serialise a second timeout onto the first.
+  const [A, B, poster] = await Promise.all([
+    firstImage([req.query.al, req.query.al2].filter(Boolean)),
+    firstImage([req.query.bl, req.query.bl2].filter(Boolean)),
+    req.query.fb ? imageService.getImage(req.query.fb) : null
   ]);
 
-  if (!aEntry && !bEntry) {
-    // Both crests unreachable: fall back to the plain name card rather than
-    // serving an empty frame.
+  if ((!A || !B) && poster && poster.buffer) {
+    // A half-resolved card loses to real provider artwork, same as before —
+    // but decided here, on what actually fetched, not on what the catalog hoped.
+    // Short TTL: this path is only reached because a crest fetch failed, and
+    // if that was transient the next request should get the crests back.
+    res.setHeader('Content-Type', poster.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(poster.buffer);
+  }
+
+  res.setHeader('Content-Type', 'image/svg+xml');
+  if (!A && !B) {
+    // Nothing resolved: the plain name card rather than an empty frame. Short
+    // TTL so a transient upstream failure doesn't pin a name card for a day.
     res.setHeader('Cache-Control', 'public, max-age=300');
     return res.send(imageService.svgPlaceholder(`${a}\nvs\n${b}`, color));
   }
 
-  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(imageService.svgMatchup(a, b, aEntry, bEntry, color, {
-    aUrl: req.query.al || null,
-    bUrl: req.query.bl || null
+  // One-sided cards get a shorter TTL too: the missing crest may just have
+  // been an upstream hiccup, and the next request should get a chance at it.
+  res.setHeader('Cache-Control', A && B
+    ? 'public, max-age=86400, stale-while-revalidate=604800'
+    : 'public, max-age=3600');
+  res.send(imageService.svgMatchup(a, b, A && A.entry, B && B.entry, color, {
+    aUrl: A ? A.url : null,
+    bUrl: B ? B.url : null
   }));
 });
 

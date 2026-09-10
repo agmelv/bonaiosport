@@ -372,18 +372,29 @@ function placeholderUrl(baseUrl, text, color) {
 }
 
 /**
- * Build the /img/matchup URL. At least one logo must be present — with neither,
- * the caller should use placeholderUrl() instead.
+ * Build the /img/matchup URL.
+ *
+ * Carries up to two candidate crest URLs per side (al/al2, bl/bl2) and, when
+ * the provider shipped its own poster, that poster as `fb`. The route tries
+ * candidates in order and falls back to the poster, so the decision about
+ * which image actually exists is made where it can be known — at fetch time —
+ * instead of guessed here. Returns null when neither side has a candidate.
  */
-function matchupUrl(baseUrl, { a, b, aLogo, bLogo, color = '333333' }) {
-  if (!aLogo && !bLogo) return null;
+function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '333333', fallback = null }) {
+  const A = (Array.isArray(aLogos) ? aLogos : [aLogo]).filter(Boolean).slice(0, 2);
+  const B = (Array.isArray(bLogos) ? bLogos : [bLogo]).filter(Boolean).slice(0, 2);
+  if (!A.length && !B.length) return null;
   const q = [
     `a=${encodeURIComponent(a || '')}`,
     `b=${encodeURIComponent(b || '')}`,
     `color=${color}`
   ];
-  if (aLogo) q.push(`al=${encodeURIComponent(aLogo)}`);
-  if (bLogo) q.push(`bl=${encodeURIComponent(bLogo)}`);
+  if (A[0]) q.push(`al=${encodeURIComponent(A[0])}`);
+  if (A[1]) q.push(`al2=${encodeURIComponent(A[1])}`);
+  if (B[0]) q.push(`bl=${encodeURIComponent(B[0])}`);
+  if (B[1]) q.push(`bl2=${encodeURIComponent(B[1])}`);
+  const fb = normalizeUrl(fallback);
+  if (fb) q.push(`fb=${encodeURIComponent(fb)}`);
   return `${baseUrl}/img/matchup?${q.join('&')}`;
 }
 

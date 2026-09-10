@@ -91,7 +91,11 @@ function logoFor(team, slug) {
     const light = team.logos.find(l => !(l.rel || []).includes('dark')) || team.logos[0];
     if (light && light.href) return light.href.replace(/^http:/, 'https:');
   }
-  if (team.id) return `https://a.espncdn.com/i/teamlogos/${slug}/500/${team.id}.png`;
+  // No published logo means no logo. Constructing one from the team id
+  // produced 707 URLs that 404 (every CFL side, 527 college-football, 132
+  // college-hockey): ESPN keeps crests under per-league paths that don't
+  // exist for these teams, and a dead URL costs a fetch on every card before
+  // falling back to a name plate anyway.
   return null;
 }
 
