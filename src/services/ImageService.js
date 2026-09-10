@@ -24,6 +24,13 @@ const { request, Agent, interceptors } = require('undici');
 // and the card falls back to a name plate — which is why no soccer fixture had
 // a crest. undici 8 dropped the maxRedirections option in favour of this.
 const redirectAgent = new Agent().compose(interceptors.redirect({ maxRedirections: 3 }));
+
+// Generated cards are cached for a day by the client, and the URL for a given
+// fixture is the same before and after a change to how they're drawn — so a
+// restyle would leave viewers looking at the old artwork until the TTL expired.
+// Bump this whenever svgMatchup() or svgPlaceholder() changes what they draw;
+// it rides along in every generated image URL and retires the stale copies.
+const RENDER_VERSION = 2;
 const crestColor = require('./CrestColorService');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
@@ -391,11 +398,12 @@ async function getImage(rawUrl) {
 function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
   const validUrl = normalizeUrl(sourceUrl);
   if (!validUrl) return null;
-  return `${baseUrl}/img?url=${encodeURIComponent(validUrl)}&text=${encodeURIComponent(text)}&color=${color}`;
+  // The proxy's own fallback is a generated card, so it versions too.
+  return `${baseUrl}/img?url=${encodeURIComponent(validUrl)}&text=${encodeURIComponent(text)}&color=${color}&v=${RENDER_VERSION}`;
 }
 
 function placeholderUrl(baseUrl, text, color) {
-  return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '333333'}`;
+  return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '333333'}&v=${RENDER_VERSION}`;
 }
 
 /**
@@ -422,6 +430,7 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '3333
   if (B[1]) q.push(`bl2=${encodeURIComponent(B[1])}`);
   const fb = normalizeUrl(fallback);
   if (fb) q.push(`fb=${encodeURIComponent(fb)}`);
+  q.push(`v=${RENDER_VERSION}`);
   return `${baseUrl}/img/matchup?${q.join('&')}`;
 }
 
