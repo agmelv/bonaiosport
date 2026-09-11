@@ -48,6 +48,16 @@ function canonicalName(logoUrl) {
 // Which ESPN leagues to consult for a given addon category, in priority order.
 // Ordering matters: "kansas city chiefs" must hit the NFL before the
 // college-football table gets a chance at "kansas".
+// Crests for clubs ESPN has no table for, and for the ones it spells
+// differently, gathered by scripts/build-extra-crests.js. Consulted only after
+// ESPN has failed, so it adds coverage without changing any existing answer.
+let EXTRA_CRESTS = {};
+try {
+  EXTRA_CRESTS = require('./data/extra-crests.json');
+} catch {
+  // Optional: the addon runs without it, just with more name plates.
+}
+
 const CATEGORY_LEAGUES = {
   // AFL last: the providers file Australian rules under american_football, but
   // a bare "richmond" in that feed is the Spiders far more often than the
@@ -241,6 +251,14 @@ function lookupTeam(side, category, leaguesOverride = null) {
           || (ALIASES[senior] ? resolve(ALIASES[senior], leagues) : null)
           || resolve(stripAffix(senior), leagues);
   }
+  // Last: the clubs ESPN has no table for. Keyed by category rather than by
+  // league, because the whole reason a side is in here is that no league table
+  // of ESPN's contained it.
+  if (!result && category) {
+    const extra = EXTRA_CRESTS[category];
+    if (extra) result = extra[key] || extra[stripAffix(key)] || null;
+  }
+
   if (cache.size >= CACHE_MAX) cache.clear();
   cache.set(cacheKey, result);
   return result;

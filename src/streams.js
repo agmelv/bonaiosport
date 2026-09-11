@@ -1,5 +1,14 @@
 const container = require('./container');
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// How long the stream list waits on its sources. Past this, whatever answered
+// is what the viewer gets and the rest keep resolving into the cache behind
+// them. The second figure applies only when nothing has answered at all, where
+// waiting beats handing back an empty list.
+const SOURCE_DEADLINE_MS = Number(process.env.STREAM_DEADLINE_MS) || 3500;
+const SOURCE_HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS) || 9000;
+
 // Source selection (shared by handleStream and prewarmMatch)
 function selectSources(matchSources, config) {
   const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'streamfree': 8, 'timstreams': 9, 'sportyhunter': 12, 'streamsports': 13, 'iptv-org': 14, 'embedindia': 15 };
@@ -252,7 +261,11 @@ async function mintVerifiedSources(src, match, config, cacheKey) {
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
-async function prewarmMatch(match, config, topN = 3) {
+// Warm every source a match has, not the first three. The click resolves all of
+// them, so warming three left the warm ones returning instantly and then waiting
+// on the cold tail -- which is the wait the deadline above now truncates. Warm
+// the lot and, in the normal case, the deadline is never reached at all.
+async function prewarmMatch(match, config, topN = 12) {
   try {
     if (!match || !match.sources || !match.sources.length) return;
     const resolveCache = container.resolve('streamResolveCache');
@@ -299,12 +312,41 @@ async function handleStream(type, id, config) {
     return minted.map((s) => ({ ...s, _cacheKey: key }));
   });
 
-  const results = await Promise.allSettled(resolvePromises);
-  for (const result of results) {
-    if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-      streams.push(...result.value);
-    }
+  // Wait for the sources, but not for the worst of them.
+  //
+  // Every source was awaited to completion, so the spinner after Play lasted as
+  // long as the slowest one even when a good source had answered in 300 ms --
+  // measured at nearly eleven seconds on a match with several sources.
+  //
+  // Nothing is discarded by giving up on the wait. Each promise is a
+  // resolveCache.getOrCreate, which stores its result whenever it finishes, so a
+  // straggler keeps going and lands in the cache regardless. It simply arrives
+  // for the next request instead of holding up this one.
+  const collected = [];
+  let finished = 0;
+  let markAllDone;
+  const allDone = new Promise(resolve => { markAllDone = resolve; });
+
+  for (const p of resolvePromises) {
+    p.then(
+      value => { if (Array.isArray(value)) collected.push(...value); },
+      () => { /* a failed source is one fewer option, not an error */ }
+    ).finally(() => {
+      if (++finished === resolvePromises.length) markAllDone();
+    });
   }
+
+  await Promise.race([allDone, sleep(SOURCE_DEADLINE_MS)]);
+
+  // Returning an empty list would send the viewer back with nothing, which is
+  // worse than waiting a little longer. So when the deadline passes with no
+  // source having answered at all, give the rest a second chance rather than
+  // give up -- still bounded, just bounded higher.
+  if (collected.length === 0 && finished < resolvePromises.length) {
+    await Promise.race([allDone, sleep(SOURCE_HARD_DEADLINE_MS - SOURCE_DEADLINE_MS)]);
+  }
+
+  streams.push(...collected);
 
   // --- Inject relevant 24/7 channels based on category ---
   const isStreamFreeEnabled = !config || !config.sources || config.sources === 'none' || config.sources.split(',').includes('streamfree');
