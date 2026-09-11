@@ -19,7 +19,11 @@ const VISITOR_FIRST = /\s(?:@|at)\s/i;
  * what the reader sees, and it should match the tab the card sits in.
  */
 const CATEGORY_LABEL = {
-  american_football: 'PRO FOOTBALL'
+  american_football: 'FOOTBALL',
+  // Soccer's internal name is `football`, so once the gridiron tab is called
+  // Football the two read identically on the card. The soccer tab has always
+  // been called Soccer; its cards now say so too.
+  football: 'SOCCER'
 };
 
 function categoryLabel(category) {
