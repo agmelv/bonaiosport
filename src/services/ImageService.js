@@ -321,9 +321,17 @@ function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
  * 88 the two are indistinguishable while the JPEG is a fifth of the size —
  * 27KB against 147KB for a full catalog page of artwork.
  */
-const RASTER_QUALITY = 88;
+// mozjpeg squeezes a card from 21 KB to 15 KB and costs 1.9x the CPU to do it
+// (109 ms a card against 58 ms, measured on the two-core host this runs on).
+// Loading a tab is dozens of cards at once, so that trade was buying 6 KB with
+// a pegged CPU. Quality 82 on the ordinary encoder lands at 17 KB and 56 ms.
+const RASTER_QUALITY = 82;
 const rasterCache = new Map();
-const RASTER_CACHE_MAX = 160;
+// A single tab can hold 600 cards. At 160 the cache evicted faster than a
+// scroll could fill it, so every pass down the list re-rendered the lot; 1200
+// cards of roughly 17 KB is about 20 MB, against a container already holding
+// 450 MB on a 7 GB host.
+const RASTER_CACHE_MAX = 1200;
 
 async function rasterize(svg) {
   const key = crypto.createHash('sha1').update(svg).digest('base64');
@@ -335,7 +343,7 @@ async function rasterize(svg) {
     return hit;
   }
   const buf = await sharp(Buffer.from(svg))
-    .jpeg({ quality: RASTER_QUALITY, mozjpeg: true })
+    .jpeg({ quality: RASTER_QUALITY })
     .toBuffer();
   if (rasterCache.size >= RASTER_CACHE_MAX) rasterCache.delete(rasterCache.keys().next().value);
   rasterCache.set(key, buf);
