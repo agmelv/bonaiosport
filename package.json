@@ -12,7 +12,8 @@
     "test:sanity": "node scripts/test-e2e-simulated-client.js",
     "test:247": "node scripts/test-247-channels.js",
     "generate:provider": "node scripts/generate-provider.js",
-    "check-sources": "node scripts/check-sources.js"
+    "check-sources": "node scripts/check-sources.js",
+    "crests": "node scripts/collect-missing-crests.js && node scripts/build-extra-crests.js"
   },
   "dependencies": {
     "acorn": "^8.18.0",
