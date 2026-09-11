@@ -126,9 +126,11 @@ function mapMatchToMetaPreview(match, config = {}) {
   // or both sides resolving to a real crest, is evidence. A separator is not.
   let orientedByEspn = false;
   let isFixture = false;
+  let leagueLogo = null;
   if (matchup) {
     const known = homeAway.orient(matchup.a, matchup.b, matchup.aLogo, matchup.bLogo, match.category, match.date);
     orientedByEspn = !!known;
+    if (known && known.leagueLogo) leagueLogo = known.leagueLogo;
     isFixture = orientedByEspn || (matchup.aLogos.length > 0 && matchup.bLogos.length > 0);
 
     if (isFixture) {
@@ -182,7 +184,11 @@ function mapMatchToMetaPreview(match, config = {}) {
   const matchThumb = match.thumbnail_url ? normalizeImageUrl(match.thumbnail_url) : null;
   const matchLogo = match.logo ? normalizeImageUrl(match.logo) : null;
 
-  let logo = matchLogo || team1Logo || channelLogo || null;
+  // The competition's crest is what belongs in the card's logo slot. Before
+  // this it was the home side's own crest or, far more often, a dead URL whose
+  // failure produced a generated card of the match title rendered at badge size
+  // — an unreadable box of words in the corner of every poster.
+  let logo = leagueLogo || matchLogo || team1Logo || channelLogo || null;
 
   // Matchup card from the resolved crest candidates. The provider's poster
   // rides along as the fallback, so /img/matchup can degrade to it when a

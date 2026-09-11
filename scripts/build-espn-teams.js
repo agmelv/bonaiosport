@@ -24,6 +24,9 @@ const path = require('path');
 // returns 403 to non-browser clients from many networks.
 const HOST = 'https://site.web.api.espn.com/apis/site/v2/sports';
 
+// league id (as event uids carry it) -> that league's crest
+const LEAGUE_LOGOS = {};
+
 const LEAGUES = {
   'nfl': 'football/nfl',
   'cfl': 'football/cfl',
@@ -81,7 +84,8 @@ async function fetchLeague(slug, apiPath) {
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) throw new Error(`${slug}: HTTP ${res.status}`);
   const json = await res.json();
-  const teams = json?.sports?.[0]?.leagues?.[0]?.teams;
+  const league = json?.sports?.[0]?.leagues?.[0];
+  const teams = league?.teams;
   if (!Array.isArray(teams)) throw new Error(`${slug}: unexpected response shape`);
   return teams.map(t => t.team).filter(Boolean);
 }
@@ -194,6 +198,38 @@ function finish(candidates) {
   return { map, dropped };
 }
 
+/**
+ * League crests, keyed by the league id that event uids carry.
+ *
+ * Only the scoreboard response states a league's crest — the teams response
+ * carries the id but no logos — and the crest URL itself uses a different id
+ * again (the Premier League is 700 in a uid and 23 in its logo path), so the
+ * pairing can only be read off a response that states both. One extra request
+ * per competition, at build time, which is where this belongs.
+ */
+async function fetchLeagueCrest(apiPath) {
+  const res = await fetch(`${HOST}/${apiPath}/scoreboard`, { headers: HEADERS });
+  if (!res.ok) return null;
+  const json = await res.json();
+  const league = (json?.leagues || [])[0];
+  if (!league || !league.id) return null;
+  const logo = (league.logos || []).map(l => l.href).find(Boolean);
+  return logo ? { id: String(league.id), logo: logo.replace(/^http:/, 'https:') } : null;
+}
+
+async function buildLeagueCrests(paths) {
+  let ok = 0;
+  for (const apiPath of paths) {
+    try {
+      const crest = await fetchLeagueCrest(apiPath);
+      if (crest) { LEAGUE_LOGOS[crest.id] = crest.logo; ok++; }
+    } catch {
+      // A competition without a crest costs that league's badge, nothing else.
+    }
+  }
+  return ok;
+}
+
 async function main() {
   const out = {};
   let grandTotal = 0;
@@ -236,6 +272,19 @@ async function main() {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, JSON.stringify(out));
   console.log(`\nwrote ${path.relative(process.cwd(), dest)} — ${grandTotal} keys, ${(fs.statSync(dest).size / 1024).toFixed(0)} KB`);
+
+  // League crests, collected from the same responses the teams came from.
+  process.stdout.write('\nfetching league crests ... ');
+  const crestPaths = [
+    ...Object.values(LEAGUES),
+    ...SOCCER.map(comp => `soccer/${comp}`)
+  ];
+  const crestCount = await buildLeagueCrests(crestPaths);
+  console.log(`${crestCount}/${crestPaths.length} leagues`);
+
+  const leagueDest = path.join(path.dirname(dest), 'espn-leagues.json');
+  fs.writeFileSync(leagueDest, JSON.stringify(LEAGUE_LOGOS));
+  console.log(`wrote ${path.relative(process.cwd(), leagueDest)} — ${Object.keys(LEAGUE_LOGOS).length} league crests`);
 }
 
 main().catch(err => { console.error(err.message); process.exit(1); });
