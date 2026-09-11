@@ -122,13 +122,11 @@ const homeAwayService = require('./services/HomeAwayService');
 // catalog falls back to reading orientation off the title separator.
 homeAwayService.ensureFresh().catch(() => {});
 
-app.get('/img/placeholder', (req, res) => {
+app.get('/img/placeholder', async (req, res) => {
   const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333');
-  res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(svg);
+  await imageService.sendCard(req, res, svg, 'public, max-age=86400, stale-while-revalidate=604800');
 });
 
 app.get('/img', async (req, res) => {
@@ -143,10 +141,10 @@ app.get('/img', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     return res.send(entry.buffer);
   }
+  // Upstream image unavailable: a generated card stands in, rasterised like
+  // every other generated card so it doesn't arrive as an SVG a client can't draw.
   const svg = imageService.svgPlaceholder(text, color);
-  res.setHeader('Content-Type', 'image/svg+xml');
-  res.setHeader('Cache-Control', 'public, max-age=300');
-  res.send(svg);
+  await imageService.sendCard(req, res, svg, 'public, max-age=300');
 });
 
 // /img/matchup?a=&b=&al=&al2=&bl=&bl2=&fb=&color=  -> two-crest "A vs B" card.
@@ -194,23 +192,21 @@ app.get('/img/matchup', async (req, res) => {
     return res.send(poster.buffer);
   }
 
-  res.setHeader('Content-Type', 'image/svg+xml');
   if (!A && !B) {
     // Nothing resolved: the plain name card rather than an empty frame. Short
     // TTL so a transient upstream failure doesn't pin a name card for a day.
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    return res.send(imageService.svgPlaceholder(`${a}\nvs\n${b}`, color));
+    return imageService.sendCard(req, res, imageService.svgPlaceholder(`${a}\nvs\n${b}`, color), 'public, max-age=300');
   }
 
   // One-sided cards get a shorter TTL too: the missing crest may just have
   // been an upstream hiccup, and the next request should get a chance at it.
-  res.setHeader('Cache-Control', A && B
-    ? 'public, max-age=86400, stale-while-revalidate=604800'
-    : 'public, max-age=3600');
-  res.send(imageService.svgMatchup(a, b, A && A.entry, B && B.entry, color, {
+  const svg = imageService.svgMatchup(a, b, A && A.entry, B && B.entry, color, {
     aUrl: A ? A.url : null,
     bUrl: B ? B.url : null
-  }));
+  });
+  return imageService.sendCard(req, res, svg, A && B
+    ? 'public, max-age=86400, stale-while-revalidate=604800'
+    : 'public, max-age=3600');
 });
 
 // ─── Shared safe HTTP client (impit + undici fallback) ───────────────────────

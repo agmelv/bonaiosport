@@ -30,8 +30,10 @@ const redirectAgent = new Agent().compose(interceptors.redirect({ maxRedirection
 // restyle would leave viewers looking at the old artwork until the TTL expired.
 // Bump this whenever svgMatchup() or svgPlaceholder() changes what they draw;
 // it rides along in every generated image URL and retires the stale copies.
-const RENDER_VERSION = 2;
+const RENDER_VERSION = 3;
 const crestColor = require('./CrestColorService');
+const crypto = require('crypto');
+const sharp = require('sharp');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -304,6 +306,60 @@ function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
 </svg>`;
 }
 
+/**
+ * Rasterise a generated card.
+ *
+ * Nuvio does not draw SVG posters — it showed every generated card as a blurred
+ * smear of its gradient while the provider's JPEG posters stayed sharp — so the
+ * cards clients receive are JPEG. The SVG remains the source of truth and is
+ * still served on ?format=svg, which is what the web configure page and any
+ * debugging want.
+ *
+ * JPEG rather than PNG: these are opaque photographic-ish cards, and at quality
+ * 88 the two are indistinguishable while the JPEG is a fifth of the size —
+ * 27KB against 147KB for a full catalog page of artwork.
+ */
+const RASTER_QUALITY = 88;
+const rasterCache = new Map();
+const RASTER_CACHE_MAX = 160;
+
+async function rasterize(svg) {
+  const key = crypto.createHash('sha1').update(svg).digest('base64');
+  const hit = rasterCache.get(key);
+  if (hit) {
+    // Refresh recency: a card on screen now is the one worth keeping.
+    rasterCache.delete(key);
+    rasterCache.set(key, hit);
+    return hit;
+  }
+  const buf = await sharp(Buffer.from(svg))
+    .jpeg({ quality: RASTER_QUALITY, mozjpeg: true })
+    .toBuffer();
+  if (rasterCache.size >= RASTER_CACHE_MAX) rasterCache.delete(rasterCache.keys().next().value);
+  rasterCache.set(key, buf);
+  return buf;
+}
+
+/**
+ * Send a generated card, rasterised unless ?format=svg was asked for. A
+ * rasteriser failure falls back to the SVG rather than to no image at all.
+ */
+async function sendCard(req, res, svg, cacheControl) {
+  res.setHeader('Cache-Control', cacheControl);
+  if (String(req.query.format || '').toLowerCase() === 'svg') {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.send(svg);
+  }
+  try {
+    const jpeg = await rasterize(svg);
+    res.setHeader('Content-Type', 'image/jpeg');
+    return res.send(jpeg);
+  } catch (err) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.send(svg);
+  }
+}
+
 function evictIfNeeded() {
   if (cache.size <= CACHE_MAX_ENTRIES) return;
   const byAccess = [...cache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
@@ -436,6 +492,8 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '3333
 
 module.exports = {
   svgPlaceholder,
+  rasterize,
+  sendCard,
   cardColors,
   svgMatchup,
   wrapLines,
