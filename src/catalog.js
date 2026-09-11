@@ -209,7 +209,26 @@ function mapMatchToMetaPreview(match, config = {}) {
   // this it was the home side's own crest or, far more often, a dead URL whose
   // failure produced a generated card of the match title rendered at badge size
   // — an unreadable box of words in the corner of every poster.
-  let logo = leagueLogo || matchLogo || team1Logo || channelLogo || null;
+  // The badge in the card's corner. A competition crest when ESPN named one;
+  // otherwise the governing mark for the sport, which is more use than the home
+  // side's crest repeated at badge size.
+  //
+  // The NCAA marks are served from this addon rather than hot-linked: Wikimedia
+  // rate-limits a browser user-agent, and ESPN's "ncaa_football" is a generic
+  // silhouette, not the NCAA's own mark.
+  const SPORT_BADGE = {
+    college: `${BASE_URL}/marks/ncaa.png`,
+    rugby: 'https://a.espncdn.com/redesign/assets/img/icons/ESPN-icon-rugby.png'
+  };
+  const COLLEGE_BADGE = {
+    football: `${BASE_URL}/marks/ncaa-football.png`,
+    basketball: `${BASE_URL}/marks/ncaa-basketball.png`
+  };
+  const sportBadge = match.category === 'college'
+    ? (COLLEGE_BADGE[match._collegeSport] || SPORT_BADGE.college)
+    : (SPORT_BADGE[match.category] || null);
+
+  let logo = leagueLogo || sportBadge || matchLogo || team1Logo || channelLogo || null;
 
   // Matchup card from the resolved crest candidates. The provider's poster
   // rides along as the fallback, so /img/matchup can degrade to it when a

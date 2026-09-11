@@ -225,6 +225,36 @@ function _collegiateByCrest(match) {
   return /\/teamlogos\/ncaa\//i.test(m.aLogo) && /\/teamlogos\/ncaa\//i.test(m.bLogo);
 }
 
+/**
+ * A 24/7 channel's sport, read off its name.
+ *
+ * Channels have no date and no league, and providers file them wherever:
+ * "NFL Streams Schedule" arrived categorised as basketball and sat in that tab.
+ * Only applied to dateless entries, so a fixture is never renamed by a word in
+ * its title.
+ */
+const CHANNEL_SPORT = [
+  [/\bnfl\b|red\s?zone|gridiron/i, 'american_football'],
+  [/\bnba\b|basketball/i, 'basketball'],
+  [/\bmlb\b|baseball/i, 'baseball'],
+  [/\bnhl\b|hockey/i, 'hockey'],
+  [/\bnrl\b|rugby|fox league|super league/i, 'rugby'],
+  [/cricket|willow/i, 'cricket'],
+  [/tennis/i, 'tennis'],
+  [/golf|\bpga\b/i, 'golf'],
+  [/\bf1\b|formula|motor|rally|nascar|speed/i, 'motorsport'],
+  [/\bufc\b|\bmma\b|boxing|wrestling/i, 'mma'],
+  [/soccer|football club|premier league|\bepl\b|\bmls\b/i, 'football']
+];
+
+function _categoryFromChannelName(match) {
+  if (!match || match.date) return null;           // fixtures have dates
+  const title = String(match.title || '');
+  if (!title) return null;
+  for (const [re, cat] of CHANNEL_SPORT) if (re.test(title)) return cat;
+  return null;
+}
+
 function _categoryFromLeague(match) {
   const raw = match && match.league ? String(match.league).toLowerCase().trim() : '';
   if (!raw) return null;
@@ -365,9 +395,24 @@ class MatchAggregator {
         // Put the match in the right catalog before anything else looks at its
         // category — the merge guards compare categories, so a misfiled event
         // would also fail to merge with its correctly-filed duplicate.
+        const channelCategory = _categoryFromChannelName(match);
+        if (channelCategory && match.category !== channelCategory) match.category = channelCategory;
+
         const trueCategory = _categoryFromLeague(match);
         if (trueCategory && match.category !== trueCategory) match.category = trueCategory;
-        if (match.category === 'american_football' && _collegiateByCrest(match)) match.category = 'college';
+        if (match.category === 'american_football' && _collegiateByCrest(match)) {
+          match.category = 'college';
+          match._collegeSport = 'football';
+        }
+        if (match.category === 'college' && !match._collegeSport) {
+          // Which college sport, for the card's badge. The league names it when
+          // the provider sends one; otherwise the tab it arrived in does.
+          const lg = String(match.league || '').toLowerCase();
+          if (/basketball/.test(lg)) match._collegeSport = 'basketball';
+          else if (/football/.test(lg)) match._collegeSport = 'football';
+          else if (/hockey/.test(lg)) match._collegeSport = 'hockey';
+          else if (/baseball/.test(lg)) match._collegeSport = 'baseball';
+        }
 
         const pre = this._precompute(match);
         let idx = -1;
