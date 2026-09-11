@@ -130,6 +130,46 @@ function _upstreamIds(e) {
   return out;
 }
 
+/**
+ * The sport a named league belongs to.
+ *
+ * A provider's category string and its league field can disagree, and when they
+ * do the league is the one telling the truth: the feeds list "San Francisco
+ * 49ers vs Los Angeles Rams" with league "NFL" under a category that normalises
+ * to `football`, which files an NFL game in the soccer catalog. The category is
+ * a bucket the provider chose; the league is what the fixture actually is.
+ */
+const LEAGUE_CATEGORY = {
+  nfl: 'american_football', ncaaf: 'american_football', 'college football': 'american_football',
+  cfl: 'american_football', afl: 'american_football', 'ncaa football': 'american_football',
+  nba: 'basketball', wnba: 'basketball', ncaab: 'basketball', 'ncaa basketball': 'basketball',
+  mlb: 'baseball', 'ncaa baseball': 'baseball',
+  nhl: 'hockey',
+  nrl: 'rugby', 'super rugby': 'rugby', 'six nations': 'rugby', 'gallagher prem': 'rugby',
+  'premiership rugby': 'rugby', 'top 14': 'rugby', 'rugby championship': 'rugby',
+  'formula 1': 'motorsport', f1: 'motorsport', nascar: 'motorsport', motogp: 'motorsport',
+  indycar: 'motorsport', 'moto2': 'motorsport', 'moto3': 'motorsport',
+  ufc: 'mma', pfl: 'mma', bellator: 'mma', boxing: 'mma',
+  pga: 'golf', 'pga tour': 'golf', lpga: 'golf', 'dp world tour': 'golf',
+  atp: 'tennis', wta: 'tennis'
+};
+
+/**
+ * Correct a match's category when its league contradicts it. Only ever fires on
+ * an exact league name we know, so a league we have never seen leaves the
+ * provider's own choice alone.
+ */
+function _categoryFromLeague(match) {
+  const raw = match && match.league ? String(match.league).toLowerCase().trim() : '';
+  if (!raw) return null;
+  if (LEAGUE_CATEGORY[raw]) return LEAGUE_CATEGORY[raw];
+  // "American Major League Soccer" and friends: a league whose name says the
+  // sport outright.
+  if (/\bsoccer\b|\bmls\b|premier league|la ?liga|bundesliga|serie a|ligue 1|eredivisie|champions league/.test(raw)) return 'football';
+  if (/\bncaaf\b|college football/.test(raw)) return 'american_football';
+  return null;
+}
+
 class MatchAggregator {
   constructor({ streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, cacheService, yamlProviders }) {
     this.providers = [streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, ...(yamlProviders || [])];
@@ -237,6 +277,12 @@ class MatchAggregator {
       if (!providerMatches || !Array.isArray(providerMatches)) return;
       providerMatches.forEach(match => {
         if (!match.id || !match.title) return;
+
+        // Put the match in the right catalog before anything else looks at its
+        // category — the merge guards compare categories, so a misfiled event
+        // would also fail to merge with its correctly-filed duplicate.
+        const trueCategory = _categoryFromLeague(match);
+        if (trueCategory && match.category !== trueCategory) match.category = trueCategory;
 
         const pre = this._precompute(match);
         let idx = -1;

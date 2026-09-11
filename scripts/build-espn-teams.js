@@ -38,7 +38,15 @@ const LEAGUES = {
   'nhl': 'hockey/nhl',
   'mens-college-hockey': 'hockey/mens-college-hockey',
   'womens-college-hockey': 'hockey/womens-college-hockey',
-  'afl': 'australian-football/afl'
+  'afl': 'australian-football/afl',
+  // Rugby is split across league ids rather than named slugs. These five are
+  // the ones that actually carry crests and cover what the feeds list: the
+  // English top flight, France, the European cup, Test nations, and the NRL.
+  'rugby-prem': 'rugby/267979',
+  'rugby-top14': 'rugby/270559',
+  'rugby-champions': 'rugby/271937',
+  'rugby-international': 'rugby/164205',
+  'rugby-league': 'rugby/3'
 };
 
 // Soccer is fetched per competition but collapsed into ONE bucket. A club that
@@ -128,7 +136,7 @@ function logoFor(team, slug) {
 // Club-type affixes carry no identity: "Seattle Sounders FC" and "Seattle
 // Sounders" are the same club, as are "FC Cincinnati" and "Cincinnati".
 // Kept in sync with stripAffix() in src/services/TeamLogoService.js.
-const AFFIX = /^(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if)\s+|\s+(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if|ii)$/;
+const AFFIX = /^(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if)\s+|\s+(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if|ii)$|\s+rugby$/;
 
 function stripAffix(k) {
   let prev;

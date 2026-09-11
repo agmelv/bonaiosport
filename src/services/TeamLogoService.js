@@ -36,7 +36,8 @@ const CATEGORY_LEAGUES = {
   baseball: ['mlb'],
   hockey: ['nhl', 'mens-college-hockey', 'womens-college-hockey'],
   football: ['soccer'],
-  college: ['college-football', 'mens-college-basketball', 'mens-college-hockey']
+  college: ['college-football', 'mens-college-basketball', 'mens-college-hockey'],
+  rugby: ['rugby-prem', 'rugby-champions', 'rugby-top14', 'rugby-international', 'rugby-league']
 };
 
 // Youth and reserve sides carry the senior badge, so "England U21" resolves
@@ -49,7 +50,7 @@ const AGE_GROUP = /\s+u\s?(1[5-9]|2[0-3])$/;
 // Spelled-out club suffixes as well as the abbreviated ones: the providers
 // write "Adelaide Football Club" where ESPN has "Adelaide Crows", and stripping
 // only "fc"/"sc" left that side resolving nothing.
-const AFFIX = /^(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if)\s+|\s+(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if|ii)$|\s+(football|futbol|soccer)\s+club$|\s+club$/;
+const AFFIX = /^(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if)\s+|\s+(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if|ii)$|\s+(football|futbol|soccer)\s+club$|\s+club$|\s+rugby$/;
 
 function stripAffix(k) {
   let prev;
@@ -61,6 +62,31 @@ function stripAffix(k) {
 // National sides where the scrape providers and ESPN simply use different
 // names for the same country. Only unambiguous, well-known equivalences.
 const ALIASES = {
+  // Rugby league: ESPN stores NRL clubs under the bare nickname ("Cowboys"),
+  // while every feed writes the full club name. A bare nickname is exactly the
+  // kind of key this matcher refuses to guess with, so the full names are
+  // mapped explicitly instead of loosening the rules for everyone.
+  'brisbane broncos': 'broncos',
+  'canterbury bulldogs': 'bulldogs',
+  'canterbury bankstown bulldogs': 'bulldogs',
+  'north queensland cowboys': 'cowboys',
+  'redcliffe dolphins': 'dolphins',
+  'st george illawarra dragons': 'dragons',
+  'parramatta eels': 'eels',
+  'newcastle knights': 'knights',
+  'penrith panthers': 'panthers',
+  'south sydney rabbitohs': 'rabbitohs',
+  'canberra raiders': 'raiders',
+  'sydney roosters': 'roosters',
+  'manly sea eagles': 'sea eagles',
+  'manly warringah sea eagles': 'sea eagles',
+  'cronulla sharks': 'sharks',
+  'cronulla sutherland sharks': 'sharks',
+  'melbourne storm': 'storm',
+  'gold coast titans': 'titans',
+  'new zealand warriors': 'warriors',
+  // Renamed in 2024; ESPN still lists the old name.
+  'newcastle red bulls': 'newcastle falcons',
   // Australian rules: ESPN's AFL feed names these two in ways no provider uses.
   // "Adelaide" is only ever stored as "Adelaide Crows", and ESPN ships a second,
   // wrong record for "Sydney Swans" (carrying Gold Coast's abbreviation), which
