@@ -138,6 +138,38 @@ app.get('/dashboard', (req, res) => {
  * loopback or a private network may act, which covers a LAN and a reverse proxy
  * on the same host while leaving the open internet with a read-only view.
  */
+// Failed sign-ins per address. A dashboard anyone can reach is a dashboard
+// anyone can guess at, and a short password falls quickly at a few thousand
+// tries a second. Kept in memory: this protects a login, not a ledger, and
+// losing the count on a restart costs one window.
+const FAILURES = new Map();
+const FAIL_WINDOW_MS = 5 * 60 * 1000;
+const FAIL_LIMIT = 8;
+
+function failureKey(req) {
+  return String(req.ip || '').replace(/^::ffff:/, '') || 'unknown';
+}
+
+function throttled(req) {
+  const key = failureKey(req);
+  const rec = FAILURES.get(key);
+  if (!rec) return false;
+  if (Date.now() - rec.first > FAIL_WINDOW_MS) { FAILURES.delete(key); return false; }
+  return rec.count >= FAIL_LIMIT;
+}
+
+function noteFailure(req) {
+  const key = failureKey(req);
+  const now = Date.now();
+  const rec = FAILURES.get(key);
+  if (!rec || now - rec.first > FAIL_WINDOW_MS) FAILURES.set(key, { count: 1, first: now });
+  else rec.count++;
+  // Keyed by address, so it would otherwise grow without limit.
+  if (FAILURES.size > 5000) {
+    for (const [k, v] of FAILURES) if (now - v.first > FAIL_WINDOW_MS) FAILURES.delete(k);
+  }
+}
+
 function isAdmin(req) {
   const token = process.env.ADMIN_TOKEN;
   if (token) {
@@ -155,7 +187,12 @@ function isAdmin(req) {
 }
 
 function requireAdmin(req, res) {
-  if (isAdmin(req)) return true;
+  if (throttled(req)) {
+    res.status(429).json({ error: 'Too many failed sign-ins. Wait a few minutes and try again.' });
+    return false;
+  }
+  if (isAdmin(req)) { FAILURES.delete(failureKey(req)); return true; }
+  noteFailure(req);
   // Say which rule is actually in force. Telling someone who has already set a
   // token to go and set one sends them to check a setting that is already right.
   res.status(403).json({
@@ -168,7 +205,17 @@ function requireAdmin(req, res) {
   return false;
 }
 
+/**
+ * The only thing the dashboard may ask before signing in: which door it is
+ * looking at. It deliberately says nothing else -- no counts, no uptime, no
+ * versions -- because it is the one endpoint an unauthenticated caller reaches.
+ */
+app.get('/api/cache/auth', (req, res) => {
+  res.json({ authenticated: isAdmin(req), tokenRequired: !!process.env.ADMIN_TOKEN });
+});
+
 app.get('/api/cache/stats', (req, res) => {
+  if (!requireAdmin(req, res)) return;
   res.json({
     images: imageService.cacheStats(),
     warmer: cardWarmer.status(),

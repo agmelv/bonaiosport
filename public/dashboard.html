@@ -76,7 +76,7 @@
   </form>
 </div>
 
-<main>
+<main id="panel" hidden>
   <div class="grid">
     <div class="card">
       <h2>Card cache</h2>
@@ -165,6 +165,39 @@ function flash(msg, isError) {
 }
 
 async function refresh() {
+  // Which door first. This is the only call that works signed out, and it
+  // returns nothing but the state of the lock.
+  let gate;
+  try {
+    gate = await (await fetch('/api/cache/auth', { headers: auth() })).json();
+  } catch (err) {
+    return flash('Cannot reach the addon: ' + err.message, true);
+  }
+
+  if (!gate.authenticated) {
+    // Signed out: the page shows a password box and nothing else. No counts, no
+    // uptime -- the server would not send them anyway.
+    $('panel').hidden = true;
+    $('lockBtn').hidden = true;
+    $('signin').hidden = !gate.tokenRequired;
+    const note = $('lockNote');
+    note.hidden = gate.tokenRequired;
+    if (!gate.tokenRequired) {
+      note.innerHTML = 'This dashboard is limited to the local network. To reach it from '
+        + 'elsewhere, set <code>ADMIN_TOKEN</code> on the container and a password box will appear here.';
+    }
+    if (token) {
+      forget();
+      flash('That password was not accepted.', true);
+    }
+    return;
+  }
+
+  $('signin').hidden = true;
+  $('panel').hidden = false;
+  $('lockNote').hidden = true;
+  $('lockBtn').hidden = !gate.tokenRequired;
+
   let d;
   try {
     d = await (await fetch('/api/cache/stats', { headers: auth() })).json();
@@ -195,27 +228,9 @@ async function refresh() {
   $('mem').textContent = d.memoryMb + ' MB';
   $('uptime').textContent = secs(d.uptimeSeconds);
 
-  admin = d.admin;
-  for (const id of ['warmBtn', 'cancelBtn', 'clearCards', 'clearAll']) $(id).disabled = !admin;
-  $('cancelBtn').disabled = !admin || !w.running;
-  $('warmBtn').disabled = !admin || w.running;
-
-  // Three states: signed in, needs a password, or locked to the local network.
-  const note = $('lockNote');
-  const needsPassword = !admin && d.tokenRequired;
-  $('signin').hidden = !needsPassword;
-  $('lockBtn').hidden = !(admin && d.tokenRequired);
-  note.hidden = admin || needsPassword;
-  if (!admin && !d.tokenRequired) {
-    note.innerHTML = 'Read-only: changes are limited to the local network. To act from '
-      + 'elsewhere, set <code>ADMIN_TOKEN</code> on the container and a password box will appear here.';
-  }
-  // A stored password the server no longer accepts is worse than none: it fails
-  // silently on every action. Drop it and ask again.
-  if (needsPassword && token) {
-    forget();
-    flash('That password was not accepted.', true);
-  }
+  admin = true;
+  $('cancelBtn').disabled = !w.running;
+  $('warmBtn').disabled = w.running;
 }
 
 $('signinForm').onsubmit = async e => {
@@ -223,9 +238,13 @@ $('signinForm').onsubmit = async e => {
   const value = $('pw').value;
   if (!value) return;
   try {
-    const res = await fetch('/api/cache/stats', { headers: { 'x-admin-token': value } });
+    const res = await fetch('/api/cache/auth', { headers: { 'x-admin-token': value } });
     const body = await res.json();
-    if (!body.admin) return flash('That password was not accepted.', true);
+    if (!body.authenticated) {
+      return flash(res.status === 429
+        ? 'Too many attempts. Wait a few minutes.'
+        : 'That password was not accepted.', true);
+    }
     token = value;
     try { localStorage.setItem(STORE, token); } catch { /* private window */ }
     $('pw').value = '';
