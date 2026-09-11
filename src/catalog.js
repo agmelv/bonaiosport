@@ -14,6 +14,20 @@ const leagueBadges = require('./services/LeagueBadgeService');
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
+ * What a category is called on the card. The internal name is the key every
+ * provider, merge guard and filter agrees on and does not change; this is only
+ * what the reader sees, and it should match the tab the card sits in.
+ */
+const CATEGORY_LABEL = {
+  american_football: 'PRO FOOTBALL'
+};
+
+function categoryLabel(category) {
+  const key = String(category || '');
+  return CATEGORY_LABEL[key] || key.toUpperCase();
+}
+
+/**
  * An always-on channel rather than a fixture. Most carry no kickoff at all,
  * which is the one thing every fixture has and no channel does. A few are
  * scheduled anyway -- the feed gives NFL RedZone a Sunday start -- and those
@@ -377,7 +391,7 @@ function mapMatchToMetaPreview(match, config = {}) {
   const statusStr = is247 
     ? '24/7 Live Network' 
     : (isLive ? '🔴 LIVE NOW' : `Kickoff at ${timeString}${relativeTimeStr}`);
-  const desc = `${leagueStr}📅 Category: ${match.category.toUpperCase()}\n⏰ Status: ${statusStr}`;
+  const desc = `${leagueStr}📅 Category: ${categoryLabel(match.category)}\n⏰ Status: ${statusStr}`;
 
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
