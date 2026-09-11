@@ -238,24 +238,34 @@ $('signinForm').onsubmit = async e => {
   const value = $('pw').value;
   if (!value) return;
   try {
-    const res = await fetch('/api/cache/auth', { headers: { 'x-admin-token': value } });
+    const res = await fetch('/api/cache/login', {
+      method: 'POST', headers: { 'x-admin-token': value }
+    });
     const body = await res.json();
     if (!body.authenticated) {
       return flash(res.status === 429
         ? 'Too many attempts. Wait a few minutes.'
         : 'That password was not accepted.', true);
     }
+    // The cookie is what carries the sign-in from now on, including to the
+    // catalog page. Keeping a copy here means the buttons work in a browser
+    // that refuses cookies.
     token = value;
     try { localStorage.setItem(STORE, token); } catch { /* private window */ }
     $('pw').value = '';
-    flash('Signed in.');
+    flash('Signed in. The catalog page is unlocked too.');
     refresh();
   } catch (err) {
     flash(err.message, true);
   }
 };
 
-$('lockBtn').onclick = () => { forget(); flash('Signed out.'); refresh(); };
+$('lockBtn').onclick = async () => {
+  forget();
+  try { await fetch('/api/cache/logout', { method: 'POST' }); } catch { /* ignore */ }
+  flash('Signed out.');
+  refresh();
+};
 
 async function act(path, label) {
   try {

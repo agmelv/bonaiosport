@@ -91,6 +91,16 @@ builder.defineStreamHandler(({ type, id, config })         => handleStream(type,
 
 const app = express();
 
+// This runs behind Caddy, so the address of the immediate peer is the proxy's,
+// not the caller's. Left unsaid, every visitor on the internet arrives wearing a
+// private address -- which the local-network rule below would have trusted, and
+// which would have made one attacker's failed guesses lock out everybody.
+//
+// Trust is limited to proxies on loopback or a private range. A request that
+// arrives straight from a public address cannot forge X-Forwarded-For to claim
+// it came from inside.
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
+
 app.set('trust proxy', true);
 app.use(cors());
 
@@ -121,7 +131,7 @@ function startWarm() {
 // Serve the web debugger UI and Configuration Page
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
-app.get('/', (req, res) => {
+app.get('/', requirePage, (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
@@ -170,9 +180,42 @@ function noteFailure(req) {
   }
 }
 
+/**
+ * A signed, expiring ticket for the browser. The password itself never goes in
+ * the cookie -- this is an HMAC over the expiry keyed by the password, so a
+ * stolen cookie cannot be turned back into the password, and editing the expiry
+ * invalidates the signature.
+ */
+function mintTicket(token, ttlMs = 30 * 24 * 3600 * 1000) {
+  const exp = Date.now() + ttlMs;
+  const sig = crypto.createHmac('sha256', token).update(String(exp)).digest('hex');
+  return `${exp}.${sig}`;
+}
+
+function ticketValid(value, token) {
+  const [exp, sig] = String(value || '').split('.');
+  if (!exp || !sig || !/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
+  const want = crypto.createHmac('sha256', token).update(exp).digest('hex');
+  const a = Buffer.from(sig, 'utf8');
+  const b = Buffer.from(want, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function cookieValue(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return '';
+}
+
+const TICKET_COOKIE = 'ls_admin';
+
 function isAdmin(req) {
   const token = process.env.ADMIN_TOKEN;
   if (token) {
+    if (ticketValid(cookieValue(req, TICKET_COOKIE), token)) return true;
     const given = req.get('x-admin-token') || req.query.token || '';
     // Compare as bytes. A password with any character outside ASCII has a byte
     // length that differs from its string length, and timingSafeEqual throws on
@@ -214,6 +257,41 @@ app.get('/api/cache/auth', (req, res) => {
   res.json({ authenticated: isAdmin(req), tokenRequired: !!process.env.ADMIN_TOKEN });
 });
 
+/**
+ * Exchange the password for a cookie. A browser navigating to a page cannot
+ * send a header, so signing in has to leave something behind that an ordinary
+ * navigation carries.
+ */
+app.post('/api/cache/login', (req, res) => {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token) return res.json({ authenticated: isAdmin(req), tokenRequired: false });
+  if (!requireAdmin(req, res)) return;
+  res.cookie(TICKET_COOKIE, mintTicket(token), {
+    httpOnly: true,      // script cannot read it, so a page flaw cannot leak it
+    sameSite: 'lax',
+    secure: req.secure,  // https here, so it never travels in the clear
+    maxAge: 30 * 24 * 3600 * 1000
+  });
+  res.json({ authenticated: true, tokenRequired: true });
+});
+
+app.post('/api/cache/logout', (req, res) => {
+  res.clearCookie(TICKET_COOKIE);
+  res.json({ authenticated: false });
+});
+
+/**
+ * The pages a person reads are behind the password; the endpoints an addon
+ * reads cannot be, because Nuvio and AIOStreams have no way to sign in and the
+ * catalog would simply stop working. What stays open is sports listings and
+ * artwork -- no settings, no state, nothing about the household.
+ */
+function requirePage(req, res, next) {
+  if (!process.env.ADMIN_TOKEN || isAdmin(req)) return next();
+  if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'Sign in to the dashboard first.' });
+  return res.redirect('/dashboard');
+}
+
 app.get('/api/cache/stats', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({
@@ -246,11 +324,11 @@ app.post('/api/cache/warm/cancel', (req, res) => {
   res.json({ cancelled: true, warmer: cardWarmer.status() });
 });
 
-app.get(['/configure', '/:config/configure'], (req, res) => {
+app.get(['/configure', '/:config/configure'], requirePage, (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'configure.html'));
 });
 
-app.get('/api/matches', (req, res) => {
+app.get('/api/matches', requirePage, (req, res) => {
   const matches = container.resolve('cacheService').getMatches();
   res.json(matches);
 });
