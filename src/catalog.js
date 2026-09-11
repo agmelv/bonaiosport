@@ -13,6 +13,14 @@ const eventMarks = require('./services/EventMarkService');
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
+ * An always-on channel rather than a fixture. Channels carry no kickoff, which
+ * is the one thing every fixture has and no channel does.
+ */
+function isChannel(m) {
+  return !!m && (m.category === 'networks' || !m.date);
+}
+
+/**
  * Tidy a team name for display.
  *
  * The feeds disagree with each other on the same club: one writes "Florida A&M",
@@ -401,28 +409,18 @@ async function handleCatalog(type, id, extra, config) {
     } else {
       filteredMatches = []; // If no config, return empty
     }
+  } else if (categoryMatch === 'channels') {
+    // Always-on channels, gathered in one place. A channel has no kickoff, which
+    // is what separates it from a fixture.
+    filteredMatches = matches.filter(m => isChannel(m));
   } else if (categoryMatch === 'other') {
     const topLevelCats = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts', 'networks', 'college'];
-    filteredMatches = matches.filter(m => !topLevelCats.includes(m.category));
+    filteredMatches = matches.filter(m => !topLevelCats.includes(m.category) && !isChannel(m));
   } else if (categoryMatch !== 'catalog') {
-    filteredMatches = matches.filter(m => {
-      if (m.category === categoryMatch) return true;
-      // Also include 24/7 networks specifically matching the sport category
-      if (m.category === 'networks') {
-        const titleLower = m.title.toLowerCase();
-        if (categoryMatch === 'cricket' && titleLower.includes('cricket')) return true;
-        if (categoryMatch === 'tennis' && titleLower.includes('tennis')) return true;
-        if (categoryMatch === 'motorsport' && (titleLower.includes('f1') || titleLower.includes('racing') || titleLower.includes('moto') || titleLower.includes('motorsport'))) return true;
-        if (categoryMatch === 'basketball' && (titleLower.includes('nba') || titleLower.includes('basketball'))) return true;
-        if (categoryMatch === 'football' && (titleLower.includes('football') || titleLower.includes('soccer') || titleLower.includes('golazo') || titleLower.includes('laliga') || titleLower.includes('premier league') || titleLower.includes('bein sports'))) return true;
-        if (categoryMatch === 'rugby' && (titleLower.includes('rugby') || titleLower.includes('league') || titleLower.includes('nrl'))) return true;
-        if (categoryMatch === 'american_football' && (titleLower.includes('nfl') || titleLower.includes('american football'))) return true;
-        if (categoryMatch === 'baseball' && (titleLower.includes('mlb') || titleLower.includes('baseball'))) return true;
-        if (categoryMatch === 'hockey' && (titleLower.includes('nhl') || titleLower.includes('hockey'))) return true;
-        if (categoryMatch === 'golf' && (titleLower.includes('golf') || titleLower.includes('pga'))) return true;
-      }
-      return false;
-    });
+    // Fixtures only. The always-on channels that used to be mixed in here now
+    // live in the Channels tab, so a sport tab is a schedule rather than a
+    // schedule with a few permanent entries pinned among it.
+    filteredMatches = matches.filter(m => m.category === categoryMatch && !isChannel(m));
   }
 
   if (typeof conf.sports === 'string' && conf.sports !== 'all') {
