@@ -13,6 +13,22 @@ const eventMarks = require('./services/EventMarkService');
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
+ * Tidy a team name for display.
+ *
+ * The feeds disagree with each other on the same club: one writes "Florida A&M",
+ * another "Florida A and M", and both end up on cards. They resolve to the same
+ * crest either way — normalize() folds "&" to " and " — but the two spellings
+ * sit side by side in the catalog and read as a mistake. Only initials are
+ * rejoined, so "Bristol and Gloucester" is left alone.
+ */
+function prettifyName(name) {
+  return String(name || '')
+    .replace(/\b([A-Z]) and ([A-Z])\b/g, '$1&$2')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
  * Accurately determines if an event is currently live right now.
  * 24/7 networks are always live.
  * Fixtures with a kickoff time are live starting 15 minutes before kickoff
@@ -156,9 +172,9 @@ function mapMatchToMetaPreview(match, config = {}) {
   // category cards; svgPlaceholder word-wraps, so long names are fine.
   let posterText = match.title;
   if (matchup && isFixture) {
-      posterText = `${matchup.a}\n@\n${matchup.b}`;
+      posterText = `${prettifyName(teamLogoService.canonicalName(matchup.aLogo) || matchup.a)}\n@\n${prettifyName(teamLogoService.canonicalName(matchup.bLogo) || matchup.b)}`;
   } else if (matchup) {
-      posterText = `${matchup.a}\nvs\n${matchup.b}`;
+      posterText = `${prettifyName(matchup.a)}\nvs\n${prettifyName(matchup.b)}`;
   } else if (match.team1 && match.team2 && match.team1.name && match.team2.name) {
       posterText = `${match.team1.name}\nvs\n${match.team2.name}`;
   } else {
@@ -275,13 +291,19 @@ function mapMatchToMetaPreview(match, config = {}) {
   // The card title follows the same orientation as the artwork: visitor first,
   // "@" between. Only a real two-sided fixture is rewritten — a 24/7 channel or
   // a title we couldn't split keeps whatever the provider called it.
-  const displayTitle = isFixture ? `${matchup.a} @ ${matchup.b}` : match.title;
+  // Show ESPN's name for a side we resolved, so the same club is spelled the
+  // same way on every card — the providers variously write "Florida A and M",
+  // "Florida A&M" and "Miami (FL)" for teams we have already identified.
+  const sideName = (raw, logo) => prettifyName(teamLogoService.canonicalName(logo) || raw);
+  const displayA = isFixture ? sideName(matchup.a, matchup.aLogo) : null;
+  const displayB = isFixture ? sideName(matchup.b, matchup.bLogo) : null;
+  const displayTitle = isFixture ? `${displayA} @ ${displayB}` : prettifyName(match.title);
 
   const is247 = match.category === 'networks' || !match.date;
   const prefix = isLive ? (is247 ? '📺 ' : '🔴 LIVE: ') : '⏱️ ';
   const cast = [];
   if (matchup && isFixture) {
-    cast.push(matchup.a, matchup.b);
+    cast.push(displayA, displayB);
   } else {
     if (match.team1 && match.team1.name) cast.push(match.team1.name);
     if (match.team2 && match.team2.name) cast.push(match.team2.name);
@@ -303,6 +325,9 @@ function mapMatchToMetaPreview(match, config = {}) {
     background: background,
     logo: logo,
     releaseInfo: isLive ? (is247 ? '24/7' : 'LIVE') : timeString,
+    // Kept for the catalog's repeat-fixture pass below; not part of the
+    // Stremio meta contract, and stripped before the response.
+    _relative: relativeTimeStr.trim(),
     description: desc,
     cast: cast,
     behaviorHints: {
@@ -411,6 +436,17 @@ async function handleCatalog(type, id, extra, config) {
   });
 
   let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf));
+
+  // Two legs of a series carry the same name — "Pittsburgh Pirates @ Chicago
+  // Cubs" today and again tomorrow. They are different games and must not be
+  // merged, but side by side they read as a mistake, so when a name repeats in
+  // a tab each copy says when it is.
+  const nameCounts = new Map();
+  for (const m of metas) nameCounts.set(m.name, (nameCounts.get(m.name) || 0) + 1);
+  for (const m of metas) {
+    if (nameCounts.get(m.name) > 1 && m._relative) m.name = `${m.name} ${m._relative}`;
+    delete m._relative;
+  }
 
   if (extra && extra.search) {
     const q = extra.search.toLowerCase();

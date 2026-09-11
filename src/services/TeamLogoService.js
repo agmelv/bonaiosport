@@ -24,6 +24,27 @@
 
 const TEAMS = require('./data/espn-teams.json');
 
+// crest key -> the name ESPN calls that team. Providers spell the same club
+// several ways ("Florida A and M", "Florida A&M", "Miami (FL)"); a card shows
+// this instead, so one club reads one way across the whole catalog.
+let TEAM_NAMES = {};
+try {
+  TEAM_NAMES = require('./data/espn-team-names.json');
+} catch {
+  TEAM_NAMES = {};        // absent table costs tidy names, nothing else
+}
+
+function crestKey(url) {
+  const m = /\/teamlogos\/([^/]+)\/\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url || ''));
+  return m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : '';
+}
+
+/** ESPN's name for whatever team a crest belongs to, or null. */
+function canonicalName(logoUrl) {
+  const k = crestKey(logoUrl);
+  return (k && TEAM_NAMES[k]) || null;
+}
+
 // Which ESPN leagues to consult for a given addon category, in priority order.
 // Ordering matters: "kansas city chiefs" must hit the NFL before the
 // college-football table gets a chance at "kansas".
@@ -182,6 +203,16 @@ function lookupTeam(side, category, leaguesOverride = null) {
     const bare = stripAffix(key);
     if (bare && bare !== key && bare.length >= 4) result = resolve(bare, leagues);
   }
+  // Parenthetical disambiguators: the college feeds write "Miami (FL)" to tell
+  // it apart from Miami (OH), and normalize() turns that into "miami fl", which
+  // is nobody's key. Retry without the qualifier.
+  if (!result && /\(/.test(String(side))) {
+    const unqualified = normalize(String(side).replace(/\([^)]*\)/g, ' '));
+    if (unqualified && unqualified !== key && unqualified.length >= 3) {
+      result = resolve(unqualified, leagues)
+            || (ALIASES[unqualified] ? resolve(ALIASES[unqualified], leagues) : null);
+    }
+  }
   if (!result && AGE_GROUP.test(key)) {
     const senior = key.replace(AGE_GROUP, '');
     result = resolve(senior, leagues)
@@ -326,6 +357,7 @@ function resolveMatchup(match) {
 
 module.exports = {
   resolveMatchup,
+  canonicalName,
   resolvingLeagues,
   lookupTeam,
   splitSides,

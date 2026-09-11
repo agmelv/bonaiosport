@@ -27,6 +27,16 @@ const HOST = 'https://site.web.api.espn.com/apis/site/v2/sports';
 // league id (as event uids carry it) -> that league's crest
 const LEAGUE_LOGOS = {};
 
+// crest key ("ncaa/50") -> the name ESPN calls that team. Cards display this
+// instead of whatever a provider wrote, so one club is spelled one way across
+// the whole catalog.
+const TEAM_NAMES = {};
+
+function crestKey(url) {
+  const m = /\/teamlogos\/([^/]+)\/\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url || ''));
+  return m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : '';
+}
+
 const LEAGUES = {
   'nfl': 'football/nfl',
   'cfl': 'football/cfl',
@@ -204,6 +214,10 @@ function keysFor(team) {
 function addTeams(candidates, teams, slug) {
   for (const team of teams) {
     const logo = logoFor(team, slug);
+    const ck = crestKey(logo);
+    // First league to name a crest wins; the same club reached through a
+    // continental cup carries the same name anyway.
+    if (ck && team.displayName && !TEAM_NAMES[ck]) TEAM_NAMES[ck] = String(team.displayName).trim();
     // A team with no published logo still takes part in the ambiguity check
     // below, it just can't be the answer. Skipping it outright would let a key
     // two clubs answer to resolve to whichever of them happens to have a crest
@@ -341,6 +355,10 @@ async function main() {
   ];
   const crestCount = await buildLeagueCrests(crestPaths);
   console.log(`${crestCount}/${crestPaths.length} leagues`);
+
+  const namesDest = path.join(path.dirname(dest), 'espn-team-names.json');
+  fs.writeFileSync(namesDest, JSON.stringify(TEAM_NAMES));
+  console.log(`wrote ${path.relative(process.cwd(), namesDest)} — ${Object.keys(TEAM_NAMES).length} canonical names`);
 
   const leagueDest = path.join(path.dirname(dest), 'espn-leagues.json');
   fs.writeFileSync(leagueDest, JSON.stringify(LEAGUE_LOGOS));

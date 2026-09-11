@@ -142,11 +142,53 @@ function _upstreamIds(e) {
  * to `football`, which files an NFL game in the soccer catalog. The category is
  * a bucket the provider chose; the league is what the fixture actually is.
  */
+// Two catalog names for one sport. A pair drawn from this set may merge.
+const _SAME_SPORT = new Set(['college', 'american_football']);
+
+const teamLogos = require('./TeamLogoService');
+
+/**
+ * A fixture's identity, independent of how any provider spelled it.
+ *
+ * Titles are a presentation detail — "Miami vs Florida A&M", "Miami (FL) vs
+ * Florida A and M" and "Florida A&M Rattlers at Miami Hurricanes" are one
+ * game — and comparing them as strings is why one fixture could be listed
+ * three times. What actually identifies a fixture is which two teams are
+ * playing, so both sides are resolved to their crest and the pair, unordered,
+ * is the key. Everything about the title, including which side was written
+ * first, drops out.
+ *
+ * Null when either side doesn't resolve; the caller then falls back to the
+ * title comparison rather than merging on a guess.
+ */
+function _identity(e) {
+  if (!e) return null;
+  let m;
+  try {
+    m = teamLogos.resolveMatchup(e);
+  } catch {
+    return null;
+  }
+  if (!m || !m.aLogo || !m.bLogo) return null;
+  const key = (url) => {
+    const hit = /\/teamlogos\/([^/]+)\/\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url));
+    return hit ? `${hit[1].toLowerCase()}/${hit[2].toLowerCase()}` : String(url);
+  };
+  const a = key(m.aLogo);
+  const b = key(m.bLogo);
+  if (!a || !b || a === b) return null;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
 const LEAGUE_CATEGORY = {
-  nfl: 'american_football', ncaaf: 'american_football', 'college football': 'american_football',
-  cfl: 'american_football', afl: 'american_football', 'ncaa football': 'american_football',
-  nba: 'basketball', wnba: 'basketball', ncaab: 'basketball', 'ncaa basketball': 'basketball',
-  mlb: 'baseball', 'ncaa baseball': 'baseball',
+  // American Football is professional only; anything collegiate goes to the
+  // College catalog, whatever the provider called it.
+  nfl: 'american_football', cfl: 'american_football', afl: 'american_football',
+  ncaaf: 'college', 'college football': 'college', 'ncaa football': 'college',
+  'ncaa division 1 football': 'college',
+  nba: 'basketball', wnba: 'basketball',
+  ncaab: 'college', 'ncaa basketball': 'college',
+  mlb: 'baseball', 'ncaa baseball': 'college',
   nhl: 'hockey',
   nrl: 'rugby', 'super rugby': 'rugby', 'six nations': 'rugby', 'gallagher prem': 'rugby',
   'premiership rugby': 'rugby', 'top 14': 'rugby', 'rugby championship': 'rugby',
@@ -173,7 +215,7 @@ function _categoryFromLeague(match) {
   // Division 1 Football" would pull 124 college games out of the College
   // catalog and into American Football, which is a different decision than
   // "stop filing NFL games under soccer" and not one to make as a side effect.
-  if (/\bncaaf\b|college football/.test(raw)) return 'american_football';
+  if (/\bncaa\b|college/.test(raw)) return 'college';
   return null;
 }
 
@@ -201,6 +243,7 @@ class MatchAggregator {
       // sources by. Several providers quote the same number for the same
       // fixture, which is exact identity rather than a similarity guess.
       up: _upstreamIds(e),
+      ident: _identity(e),
       norm: _compoundify(_stripNoise(title)).replace(/\s+/g, ' ').trim(),
       digits: (title.match(/\d+/g) || []).sort().join(',')
     };
@@ -223,9 +266,16 @@ class MatchAggregator {
     if (p1.up && p2.up && p1.up.size && p2.up.size) {
       for (const u of p1.up) if (p2.up.has(u)) return true;
     }
-    // 1. Category mismatch guard
+    // 1. Category mismatch guard.
+    //
+    // `college` and `american_football` are the same sport filed under two
+    // names — StreamSports99 calls an NCAA game `college`, StreamedPk calls the
+    // same game `american_football`. Treating them as different kept one
+    // fixture listed twice, once in each tab, with its streams split between
+    // the two. They are compatible here; the merged event remembers both tabs
+    // so it still appears in each.
     if (p1.category && p2.category && p1.category !== 'other' && p2.category !== 'other' && p1.category !== p2.category) {
-      return false;
+      if (!(_SAME_SPORT.has(p1.category) && _SAME_SPORT.has(p2.category))) return false;
     }
     // 2. Exact ID match
     if (p1.id && p2.id && p1.id === p2.id) return true;
@@ -233,6 +283,12 @@ class MatchAggregator {
     //    played on consecutive days; measured disagreement between providers
     //    about the same fixture is at most 1.5h, so 2h is generous.
     if (p1.date && p2.date && Math.abs(p1.date - p2.date) > 7200000) return false;
+
+    // 4. Same two teams, same time — the fixture itself, not its wording.
+    //    Deliberately placed after the date guard: the two legs of a series
+    //    resolve to the same pair of crests and are only told apart by when
+    //    they kick off.
+    if (p1.ident && p2.ident && p1.ident === p2.ident) return true;
 
     // 5. Dual-team extraction — if both titles parse as "team1 vs team2", require
     //    BOTH teams to independently fuzzy-match.
@@ -304,6 +360,12 @@ class MatchAggregator {
         }
 
         const existing = finalMatches[idx];
+        // When a merge crosses the college/american_football line, the merged
+        // event is collegiate: American Football lists professional fixtures
+        // only, so College wins regardless of which provider arrived first.
+        if (match.category !== existing.category && _SAME_SPORT.has(match.category) && _SAME_SPORT.has(existing.category)) {
+          existing.category = 'college';
+        }
         if (match.sources && Array.isArray(match.sources)) {
           match.sources.forEach(src => {
             if (!existing.sources.find(s => s.id === src.id && s.source === src.source)) {
