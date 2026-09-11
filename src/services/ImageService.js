@@ -436,7 +436,15 @@ function evictIfNeeded() {
   for (let i = 0; i < excess; i++) cache.delete(byAccess[i][0]);
 }
 
-const MARKS_DIR = path.join(require('../config').PUBLIC_DIR, 'marks');
+// Where the bundled marks live. Running from source this file sits two levels
+// below the app root; in the build everything collapses into dist and sits one
+// level below. ncc also rewrites either expression to point at its own asset
+// base. Probing settles all three rather than betting on one.
+const MARKS_DIRS = [
+  path.join(__dirname, '..', '..', 'public', 'marks'),
+  path.join(__dirname, '..', 'public', 'marks'),
+  path.join(process.cwd(), 'public', 'marks')
+];
 
 /**
  * Read a bundled mark straight from disk. Returns null for anything that is
@@ -453,11 +461,12 @@ function localMark(url) {
   if (hit !== undefined) return hit;
 
   let result = null;
-  try {
-    const buffer = fs.readFileSync(path.join(MARKS_DIR, name));
-    result = { buffer, contentType: name.endsWith('.svg') ? 'image/svg+xml' : 'image/png' };
-  } catch {
-    result = null;
+  for (const dir of MARKS_DIRS) {
+    try {
+      const buffer = fs.readFileSync(path.join(dir, name));
+      result = { buffer, contentType: name.endsWith('.svg') ? 'image/svg+xml' : 'image/png' };
+      break;
+    } catch { /* next candidate */ }
   }
   markCache.set(name, result);
   return result;

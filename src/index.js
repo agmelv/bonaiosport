@@ -22,7 +22,7 @@ const path = require('path');
 const { builder } = require('./manifest');
 const { handleCatalog, handleMeta } = require('./catalog');
 const { handleStream } = require('./streams');
-const { PORT, BASE_URL, getRequestBaseUrl, PUBLIC_DIR } = require('./config');
+const { PORT, BASE_URL, getRequestBaseUrl } = require('./config');
 const container = require('./container');
 
 
@@ -93,7 +93,7 @@ app.set('trust proxy', true);
 app.use(cors());
 
 // Serve the web debugger UI and Configuration Page
-app.use(express.static(PUBLIC_DIR, { index: false }));
+app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
