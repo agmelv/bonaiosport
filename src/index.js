@@ -150,9 +150,14 @@ function isAdmin(req) {
 
 function requireAdmin(req, res) {
   if (isAdmin(req)) return true;
+  // Say which rule is actually in force. Telling someone who has already set a
+  // token to go and set one sends them to check a setting that is already right.
   res.status(403).json({
-    error: 'This action is limited to the local network. Set ADMIN_TOKEN on the '
-      + 'container and pass it as ?token= to use it from anywhere.'
+    error: process.env.ADMIN_TOKEN
+      ? 'This action needs the admin token. Open the dashboard as /dashboard?token=… '
+        + 'with the ADMIN_TOKEN set on the container.'
+      : 'This action is limited to the local network. Set ADMIN_TOKEN on the '
+        + 'container and pass it as ?token= to use it from anywhere.'
   });
   return false;
 }
