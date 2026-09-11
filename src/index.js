@@ -142,7 +142,13 @@ function isAdmin(req) {
   const token = process.env.ADMIN_TOKEN;
   if (token) {
     const given = req.get('x-admin-token') || req.query.token || '';
-    return given.length === token.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(token));
+    // Compare as bytes. A password with any character outside ASCII has a byte
+    // length that differs from its string length, and timingSafeEqual throws on
+    // a length mismatch -- so comparing string lengths first would have turned
+    // one accented character in the password into a 500 on every attempt.
+    const a = Buffer.from(String(given), 'utf8');
+    const b = Buffer.from(token, 'utf8');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
   const ip = String(req.ip || '').replace(/^::ffff:/, '');
   return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(ip) || ip === '::1' || ip === '';

@@ -60,8 +60,21 @@
 <header>
   <h1>⚙️ Live Sports — Dashboard</h1>
   <div class="spacer"></div>
+  <button id="lockBtn" hidden style="padding:7px 13px">Sign out</button>
   <a href="/">← Back to catalog</a>
 </header>
+
+<div id="signin" hidden style="max-width:1000px;margin:24px auto 0;padding:0 24px">
+  <form class="card" id="signinForm" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+    <div style="flex:1 1 240px">
+      <h2 style="margin-bottom:6px">Dashboard password</h2>
+      <div class="dim" style="font-size:13.5px">Sign in to warm or clear the caches. Viewing needs no password.</div>
+    </div>
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password"
+      style="font:inherit;font-size:14px;padding:9px 13px;border-radius:9px;background:#1f1f24;color:var(--text);border:1px solid var(--line);min-width:200px">
+    <button type="submit">Sign in</button>
+  </form>
+</div>
 
 <main>
   <div class="grid">
@@ -119,10 +132,30 @@ const secs = n => n >= 86400 ? Math.floor(n / 86400) + 'd ' + Math.floor((n % 86
   : n >= 3600 ? Math.floor(n / 3600) + 'h ' + Math.floor((n % 3600) / 60) + 'm'
   : n >= 60 ? Math.floor(n / 60) + 'm' : (n || 0) + 's';
 
-// A token in the address bar is carried through to the actions, so the page
-// works from outside the house when the server is set up to want one.
-const token = new URLSearchParams(location.search).get('token');
+// The password lives in this browser, not in the address bar. A token in a URL
+// ends up in history, bookmarks and any proxy log between here and the server,
+// and it has to be carried by hand to every device.
+const STORE = 'liveSportsAdminToken';
+let token = '';
+try { token = localStorage.getItem(STORE) || ''; } catch { /* private window */ }
+
+// An old ?token=… link still works: adopt it, then take it out of the address
+// bar so it stops being written to history from here on.
+const fromUrl = new URLSearchParams(location.search).get('token');
+if (fromUrl) {
+  token = fromUrl;
+  try { localStorage.setItem(STORE, token); } catch { /* ignore */ }
+  history.replaceState(null, '', location.pathname);
+}
+
 let admin = false;
+
+const auth = () => (token ? { 'x-admin-token': token } : {});
+
+function forget() {
+  token = '';
+  try { localStorage.removeItem(STORE); } catch { /* ignore */ }
+}
 
 function flash(msg, isError) {
   const el = $('flash');
@@ -134,7 +167,7 @@ function flash(msg, isError) {
 async function refresh() {
   let d;
   try {
-    d = await (await fetch('/api/cache/stats')).json();
+    d = await (await fetch('/api/cache/stats', { headers: auth() })).json();
   } catch (err) {
     return flash('Cannot reach the addon: ' + err.message, true);
   }
@@ -167,21 +200,47 @@ async function refresh() {
   $('cancelBtn').disabled = !admin || !w.running;
   $('warmBtn').disabled = !admin || w.running;
 
+  // Three states: signed in, needs a password, or locked to the local network.
   const note = $('lockNote');
-  if (admin) {
-    note.hidden = true;
-  } else {
-    note.hidden = false;
-    note.innerHTML = d.tokenRequired
-      ? 'Read-only: this server wants a token. Append <code>?token=…</code> to the address to unlock the buttons.'
-      : 'Read-only: changes are limited to the local network. To act from elsewhere, set <code>ADMIN_TOKEN</code> on the container and open this page with <code>?token=…</code>.';
+  const needsPassword = !admin && d.tokenRequired;
+  $('signin').hidden = !needsPassword;
+  $('lockBtn').hidden = !(admin && d.tokenRequired);
+  note.hidden = admin || needsPassword;
+  if (!admin && !d.tokenRequired) {
+    note.innerHTML = 'Read-only: changes are limited to the local network. To act from '
+      + 'elsewhere, set <code>ADMIN_TOKEN</code> on the container and a password box will appear here.';
+  }
+  // A stored password the server no longer accepts is worse than none: it fails
+  // silently on every action. Drop it and ask again.
+  if (needsPassword && token) {
+    forget();
+    flash('That password was not accepted.', true);
   }
 }
 
-async function act(path, label) {
-  const url = path + (token ? (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : '');
+$('signinForm').onsubmit = async e => {
+  e.preventDefault();
+  const value = $('pw').value;
+  if (!value) return;
   try {
-    const res = await fetch(url, { method: 'POST' });
+    const res = await fetch('/api/cache/stats', { headers: { 'x-admin-token': value } });
+    const body = await res.json();
+    if (!body.admin) return flash('That password was not accepted.', true);
+    token = value;
+    try { localStorage.setItem(STORE, token); } catch { /* private window */ }
+    $('pw').value = '';
+    flash('Signed in.');
+    refresh();
+  } catch (err) {
+    flash(err.message, true);
+  }
+};
+
+$('lockBtn').onclick = () => { forget(); flash('Signed out.'); refresh(); };
+
+async function act(path, label) {
+  try {
+    const res = await fetch(path, { method: 'POST', headers: auth() });
     const body = await res.json();
     flash(res.ok ? label : (body.error || 'Refused'), !res.ok);
   } catch (err) {
