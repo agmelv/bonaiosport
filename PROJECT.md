@@ -41,6 +41,14 @@ Nuvio Live Sports Plugin is a Stremio v1 protocol addon built with Node.js/Expre
 - `.env`: Clean configuration without hardcoded local IP.
 - `src/services/ImageService.js`: Image fetching, protocol-relative normalization, LRU cache, SVG fallback generator.
 - `src/catalog.js`: Catalog mapping, thumbnail normalization, team logo fallback hierarchy.
+- `src/services/TeamLogoService.js`: Resolves a side's name to a crest from the ESPN tables, through aliases, affix stripping and Saint/St. equivalence.
+- `src/services/LeagueBadgeService.js`: Names the competition a fixture belongs to from the two crests, and picks its badge.
+- `src/services/HomeAwayService.js`: ESPN scoreboards, so a card can say which side is host.
+- `src/services/CrestColorService.js`: Reads a crest's dominant colours to tint the card behind it.
+- `src/services/EventMarkService.js`: Sport icons and series marks for events that are not team-vs-team.
+- `src/services/ChannelLogoService.js`: Channel branding for the always-on listings.
+- `src/services/CardWarmer.js`: Renders catalog cards ahead of demand, paced so a burst never lands on the host.
+- `scripts/build-espn-teams.js`: Build-time generator for the crest, name and competition tables under `src/services/data/`.
 - `src/services/MatchAggregator.js`: Deduplication logic preserving image assets.
 - `src/providers/*.js`: Provider scrapers with normalized image and proxy URLs.
 - `scripts/test-e2e-simulated-client.js`: Automated E2E test runner.

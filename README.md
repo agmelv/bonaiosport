@@ -9,6 +9,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-3.0.0-brightgreen.svg)](#)
 
+> 🍴 **THIS IS A FORK.**
+> The upstream project is [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin) and all credit for it belongs there. This fork is [mlp2069/live-sport-plugin](https://github.com/mlp2069/live-sport-plugin), self-hosted, and differs in ways the instructions below assume:
+> - **Sign-in.** The catalog and configure pages can sit behind `AUTH_KEY`, and a dashboard behind a separate `ADMIN_TOKEN`. See [Sign-in and the dashboard](#-sign-in-and-the-dashboard).
+> - **Artwork built from crests.** Cards are drawn from team crests and rendered server-side, with a competition badge worked out from the crests rather than from whatever a provider called the league.
+> - **Different tabs.** Soccer, NFL, Other Football, College, Racing and Channels, among others — see [Catalog tabs](#-catalog-tabs).
+> - **Poster cache warming**, so opening a tab does not render hundreds of cards at once.
+>
+> Clone this fork rather than upstream if you want the above; the commands below already point at it.
+
 > ⚠️ **IMPORTANT HOSTING NOTICE:**
 > **Do NOT deploy this addon to free/shared PaaS clouds like Render.com, Vercel, or Railway.** Their automated Acceptable Use Policy (AUP) scanners detect web scrapers and media proxying, which will result in **immediate and permanent suspension of your account**.
 > 
@@ -46,7 +55,7 @@ Run the addon container in seconds:
 
 ```bash
 # Clone the repository
-git clone https://github.com/rajhodedara/live-sport-plugin.git
+git clone https://github.com/mlp2069/live-sport-plugin.git
 cd live-sport-plugin
 
 # Start the container in background
@@ -61,7 +70,7 @@ The addon is now available at `http://localhost:7000` (or `http://YOUR_SERVER_IP
 
 1. **Install and run the addon:**
    ```bash
-   git clone https://github.com/rajhodedara/live-sport-plugin.git
+   git clone https://github.com/mlp2069/live-sport-plugin.git
    cd live-sport-plugin
    npm install
    npm run build
@@ -95,7 +104,7 @@ The addon is now available at `http://localhost:7000` (or `http://YOUR_SERVER_IP
 
 ```bash
 # Clone and build
-git clone https://github.com/rajhodedara/live-sport-plugin.git
+git clone https://github.com/mlp2069/live-sport-plugin.git
 cd live-sport-plugin
 npm install
 npm run build
@@ -106,6 +115,78 @@ pm2 start dist/index.js --name "nuvio-sports"
 pm2 save
 pm2 startup
 ```
+
+---
+
+## 🔐 Sign-in and the Dashboard
+
+Two separate keys, both optional. Set neither and everything stays open, exactly
+as it was.
+
+| Variable | Guards | Leave empty and… |
+|---|---|---|
+| `AUTH_KEY` | the catalog at `/` and `/configure` | anyone with the link can browse |
+| `ADMIN_TOKEN` | `/dashboard` and anything that changes state | the dashboard is limited to callers on the local network |
+
+Set them on the container:
+
+```yaml
+environment:
+  - AUTH_KEY=${AUTH_KEY}
+  - ADMIN_TOKEN=${ADMIN_TOKEN}
+```
+
+Visiting the site then lands on `/login`, and signing in takes you to the
+catalog. The gear icon in the header opens the dashboard, which asks for
+`ADMIN_TOKEN` separately — being allowed to browse does not mean being allowed
+to clear a cache. `ADMIN_TOKEN` works for both, so you never type two passwords.
+
+Sign-in leaves an `HttpOnly` cookie holding a signature over its own expiry,
+keyed by the password. The password itself is never in the cookie, so a stolen
+one cannot be turned back into it. Eight failed attempts from an address buys a
+five-minute pause — which applies to the correct password too, since refusing to
+check it is the point.
+
+### What is deliberately *not* behind a password
+
+The addon's own endpoints — `manifest.json`, catalogs, metadata, streams and
+`/img` artwork. Nuvio and Stremio have no way to sign in, so gating those would
+simply stop the addon working. What stays reachable to somebody holding your URL
+is fixtures and pictures of crests: no settings, no state, nothing personal.
+
+If you need the addon itself private, that is a job for the layer in front of
+it — an IP allowlist or a VPN — not for this application.
+
+### Behind a reverse proxy
+
+If you put a proxy (Caddy, nginx, Traefik) in front, the addon must be told, or
+every visitor arrives wearing the proxy's address. It trusts `X-Forwarded-For`
+only from proxies on loopback or a private range, which is the usual arrangement
+and needs no configuration. A proxy on a public address would need
+`trust proxy` widened in `src/index.js`, and you should be sure the port is not
+reachable directly before doing that.
+
+---
+
+## 🗂️ Catalog Tabs
+
+| Tab | Holds |
+|---|---|
+| 🔴 Live Now | fixtures in progress — channels are not mixed in |
+| ⚽ Soccer | association football |
+| 🏈 NFL | the NFL alone |
+| 🏈 Other Football | the CFL, the AFL, and gridiron whose league cannot be named |
+| 🎓 College | college fixtures of any sport, badged with the ball it is played with |
+| 🏉 Rugby | badged per competition: NRL, Premiership, URC, Top 14, Super Rugby, test rugby |
+| 🏎️ Racing | motorsport |
+| 📺 Channels | every always-on channel in one place, including scheduled ones like NFL RedZone |
+| 🏏 🏀 🏒 ⚾ 🥊 ⛳ 🎾 🎯 | cricket, basketball, hockey, baseball, MMA, golf, tennis, darts |
+| 🏅 Other Sports | anything that fits no tab above |
+| ⏱️ Upcoming · ⭐ Your Teams | everything ahead; clubs you follow in `/configure` |
+
+A fixture's competition is derived from the crests of the two sides, so a game
+lands in the right tab even when the provider sends no league — which is the
+normal case for rugby, and common for the smaller college divisions.
 
 ---
 
@@ -120,7 +201,10 @@ pm2 startup
 - **🧠 Algorithmic Stream Scoring & Ranking:** Evaluates and sorts stream links in real time based on resolution (1080p > 720p > SD), latency, direct M3U8 vs. webview embeds, audio commentary language, and live viewer counts.
 - **🧱 Clean Architecture & Awilix IoC:** Built with Domain-Driven Design (DDD) entities (`MatchEntity`, `StreamEntity`), modular service layers, and an Awilix Inversion of Control (IoC) dependency injection container.
 - **📄 Declarative YAML Provider Engine:** Includes a dynamic `YamlProviderBuilder` allowing developers to configure and plug in new stream scrapers via declarative YAML definitions without writing boilerplate.
-- **⚙️ Responsive Glassmorphic Web Dashboard:** Includes a local browser player (`/`) and a full configuration interface (`/configure`) to filter sports categories, toggle active providers, localize match kickoffs to your timezone, and track favorite clubs.
+- **⚙️ Responsive Glassmorphic Web UI:** A browser catalog (`/`) and a configuration interface (`/configure`) to filter sports categories, toggle active providers, order stream sources, localize match kickoffs to your timezone, and track favorite clubs.
+- **📊 Operations Dashboard (`/dashboard`):** Cache sizes and hit rates, warming progress, event count, memory and uptime, with controls to warm or clear the caches. Behind its own password.
+- **🖼️ Crest-Built Match Cards:** Posters are drawn from both teams' crests and rasterised to JPEG server-side, because clients do not render SVG posters. The corner badge is the competition, worked out from the crests themselves rather than from whatever a provider called the league — which is how rugby, the CFL and college fixtures get the right mark when the feed names no league at all.
+- **🔥 Poster Cache Warming:** Cards are rendered ahead of time, one at a time with a pause, at startup and every six hours. A tab is hundreds of cards; rendering them on demand pegged a two-core host, and rendering them slowly in advance does not.
 
 ---
 

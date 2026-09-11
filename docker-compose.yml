@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   nuvio:
     build: .
@@ -8,6 +6,18 @@ services:
       - "7000:7000"
     environment:
       - PORT=7000
-      # If you are hosting this on a public VPS, uncomment the line below and set your domain or IP
+      # Kickoff times for viewers who have not picked a timezone in /configure
+      - TZ=${TZ:-America/New_York}
+      # If you are hosting this on a public VPS, set your domain or IP
       # - ADDON_URL=http://your-server-ip:7000
+      #
+      # Sign-in. Both optional; an empty value leaves that door open.
+      # AUTH_KEY guards the catalog and configure pages, ADMIN_TOKEN the
+      # dashboard and anything that changes state. The addon's own endpoints
+      # (manifest, catalogs, streams, artwork) are never gated -- Nuvio cannot
+      # sign in, so gating them would stop the addon working.
+      - AUTH_KEY=${AUTH_KEY:-}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      # Pause between cards while warming the poster cache in the background.
+      - WARM_GAP_MS=${WARM_GAP_MS:-250}
     restart: unless-stopped
