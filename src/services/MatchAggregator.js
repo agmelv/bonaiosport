@@ -470,9 +470,25 @@ class MatchAggregator {
         // the feed's own mistake.
         const isChannelGroup = !!(pre.chan && finalPres[idx].chan);
         if (isChannelGroup) {
-          if (pre.teams && !finalPres[idx].teams) {
-            // incoming is the mangled one: keep what we have
-          } else if (!pre.teams && finalPres[idx].teams) {
+          // A channel is always on, so a provider that stamps a kickoff on one
+          // must not give the group something to expire against. StreamFree
+          // lists Willow with a June date; merging it with the live listing
+          // handed the group that date, and the 24h cull below dropped both.
+          if (!match.date) {
+            existing.date = '';
+            finalPres[idx] = { ...finalPres[idx], date: 0 };
+          }
+
+          // The fuller name of the same channel wins: "Willow" gives way to
+          // "Willow Cricket", and the feed's mangled "NFL vs RedZone" -- which
+          // parses as a fixture -- gives way to "NFL RedZone".
+          const groupIsMangled = !!finalPres[idx].teams && !pre.teams;
+          let fuller = false;
+          if (!pre.teams && pre.tokens.size > finalPres[idx].tokens.size) {
+            fuller = true;
+            for (const w of finalPres[idx].tokens) if (!pre.tokens.has(w)) { fuller = false; break; }
+          }
+          if (groupIsMangled || fuller) {
             existing.title = match.title;
             finalPres[idx] = { ...finalPres[idx], teams: null, tokens: pre.tokens, norm: pre.norm, digits: pre.digits };
           }
