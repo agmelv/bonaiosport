@@ -79,6 +79,28 @@ function normalize(s) {
     .trim();
 }
 
+
+/**
+ * CFL crests, which ESPN simply does not have — every team in its CFL feed
+ * reports an empty logos array, and .../teamlogos/cfl/500/<id>.png 404s for all
+ * of them. Without these the league's nine clubs resolve nothing at all.
+ *
+ * Badges come from TheSportsDB, verified as 500-512px RGBA PNGs. They are
+ * written into the table like any other crest so nothing downstream has to know
+ * they came from somewhere else.
+ */
+const CFL_BADGES = {
+  'BC Lions': 'https://r2.thesportsdb.com/images/media/team/badge/ysxssy1424732039.png',
+  'Calgary Stampeders': 'https://r2.thesportsdb.com/images/media/team/badge/lksemj1565196917.png',
+  'Edmonton Elks': 'https://r2.thesportsdb.com/images/media/team/badge/ehy8wx1770834697.png',
+  'Hamilton Tiger-Cats': 'https://r2.thesportsdb.com/images/media/team/badge/qtwsuq1424727420.png',
+  'Montreal Alouettes': 'https://r2.thesportsdb.com/images/media/team/badge/8m9v4n1770835125.png',
+  'Ottawa Redblacks': 'https://r2.thesportsdb.com/images/media/team/badge/k8wjz71546002654.png',
+  'Saskatchewan Roughriders': 'https://r2.thesportsdb.com/images/media/team/badge/xrdull1630952245.png',
+  'Toronto Argonauts': 'https://r2.thesportsdb.com/images/media/team/badge/5a57ou1628555372.png',
+  'Winnipeg Blue Bombers': 'https://r2.thesportsdb.com/images/media/team/badge/4bo4wj1561667273.png'
+};
+
 async function fetchLeague(slug, apiPath) {
   const url = `${HOST}/${apiPath}/teams?limit=1000`;
   const res = await fetch(url, { headers: HEADERS });
@@ -115,6 +137,23 @@ function stripAffix(k) {
   return cur;
 }
 
+/** The key shapes keysFor() would produce for a plain "City Nickname" string. */
+function keysForName(name) {
+  const keys = new Set();
+  const k = normalize(name);
+  if (k.length >= 2) keys.add(k);
+  const parts = k.split(' ');
+  if (parts.length > 1) {
+    keys.add(parts[parts.length - 1]);            // bare nickname, e.g. "argonauts"
+    keys.add(parts.slice(0, -1).join(' '));       // bare city, e.g. "toronto"
+  }
+  for (const key of [...keys]) {
+    const squashed = key.replace(/ /g, '');
+    if (squashed !== key && squashed.length >= 6) keys.add('~' + squashed);
+  }
+  return keys;
+}
+
 function keysFor(team) {
   const keys = new Set();
   for (const field of [team.displayName, team.shortDisplayName, team.name, team.nickname, team.location, team.abbreviation]) {
@@ -126,6 +165,14 @@ function keysFor(team) {
   const loc = normalize(team.location);
   const nick = normalize(team.name);
   if (loc && nick && loc !== nick) keys.add(`${loc} ${nick}`);
+
+  // The same recombination from the other pair of fields. ESPN's AFL records
+  // carry location: null and split the club from its nickname across `name`
+  // ("Fremantle") and `nickname` ("Dockers"), so the "Fremantle Dockers" every
+  // provider writes had no key at all — 11 of 18 clubs resolved nothing.
+  const short = normalize(team.name);
+  const tag = normalize(team.nickname);
+  if (short && tag && short !== tag) keys.add(`${short} ${tag}`);
 
   for (const k of [...keys]) {
     const stripped = stripAffix(k);
@@ -240,6 +287,11 @@ async function main() {
     const candidates = new Map();
     addTeams(candidates, teams, slug);
     const { map, dropped } = finish(candidates);
+    if (slug === 'cfl') {
+      for (const [name, logo] of Object.entries(CFL_BADGES)) {
+        for (const k of keysForName(name)) if (!map[k]) map[k] = logo;
+      }
+    }
     out[slug] = map;
     grandTotal += Object.keys(map).length;
     console.log(`${teams.length} teams, ${Object.keys(map).length} keys, ${dropped} ambiguous dropped`);

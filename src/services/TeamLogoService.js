@@ -46,7 +46,10 @@ const AGE_GROUP = /\s+u\s?(1[5-9]|2[0-3])$/;
 // Club-type affixes carry no identity: the providers say "Seattle Sounders"
 // where ESPN says "Seattle Sounders FC". The builder indexes stripped variants
 // too; this is the query-side half. Kept in sync with scripts/build-espn-teams.js.
-const AFFIX = /^(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if)\s+|\s+(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if|ii)$/;
+// Spelled-out club suffixes as well as the abbreviated ones: the providers
+// write "Adelaide Football Club" where ESPN has "Adelaide Crows", and stripping
+// only "fc"/"sc" left that side resolving nothing.
+const AFFIX = /^(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if)\s+|\s+(fc|sc|cf|afc|ac|as|sv|cd|ud|fk|sk|nk|bk|if|ii)$|\s+(football|futbol|soccer)\s+club$|\s+club$/;
 
 function stripAffix(k) {
   let prev;
@@ -58,6 +61,16 @@ function stripAffix(k) {
 // National sides where the scrape providers and ESPN simply use different
 // names for the same country. Only unambiguous, well-known equivalences.
 const ALIASES = {
+  // Australian rules: ESPN's AFL feed names these two in ways no provider uses.
+  // "Adelaide" is only ever stored as "Adelaide Crows", and ESPN ships a second,
+  // wrong record for "Sydney Swans" (carrying Gold Coast's abbreviation), which
+  // makes every spelling of the Swans ambiguous and drops them from the table —
+  // so the club's own abbreviation is the only key left to point at.
+  'adelaide': 'adelaide crows',
+  'adelaide football club': 'adelaide crows',
+  'sydney swans': 'syd',
+  'sydney': 'syd',
+  'swans': 'syd',
   'czech republic': 'czechia',
   'ireland': 'republic of ireland',
   'turkey': 'turkiye',
@@ -161,8 +174,8 @@ function lookupTeam(side, category, leaguesOverride = null) {
  * the AFL and gets the Tigers.
  *
  * This runs the full ladder per league rather than checking for an exact key,
- * because a side ESPN stores as "Essendon" arrives from the providers as
- * "Essendon Bombers" and only the multi-word stage matches it. An exact-key
+ * because a side may resolve in one league only through an alias or a stripped
+ * affix. An exact-key
  * test left those fixtures with no common league, which fell back to category
  * order and handed Richmond the wrong crest. lookupTeam() memoises per
  * (leagues, key), so the repeated calls cost one pass each per catalog build.

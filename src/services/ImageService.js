@@ -360,6 +360,73 @@ async function sendCard(req, res, svg, cacheControl) {
   }
 }
 
+/**
+ * Event card: a badge over the house gradient, for events that are not
+ * team-vs-team — a race, a fight card, a tournament round. These resolve no
+ * crests, so the alternative is the title alone on a plain panel.
+ *
+ * The badge sits on a white plate on purpose. A third of the marks worth using
+ * (WWE, AEW, MotoGP, the boxing glove) are drawn in black and vanish against a
+ * dark gradient without it.
+ */
+function svgEvent(text, entry, color, opts = {}) {
+  const { w = 800, h = 450, kicker = '' } = opts;
+  const base = accentColor(color).slice(1);
+  const seated = luminance(base) > 0.55 ? shade(base, -0.45)
+    : luminance(base) > 0.32 ? shade(base, -0.28)
+    : luminance(base) < 0.05 ? shade(base, 0.16)
+    : base;
+  const left = shade(seated, 0.10);
+  const right = shade(seated, -0.22);
+  const seam = shade(seated, -0.42);
+
+  const plate = 196;
+  const plateX = (w - plate) / 2;
+  const plateY = 46;
+  const markSize = 144;
+
+  const lines = wrapLines(text, 26, 3);
+  const fs = lines.length >= 3 ? 34 : lines.length === 2 ? 40 : 44;
+  const startY = 300;
+  const textEls = lines.map((line, i) =>
+    `<text x="50%" y="${(startY + i * (fs + 8)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${fs}" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#pdrop)">${escapeXml(line)}</text>`
+  ).join('\n  ');
+
+  const uri = entry && entry.buffer
+    ? `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`
+    : null;
+
+  // The kicker is only ever set when a series was actually named in the title,
+  // never when the mark came from the category fallback — the card must not
+  // assert a series it guessed.
+  const kickerEl = kicker
+    ? `<text x="50%" y="${(plateY - 14).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3" fill="rgba(255,255,255,0.60)" text-anchor="middle" dominant-baseline="middle">${escapeXml(String(kicker).toUpperCase())}</text>`
+    : '';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <defs>
+    <linearGradient id="pbg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#${left}"/>
+      <stop offset="50%" stop-color="#${seam}"/>
+      <stop offset="100%" stop-color="#${right}"/>
+    </linearGradient>
+    <radialGradient id="pglow" cx="50%" cy="34%" r="42%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="pdrop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#pbg)"/>
+  <rect width="${w}" height="${h}" fill="url(#pglow)"/>
+  ${kickerEl}
+  ${uri ? `<rect x="${plateX.toFixed(1)}" y="${plateY}" width="${plate}" height="${plate}" rx="30" fill="#ffffff" fill-opacity="0.95" filter="url(#pdrop)"/>
+  <image x="${(plateX + (plate - markSize) / 2).toFixed(1)}" y="${(plateY + (plate - markSize) / 2).toFixed(1)}" width="${markSize}" height="${markSize}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"/>` : ''}
+  ${textEls}
+</svg>`;
+}
+
 function evictIfNeeded() {
   if (cache.size <= CACHE_MAX_ENTRIES) return;
   const byAccess = [...cache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
@@ -458,6 +525,23 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
   return `${baseUrl}/img?url=${encodeURIComponent(validUrl)}&text=${encodeURIComponent(text)}&color=${color}&v=${RENDER_VERSION}`;
 }
 
+/**
+ * Build the /img/event URL. Carries a second mark so a series logo that fails
+ * to load still leaves the card its sport icon.
+ */
+function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333' }) {
+  if (!mark) return null;
+  const q = [
+    `text=${encodeURIComponent(text || '')}`,
+    `color=${color}`,
+    `mark=${encodeURIComponent(mark)}`
+  ];
+  if (mark2) q.push(`mark2=${encodeURIComponent(mark2)}`);
+  if (kicker) q.push(`kicker=${encodeURIComponent(kicker)}`);
+  q.push(`v=${RENDER_VERSION}`);
+  return `${baseUrl}/img/event?${q.join('&')}`;
+}
+
 function placeholderUrl(baseUrl, text, color) {
   return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '333333'}&v=${RENDER_VERSION}`;
 }
@@ -492,6 +576,8 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '3333
 
 module.exports = {
   svgPlaceholder,
+  svgEvent,
+  eventUrl,
   rasterize,
   sendCard,
   cardColors,

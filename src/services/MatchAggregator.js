@@ -111,6 +111,25 @@ function _tryExtractTeams(title) {
 
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The upstream event numbers an event's sources are keyed by.
+ *
+ * StreamSports99, StreamedPk and cdnlive all quote the same number for the same
+ * fixture, so a shared one is proof two listings are the same event — not a
+ * resemblance between their titles. Five digits or more, to skip the short
+ * ordinals some providers use for channel slots.
+ */
+function _upstreamIds(e) {
+  const out = new Set();
+  const push = (v) => {
+    const m = /(\d{5,})$/.exec(String(v || ''));
+    if (m) out.add(m[1]);
+  };
+  push(e && e.id);
+  if (e && Array.isArray(e.sources)) for (const s of e.sources) push(s && s.id);
+  return out;
+}
+
 class MatchAggregator {
   constructor({ streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, cacheService, yamlProviders }) {
     this.providers = [streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, ...(yamlProviders || [])];
@@ -131,6 +150,10 @@ class MatchAggregator {
       date: Number(e && e.date) || 0,
       teams: _tryExtractTeams(title),
       tokens: new Set(_tokenize(_compoundify(_stripNoise(title)))),
+      // Upstream event numbers, from the ids the providers key their own
+      // sources by. Several providers quote the same number for the same
+      // fixture, which is exact identity rather than a similarity guess.
+      up: _upstreamIds(e),
       norm: _compoundify(_stripNoise(title)).replace(/\s+/g, ' ').trim(),
       digits: (title.match(/\d+/g) || []).sort().join(',')
     };
@@ -145,14 +168,24 @@ class MatchAggregator {
    *     "US Open Court 13" + "Court 7" merged)
    */
   _sameEventPre(p1, p2) {
+    // 0. Same upstream event number — checked before every guard, because it is
+    //    identity rather than similarity. This is what the category guard below
+    //    was blocking: StreamSports99 files NCAA games as `college` while
+    //    StreamedPk files the same fixture as `american_football`, so 14 of the
+    //    18 duplicate groups never reached the title logic at all.
+    if (p1.up && p2.up && p1.up.size && p2.up.size) {
+      for (const u of p1.up) if (p2.up.has(u)) return true;
+    }
     // 1. Category mismatch guard
     if (p1.category && p2.category && p1.category !== 'other' && p2.category !== 'other' && p1.category !== p2.category) {
       return false;
     }
     // 2. Exact ID match
     if (p1.id && p2.id && p1.id === p2.id) return true;
-    // 3. Date window guard — events more than 24h apart are definitely different
-    if (p1.date && p2.date && Math.abs(p1.date - p2.date) > 86400000) return false;
+    // 3. Date window guard. 24h was wide enough to fuse two legs of a series
+    //    played on consecutive days; measured disagreement between providers
+    //    about the same fixture is at most 1.5h, so 2h is generous.
+    if (p1.date && p2.date && Math.abs(p1.date - p2.date) > 7200000) return false;
 
     // 5. Dual-team extraction — if both titles parse as "team1 vs team2", require
     //    BOTH teams to independently fuzzy-match.
@@ -245,7 +278,16 @@ class MatchAggregator {
         if (!existing._titleIsFixture && pre.teams) {
           existing.title = match.title;
           existing._titleIsFixture = true;
-          finalPres[idx] = pre;
+          // Take the better title, but keep the group's own date and identity:
+          // replacing the whole precompute moved the group's date onto whichever
+          // member merged last, which then pushed the next legitimate duplicate
+          // outside the window.
+          finalPres[idx] = { ...finalPres[idx], teams: pre.teams, tokens: pre.tokens, norm: pre.norm, digits: pre.digits };
+        }
+        // A group accumulates its members' upstream ids, so a third listing
+        // matches on any alias the group has already absorbed.
+        if (pre.up && pre.up.size) {
+          for (const u of pre.up) finalPres[idx].up.add(u);
         }
       });
     };

@@ -73,7 +73,14 @@ class StreamSports99Provider extends BaseProvider {
             let status = 'upcoming';
             if (item.status === 'live' || item.status === 'in') status = 'live';
 
-            const matchTime = item.start ? new Date(item.start).getTime() : Date.now();
+            // Upstream sends "2026-09-11 22:40" — UTC, but with no zone marker,
+            // so new Date() reads it as container-local. The container runs
+            // TZ=America/Phoenix, which shifted every kickoff 7 hours late and
+            // pushed this provider's copy of a fixture outside the aggregator's
+            // 24h merge window, so the same game listed twice.
+            const matchTime = item.start
+              ? new Date(String(item.start).trim().replace(' ', 'T') + (/[zZ]|[+-]\d{2}:?\d{2}$/.test(String(item.start)) ? '' : 'Z')).getTime()
+              : Date.now();
 
             // Drop far-out fixtures: they never get channels and resolve to nothing.
             // Live-flagged events are always kept (clock-skew tolerant).

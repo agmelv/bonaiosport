@@ -147,6 +147,27 @@ app.get('/img', async (req, res) => {
   await imageService.sendCard(req, res, svg, 'public, max-age=300');
 });
 
+// /img/event?text=&mark=&mark2=&kicker=&color=  -> badge card for an event that
+// isn't team-vs-team. Same candidate pattern as /img/matchup: the marks are
+// tried in order and the plain name card is what happens when none of them
+// loads, so a dead badge costs the badge and never the card.
+app.get('/img/event', async (req, res) => {
+  const text = req.query.text || 'Live Sports';
+  const color = req.query.color || '333333';
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
+  const M = await firstImage([req.query.mark, req.query.mark2].filter(Boolean));
+  if (!M) {
+    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), 'public, max-age=300');
+  }
+  return imageService.sendCard(
+    req, res,
+    imageService.svgEvent(text, M.entry, color, { kicker: req.query.kicker || '' }),
+    'public, max-age=86400, stale-while-revalidate=604800'
+  );
+});
+
 // /img/matchup?a=&b=&al=&al2=&bl=&bl2=&fb=&color=  -> two-crest "A vs B" card.
 // The crests are fetched server-side and inlined as data URIs: an SVG that
 // referenced them by URL renders blank in clients that block external refs.

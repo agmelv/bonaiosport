@@ -5,6 +5,7 @@ const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const teamLogoService = require('./services/TeamLogoService');
 const homeAway = require('./services/HomeAwayService');
+const eventMarks = require('./services/EventMarkService');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
@@ -225,6 +226,13 @@ function mapMatchToMetaPreview(match, config = {}) {
   } else if (team1Logo) {
     poster = buildImg(team1Logo, posterText, color) || fallbackPoster;
     if (!logo) logo = team1Logo;
+  } else if (!isFixture) {
+    // Not a fixture and no provider artwork: a badge card beats the title alone
+    // on a blank panel. Falls back to exactly that panel when no mark loads.
+    const mark = eventMarks.markFor(match.title, match.category, match.league);
+    if (mark) {
+      poster = imageService.eventUrl(BASE_URL, { text: posterText, color, ...mark }) || poster;
+    }
   }
 
   if (logo) {
