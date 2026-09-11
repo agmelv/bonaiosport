@@ -37,6 +37,16 @@ const TEAM_NAMES = {};
 // one identifier that needs no disambiguation to look a competition up by.
 const CREST_COMPS = {};
 
+// Where each competition sits in the order it was listed. The lists are written
+// most-prominent first, so this doubles as a priority: when two clubs answer to
+// one name, the one from the more prominent competition is the one a viewer
+// almost certainly means.
+const COMP_RANK = new Map();
+function rankOfComp(comp) {
+  if (!COMP_RANK.has(comp)) COMP_RANK.set(comp, COMP_RANK.size);
+  return COMP_RANK.get(comp);
+}
+
 // Each competition's own badge, keyed by the slug above rather than by the
 // numeric id an event uid carries. LEAGUE_LOGOS keys by that id for the
 // per-game path; this is for the path that works the league out from the crests.
@@ -272,10 +282,11 @@ function addTeams(candidates, teams, slug, comp) {
     }
     for (const k of keysFor(team)) {
       if (!candidates.has(k)) {
-        candidates.set(k, { ids: new Set(), logos: new Set(), logo: null, primaries: new Set(), primaryLogo: null });
+        candidates.set(k, { ids: new Set(), logos: new Set(), logo: null, primaries: new Set(), primaryLogo: null, ranked: [] });
       }
       const entry = candidates.get(k);
       entry.ids.add(id);
+      if (logo) entry.ranked.push({ logo, rank: rankOfComp(competition) });
       // Logo-less teams get a unique sentinel so they count as a distinct
       // crest for ambiguity, never as a usable one.
       entry.logos.add(logo || `none:${id}`);
@@ -306,7 +317,15 @@ function finish(candidates) {
       if (entry.logo) map[k] = entry.logo; else dropped++;
     } else if (entry.primaries.size === 1 && entry.primaryLogo) {
       map[k] = entry.primaryLogo;
-    } else dropped++;
+    } else {
+      // Two clubs really do answer to this name. Rather than leave the name
+      // with no crest at all, give it the one from the most prominent
+      // competition that claims it -- "arsenal" is the Premier League club, not
+      // Arsenal Sarandi. Only a tie at the top is still undecidable.
+      const best = entry.ranked.reduce((r, c) => (!r || c.rank < r.rank ? c : r), null);
+      const tied = best ? new Set(entry.ranked.filter(c => c.rank === best.rank).map(c => c.logo)) : null;
+      if (tied && tied.size === 1) map[k] = best.logo; else dropped++;
+    }
   }
   return { map, dropped };
 }

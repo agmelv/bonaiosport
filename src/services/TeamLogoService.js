@@ -344,13 +344,27 @@ function resolveMatchup(match) {
   // opponent settles it. Without one there is no evidence, and league order
   // would just be a coin flip dressed up as an answer, so the table declines
   // and the provider's own URL (which knows which club it meant) gets its turn.
-  const undecidable = side => !common.length && side.length > 1;
+  // Several leagues answering is only a collision when they disagree. Exeter
+  // Chiefs appear in the Premiership, the Champions Cup and the Challenge Cup
+  // and are the same club with the same crest in all three; Richmond is the
+  // NCAA Spiders in one table and the AFL Tigers in another. Comparing the
+  // crests tells those apart, where counting the leagues cannot -- and counting
+  // meant a side lost its crest whenever its opponent had none to share.
+  const undecidable = (side, inSide) => {
+    if (common.length || inSide.length <= 1) return false;
+    const crests = new Set();
+    for (const lg of inSide) {
+      const crest = lookupTeam(side, match.category, [lg]);
+      if (crest) crests.add(crest);
+    }
+    return crests.size > 1;
+  };
   const fromTable = (side, ambiguous) =>
     ambiguous ? null : lookupTeam(side, match.category, scope);
 
   const dedupe = list => [...new Set(list.filter(Boolean))];
-  const aLogos = dedupe([fromTable(a, undecidable(inA)), providedLogo(match.team1)]);
-  const bLogos = dedupe([fromTable(b, undecidable(inB)), providedLogo(match.team2)]);
+  const aLogos = dedupe([fromTable(a, undecidable(a, inA)), providedLogo(match.team1)]);
+  const bLogos = dedupe([fromTable(b, undecidable(b, inB)), providedLogo(match.team2)]);
 
   return {
     a,
