@@ -535,7 +535,20 @@ const { safeFetch: _safeFetch } = require('./impitClient');
 // fetches. Key = url|referer|origin. Only bodies containing #EXT are cached.
 const MANIFEST_TTL_MS = 3000;
 const MANIFEST_CACHE_MAX = 100;
+// A dead stream deserves 15 s of quiet. A stream that blinked deserves none:
+// hls.js and ExoPlayer both give a playlist about three retries over a few
+// seconds, so a 15 s refusal spends the player's whole budget and the session
+// dies from a blip the upstream has already recovered from.
 const MANIFEST_NEGATIVE_TTL_MS = 15 * 1000;
+const MANIFEST_TRANSIENT_TTL_MS = 2000;
+
+// How long a body stays usable as a stand-in after its own TTL has passed. A
+// live player tolerates a playlist a segment or two old; it does not tolerate a
+// 502.
+const MANIFEST_STALE_MS = 15 * 1000;
+
+// Consecutive failures per key, so one is treated as a blip and two as a fault.
+const manifestFailures = new Map();
 const manifestCache = new Map();      // key -> { body, expiresAt, lastAccess }
 const manifestInFlight = new Map();   // key -> Promise (coalesced upstream fetch)
 
@@ -547,16 +560,30 @@ function manifestCacheGet(key) {
   if (!e) return null;
   const now = Date.now();
   if (now > e.expiresAt) {
-    manifestCache.delete(key);
+    // Expired, but a positive body is kept a little longer as a stand-in for
+    // the failure path below. Eviction still bounds the map.
+    if (e.negative || !e.body || now > e.expiresAt + MANIFEST_STALE_MS) {
+      manifestCache.delete(key);
+      return null;
+    }
+    e.lastAccess = now;
     return null;
   }
   e.lastAccess = now;
   return e;
 }
 
+/** The last good body for this key, if it is recent enough to still play. */
+function manifestLastGood(key) {
+  const e = manifestCache.get(key);
+  if (!e || e.negative || !e.body) return null;
+  return Date.now() <= e.expiresAt + MANIFEST_STALE_MS ? e.body : null;
+}
+
 function manifestCacheSet(key, body) {
   const now = Date.now();
   manifestCache.set(key, { body, expiresAt: now + MANIFEST_TTL_MS, lastAccess: now });
+  manifestFailures.delete(key);
   evictManifestCacheIfNeeded();
 }
 
@@ -570,9 +597,9 @@ function evictManifestCacheIfNeeded() {
 
 // Negative caching: dead upstreams (non-m3u8 body / fetch failure) are stored
 // briefly so player polls stop re-fetching them until the entry expires.
-function manifestCacheSetNegative(key, status, body) {
+function manifestCacheSetNegative(key, status, body, ttlMs = MANIFEST_NEGATIVE_TTL_MS) {
   const now = Date.now();
-  manifestCache.set(key, { negative: true, status, body, expiresAt: now + MANIFEST_NEGATIVE_TTL_MS, lastAccess: now });
+  manifestCache.set(key, { negative: true, status, body, expiresAt: now + ttlMs, lastAccess: now });
   evictManifestCacheIfNeeded();
 }
 
@@ -586,7 +613,10 @@ async function fetchUpstreamManifest(targetUrl, referer, origin) {
   };
   // _safeFetch: impit (browser TLS fingerprint) with automatic undici fallback.
   // A hard 10 s timeout ensures a hung upstream can never hold the viewer's poll.
-  const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000 });
+  // A live playlist that takes longer than this is already useless to the player,
+  // which polls every few seconds. The budget now covers the whole call rather
+  // than each attempt, so this is the real ceiling.
+  const result = await _safeFetch(targetUrl, { headers, timeoutMs: 4000 });
   if (!result.ok) throw new Error(`HTTP ${result.status}`);
   return await result.text();
 }
@@ -609,6 +639,7 @@ app.get('/api/manifest', async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Manifest-Cache', 'HIT');
+    res.setHeader('Cache-Control', 'no-store');
     return res.send(entry.body);
   }
 
@@ -666,16 +697,43 @@ app.get('/api/manifest', async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Manifest-Cache', 'MISS');
+    // A live playlist is a different document every few seconds. Without this a
+    // cache between here and the player is free to guess, and a guess means the
+    // player re-reads a playlist it already has and finds nothing to play.
+    res.setHeader('Cache-Control', 'no-store');
     res.send(finalBody);
   } catch (err) {
-    // Preserve the old 404 semantics so players can fail over to another stream.
-    // Failures are negatively cached (15 s) so player polls stop hammering the dead upstream.
+    // A non-m3u8 body is a definitive answer -- the stream is gone, not
+    // stumbling -- so it keeps the full quiet period and the 404 that lets a
+    // player fail over to another source.
     if (err.message === 'Upstream returned non-m3u8 body') {
       manifestCacheSetNegative(cacheKey, 404, 'Stream not found or expired');
       return res.status(404).send('Stream not found or expired');
     }
+
+    // Anything else -- a reset socket, a 5xx, a timeout -- may well be a blip.
+    // Serving the last good playlist keeps the session alive across it; the
+    // player re-reads a moment later and carries on.
+    const stale = manifestLastGood(cacheKey);
+    if (stale) {
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Manifest-Cache', 'STALE');
+      return res.send(stale);
+    }
+
     console.error('[ManifestProxy] Error:', err.message);
-    manifestCacheSetNegative(cacheKey, 502, 'Manifest proxy error: ' + err.message);
+    // First failure with nothing to fall back on is refused briefly so the next
+    // poll actually retries the upstream; a second consecutive one is treated
+    // as a fault and earns the full quiet period.
+    const fails = (manifestFailures.get(cacheKey) || 0) + 1;
+    manifestFailures.set(cacheKey, fails);
+    if (manifestFailures.size > MANIFEST_CACHE_MAX * 2) manifestFailures.clear();
+    manifestCacheSetNegative(
+      cacheKey, 502, 'Manifest proxy error: ' + err.message,
+      fails >= 2 ? MANIFEST_NEGATIVE_TTL_MS : MANIFEST_TRANSIENT_TTL_MS
+    );
     return res.status(502).send('Manifest proxy error: ' + err.message);
   }
 });
