@@ -127,6 +127,23 @@
       gap: 12px;
     }
 
+    .hint { color: #8b8f95; font-size: 12px; margin: 0 0 10px; line-height: 1.45; }
+    .source-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .source-row .checkbox-label { flex: 1; margin: 0; }
+    .reorder { display: flex; flex-direction: column; gap: 2px; }
+    .reorder button {
+      background: #2a2a2e; color: #c9ced4; border: 1px solid #3a3a40; border-radius: 4px;
+      width: 26px; height: 17px; line-height: 1; font-size: 9px; cursor: pointer; padding: 0;
+    }
+    .reorder button:hover { background: #3a3a42; color: #fff; }
+    .reorder button:disabled { opacity: 0.3; cursor: default; }
+    .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toggle {
+      flex: 1; min-width: 150px; background: #1e1e22; color: #c9ced4; border: 1px solid #3a3a40;
+      border-radius: 8px; padding: 11px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .toggle:hover { background: #26262c; }
+    .toggle.active { background: #e50914; border-color: #e50914; color: #fff; }
     .checkbox-label {
       display: flex;
       align-items: center;
@@ -284,15 +301,25 @@
 
     <div class="section">
       <h3>Streaming Sources</h3>
-      <div class="sports-grid" id="sourcesGrid">
-        <label class="checkbox-label active"><input type="checkbox" value="streamfree" checked> 🌐 StreamFree</label>
-        <label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> 📺 Streamed.pk</label>
-        <label class="checkbox-label active"><input type="checkbox" value="sportyhunter" checked> 📺 SportyHunter</label>
-        <label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label>
-        <label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamic" checked> 🌐 Streamic</label>
+      <p class="hint">Tick the sources to use, and order them with the arrows — the ones nearer the top are tried first.</p>
+      <div id="sourcesGrid">
+        <div class="source-row" data-value="streamfree"><label class="checkbox-label active"><input type="checkbox" value="streamfree" checked> 🌐 StreamFree</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="timstreams"><label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="streamedpk"><label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> 📺 Streamed.pk</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="sportyhunter"><label class="checkbox-label active"><input type="checkbox" value="sportyhunter" checked> 📺 SportyHunter</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="watchfooty"><label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="cdnlive"><label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="streamsports99"><label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="streamic"><label class="checkbox-label active"><input type="checkbox" value="streamic" checked> 🌐 Streamic</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Stream Order</h3>
+      <p class="hint">Direct streams play in the app. Web streams open a browser.</p>
+      <div class="toggle-row" id="streamOrder">
+        <button type="button" class="toggle active" data-value="direct">⚡ Direct streams first</button>
+        <button type="button" class="toggle" data-value="web">🌐 Web streams first</button>
       </div>
     </div>
 
@@ -321,7 +348,47 @@
     const copyBtn = document.getElementById('copyBtn');
     const input = document.getElementById('teams');
     const checkboxes = document.querySelectorAll('#sportsGrid input[type="checkbox"]');
-    const sourceCheckboxes = document.querySelectorAll('#sourcesGrid input[type="checkbox"]');
+    const sourcesGrid = document.getElementById('sourcesGrid');
+    const streamOrderRow = document.getElementById('streamOrder');
+    // Re-queried on use: reordering moves rows, so a snapshot taken at load
+    // would report the original order for the rest of the session.
+    const sourceRows = () => Array.from(sourcesGrid.querySelectorAll('.source-row'));
+    const sourceCheckboxes = sourcesGrid.querySelectorAll('input[type="checkbox"]');
+
+    // Arrows move a row among its siblings; the resulting DOM order IS the
+    // preference, so nothing else has to track it.
+    function refreshArrows() {
+      const rows = sourceRows();
+      rows.forEach((row, i) => {
+        row.querySelector('.up').disabled = i === 0;
+        row.querySelector('.down').disabled = i === rows.length - 1;
+      });
+    }
+    sourcesGrid.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.preventDefault();
+      const row = btn.closest('.source-row');
+      if (btn.classList.contains('up') && row.previousElementSibling) {
+        sourcesGrid.insertBefore(row, row.previousElementSibling);
+      } else if (btn.classList.contains('down') && row.nextElementSibling) {
+        sourcesGrid.insertBefore(row.nextElementSibling, row);
+      }
+      refreshArrows();
+      updateLink();
+    });
+
+    streamOrderRow.addEventListener('click', (e) => {
+      const btn = e.target.closest('.toggle');
+      if (!btn) return;
+      e.preventDefault();
+      streamOrderRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t === btn));
+      updateLink();
+    });
+    const streamOrderValue = () => {
+      const active = streamOrderRow.querySelector('.toggle.active');
+      return active ? active.dataset.value : 'direct';
+    };
     const timezoneSelect = document.getElementById('timezone');
 
     // Attempt to load existing config from URL
@@ -421,6 +488,25 @@
       }
     }
 
+    const DEFAULT_SOURCE_ORDER = sourceRows().map(row => row.dataset.value);
+
+    if (existingConfig.sourceOrder) {
+      // Re-seat the rows in the saved order; anything not mentioned keeps its
+      // default place at the end.
+      for (const value of String(existingConfig.sourceOrder).split(',')) {
+        const row = sourcesGrid.querySelector('.source-row[data-value="' + value + '"]');
+        if (row) sourcesGrid.appendChild(row);
+      }
+      sourceRows().forEach(row => {
+        if (!String(existingConfig.sourceOrder).split(',').includes(row.dataset.value)) sourcesGrid.appendChild(row);
+      });
+    }
+    refreshArrows();
+
+    if (existingConfig.streamOrder === 'web') {
+      streamOrderRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t.dataset.value === 'web'));
+    }
+
     if (existingConfig.sources) {
       if (existingConfig.sources === 'none') {
         sourceCheckboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
@@ -439,7 +525,14 @@
     function updateLink() {
       const teams = input.value.trim();
       const selectedSports = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
-      const selectedSources = Array.from(sourceCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+      // DOM order is the user's order, so read the rows rather than the
+      // original checkbox list.
+      const orderedRows = sourceRows();
+      const selectedSources = orderedRows
+        .map(row => row.querySelector('input[type="checkbox"]'))
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+      const orderedValues = orderedRows.map(row => row.dataset.value);
       const tz = timezoneSelect.value || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
       let manifestUrl = window.location.origin + '/manifest.json';
@@ -457,6 +550,13 @@
         config.sources = selectedSources.join(',');
         if (config.sources === '') config.sources = 'none';
       }
+
+      // Only carried when it actually differs from the built-in order, so an
+      // untouched install keeps producing the short URL it did before.
+      if (orderedValues.join(',') !== DEFAULT_SOURCE_ORDER.join(',')) {
+        config.sourceOrder = orderedValues.join(',');
+      }
+      if (streamOrderValue() === 'web') config.streamOrder = 'web';
 
       if (Object.keys(config).length > 0) {
         const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));

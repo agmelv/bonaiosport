@@ -3,7 +3,30 @@ const container = require('./container');
 // Source selection (shared by handleStream and prewarmMatch)
 function selectSources(matchSources, config) {
   const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'streamfree': 8, 'timstreams': 9, 'sportyhunter': 12, 'streamsports': 13, 'iptv-org': 14, 'embedindia': 15 };
+
+  // A user-defined order, set in the configure page, outranks the built-in
+  // priorities entirely — it is an explicit preference, where SOURCE_PRIORITY
+  // is only a guess at which providers behave. Sources the user never ordered
+  // keep their built-in ranking behind the ones they did.
+  const userOrder = config && typeof config.sourceOrder === 'string' && config.sourceOrder
+    ? config.sourceOrder.split(',').map(s => s.trim()).filter(Boolean)
+    : null;
+  const userRank = (src) => {
+    if (!userOrder) return null;
+    const i = userOrder.indexOf(src);
+    return i === -1 ? null : i;
+  };
+
   const sortedSources = [...matchSources].sort((a, b) => {
+    if (userOrder) {
+      const ra = userRank(a.source);
+      const rb = userRank(b.source);
+      if (ra !== null || rb !== null) {
+        if (ra === null) return 1;         // unordered sources sit behind ordered ones
+        if (rb === null) return -1;
+        if (ra !== rb) return ra - rb;
+      }
+    }
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
     const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'streamfree', 'timstreams', 'sportyhunter', 'streamsports', 'iptv-org'].includes(src) ? 99 : 1.5);
@@ -413,11 +436,19 @@ async function handleStream(type, id, config) {
     }
   });
 
-  // Sort streams: Direct streams first, then by score descending
+  // Sort streams by kind first, then by score descending.
+  //
+  // "Direct" means the app can play it itself; "web" means it hands off to a
+  // browser. Direct first is the default because it is the better experience,
+  // but a user whose direct streams buffer on their setup can invert it from
+  // the configure page. Kind is read off the stream itself — a direct stream
+  // has a url, a web one has an externalUrl — rather than off its display
+  // name, which is cosmetic and has already changed once.
+  const webFirst = config && config.streamOrder === 'web';
   streams.sort((a, b) => {
-    const aIsDirect = a.name === '⚡ Direct Stream' ? 1 : 0;
-    const bIsDirect = b.name === '⚡ Direct Stream' ? 1 : 0;
-    if (aIsDirect !== bIsDirect) return bIsDirect - aIsDirect;
+    const aDirect = a.url ? 1 : 0;
+    const bDirect = b.url ? 1 : 0;
+    if (aDirect !== bDirect) return webFirst ? aDirect - bDirect : bDirect - aDirect;
     return b.score - a.score;
   });
 
