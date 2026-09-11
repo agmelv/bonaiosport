@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nuvio Live Sports — Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0b0d; --panel: #151518; --line: #26262c;
+    --text: #f2f2f4; --dim: #9a9aa4; --accent: #e50914; --ok: #3fb950; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  header a { color: var(--dim); text-decoration: none; font-size: 14px; }
+  header a:hover { color: var(--text); }
+  .spacer { flex: 1; }
+  main { padding: 24px; max-width: 1000px; margin: 0 auto; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px;
+  }
+  .card h2 {
+    margin: 0 0 14px; font-size: 12px; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--dim); font-weight: 600;
+  }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+  .row span:first-child { color: var(--dim); }
+  .big { font-size: 30px; font-weight: 650; letter-spacing: -.02em; }
+  .bar { height: 7px; border-radius: 4px; background: #222228; overflow: hidden; margin-top: 10px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  button {
+    font: inherit; font-size: 14px; padding: 9px 15px; border-radius: 9px; cursor: pointer;
+    background: #1f1f24; color: var(--text); border: 1px solid var(--line);
+  }
+  button:hover:not(:disabled) { background: #2a2a31; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.danger { border-color: #5a2326; color: #ff8d90; }
+  button.danger:hover:not(:disabled) { background: #2a1618; }
+  .note {
+    margin-top: 18px; padding: 13px 15px; border-radius: 10px;
+    background: #1c1a12; border: 1px solid #3d3218; color: #e5c07b; font-size: 13.5px;
+  }
+  .note code { background: #241f14; padding: 1px 6px; border-radius: 5px; }
+  #flash { margin-top: 16px; font-size: 14px; min-height: 20px; color: var(--ok); }
+  #flash.err { color: #ff8d90; }
+  .dim { color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚙️ Live Sports — Dashboard</h1>
+  <div class="spacer"></div>
+  <a href="/">← Back to catalog</a>
+</header>
+
+<main>
+  <div class="grid">
+    <div class="card">
+      <h2>Card cache</h2>
+      <div class="big" id="cardEntries">–</div>
+      <div class="bar"><i id="cardBar" style="width:0"></i></div>
+      <div class="row"><span>Hit rate</span><b id="cardHit">–</b></div>
+      <div class="row"><span>Size</span><b id="cardBytes">–</b></div>
+      <div class="row"><span>JPEG quality</span><b id="quality">–</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Upstream images</h2>
+      <div class="big" id="upEntries">–</div>
+      <div class="row"><span>Hit rate</span><b id="upHit">–</b></div>
+      <div class="row"><span>Size</span><b id="upBytes">–</b></div>
+      <div class="row"><span>Known-bad URLs</span><b id="negs">–</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Warming</h2>
+      <div class="big" id="warmState">–</div>
+      <div class="bar"><i id="warmBar" style="width:0"></i></div>
+      <div class="row"><span>Rendered</span><b id="warmDone">–</b></div>
+      <div class="row"><span>Errors</span><b id="warmErrors">–</b></div>
+      <div class="row"><span>Last run</span><b id="warmLast">–</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Process</h2>
+      <div class="big" id="matches">–</div>
+      <div class="row"><span>Events cached</span><b id="matches2">–</b></div>
+      <div class="row"><span>Memory</span><b id="mem">–</b></div>
+      <div class="row"><span>Uptime</span><b id="uptime">–</b></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="warmBtn">Warm cards now</button>
+    <button id="cancelBtn">Stop warming</button>
+    <button id="clearCards" class="danger">Clear card cache</button>
+    <button id="clearAll" class="danger">Clear everything</button>
+  </div>
+
+  <div id="flash"></div>
+  <div class="note" id="lockNote" hidden></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const bytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+  : n >= 1024 ? Math.round(n / 1024) + ' KB' : (n || 0) + ' B';
+const secs = n => n >= 86400 ? Math.floor(n / 86400) + 'd ' + Math.floor((n % 86400) / 3600) + 'h'
+  : n >= 3600 ? Math.floor(n / 3600) + 'h ' + Math.floor((n % 3600) / 60) + 'm'
+  : n >= 60 ? Math.floor(n / 60) + 'm' : (n || 0) + 's';
+
+// A token in the address bar is carried through to the actions, so the page
+// works from outside the house when the server is set up to want one.
+const token = new URLSearchParams(location.search).get('token');
+let admin = false;
+
+function flash(msg, isError) {
+  const el = $('flash');
+  el.textContent = msg;
+  el.className = isError ? 'err' : '';
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 6000);
+}
+
+async function refresh() {
+  let d;
+  try {
+    d = await (await fetch('/api/cache/stats')).json();
+  } catch (err) {
+    return flash('Cannot reach the addon: ' + err.message, true);
+  }
+
+  const c = d.images.cards, u = d.images.upstream, w = d.warmer;
+  $('cardEntries').textContent = c.entries.toLocaleString() + ' / ' + c.max.toLocaleString();
+  $('cardBar').style.width = Math.min(100, (100 * c.entries) / c.max) + '%';
+  $('cardHit').textContent = c.hitRate === null ? '–' : c.hitRate + '%';
+  $('cardBytes').textContent = bytes(c.bytes);
+  $('quality').textContent = 'q' + d.images.quality;
+
+  $('upEntries').textContent = u.entries.toLocaleString();
+  $('upHit').textContent = u.hitRate === null ? '–' : u.hitRate + '%';
+  $('upBytes').textContent = bytes(u.bytes);
+  $('negs').textContent = d.images.negatives.toLocaleString();
+
+  $('warmState').textContent = w.running ? (w.percent ?? 0) + '%' : (w.finishedAt ? 'Idle' : 'Not yet run');
+  $('warmBar').style.width = (w.running ? (w.percent || 0) : 0) + '%';
+  $('warmDone').textContent = w.total ? w.done.toLocaleString() + ' / ' + w.total.toLocaleString() : '–';
+  $('warmErrors').textContent = w.errors ? w.errors.toLocaleString() : '0';
+  $('warmLast').textContent = w.lastRunMs ? Math.round(w.lastRunMs / 1000) + 's' : '–';
+
+  $('matches').textContent = d.matches.toLocaleString();
+  $('matches2').textContent = d.matches.toLocaleString();
+  $('mem').textContent = d.memoryMb + ' MB';
+  $('uptime').textContent = secs(d.uptimeSeconds);
+
+  admin = d.admin;
+  for (const id of ['warmBtn', 'cancelBtn', 'clearCards', 'clearAll']) $(id).disabled = !admin;
+  $('cancelBtn').disabled = !admin || !w.running;
+  $('warmBtn').disabled = !admin || w.running;
+
+  const note = $('lockNote');
+  if (admin) {
+    note.hidden = true;
+  } else {
+    note.hidden = false;
+    note.innerHTML = d.tokenRequired
+      ? 'Read-only: this server wants a token. Append <code>?token=…</code> to the address to unlock the buttons.'
+      : 'Read-only: changes are limited to the local network. To act from elsewhere, set <code>ADMIN_TOKEN</code> on the container and open this page with <code>?token=…</code>.';
+  }
+}
+
+async function act(path, label) {
+  const url = path + (token ? (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : '');
+  try {
+    const res = await fetch(url, { method: 'POST' });
+    const body = await res.json();
+    flash(res.ok ? label : (body.error || 'Refused'), !res.ok);
+  } catch (err) {
+    flash(err.message, true);
+  }
+  refresh();
+}
+
+$('warmBtn').onclick = () => act('/api/cache/warm', 'Warming started — it runs slowly on purpose.');
+$('cancelBtn').onclick = () => act('/api/cache/warm/cancel', 'Warming stopped.');
+$('clearCards').onclick = () => act('/api/cache/clear?what=cards', 'Card cache cleared.');
+$('clearAll').onclick = () => {
+  if (confirm('Clear every cache? The next browse will be slow while cards are rendered again.')) {
+    act('/api/cache/clear?what=all', 'All caches cleared.');
+  }
+};
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

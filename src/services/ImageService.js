@@ -333,6 +333,10 @@ const rasterCache = new Map();
 // 450 MB on a 7 GB host.
 const RASTER_CACHE_MAX = 1200;
 
+// Plain counters, for the dashboard. A hit rate that is falling is the signal
+// that the cache is too small for the catalog again.
+const stats = { rasterHits: 0, rasterMisses: 0, fetchHits: 0, fetchMisses: 0 };
+
 async function rasterize(svg) {
   const key = crypto.createHash('sha1').update(svg).digest('base64');
   const hit = rasterCache.get(key);
@@ -340,8 +344,10 @@ async function rasterize(svg) {
     // Refresh recency: a card on screen now is the one worth keeping.
     rasterCache.delete(key);
     rasterCache.set(key, hit);
+    stats.rasterHits++;
     return hit;
   }
+  stats.rasterMisses++;
   const buf = await sharp(Buffer.from(svg))
     .jpeg({ quality: RASTER_QUALITY })
     .toBuffer();
@@ -505,9 +511,10 @@ async function getImage(rawUrl) {
 
   const hit = cache.get(url);
   if (hit) {
-    if (now < hit.expiresAt) { hit.lastAccess = now; return hit; }
+    if (now < hit.expiresAt) { hit.lastAccess = now; stats.fetchHits++; return hit; }
     cache.delete(url);
   }
+  stats.fetchMisses++;
 
   const pending = inFlight.get(url);
   if (pending) return pending;
@@ -628,7 +635,39 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '3333
   return `${baseUrl}/img/matchup?${q.join('&')}`;
 }
 
+/** What the caches hold, for the dashboard. */
+function cacheStats() {
+  let rasterBytes = 0;
+  for (const buf of rasterCache.values()) rasterBytes += buf.length;
+  let fetchBytes = 0;
+  for (const entry of cache.values()) fetchBytes += (entry.buffer ? entry.buffer.length : 0);
+  const rate = (h, m) => (h + m ? Math.round((100 * h) / (h + m)) : null);
+  return {
+    cards: { entries: rasterCache.size, max: RASTER_CACHE_MAX, bytes: rasterBytes,
+      hits: stats.rasterHits, misses: stats.rasterMisses, hitRate: rate(stats.rasterHits, stats.rasterMisses) },
+    upstream: { entries: cache.size, bytes: fetchBytes,
+      hits: stats.fetchHits, misses: stats.fetchMisses, hitRate: rate(stats.fetchHits, stats.fetchMisses) },
+    negatives: negatives.size,
+    quality: RASTER_QUALITY
+  };
+}
+
+/**
+ * Empty the caches. `what` is 'cards', 'upstream' or 'all'. Returns what went.
+ */
+function clearCache(what = 'all') {
+  const before = { cards: rasterCache.size, upstream: cache.size, negatives: negatives.size };
+  if (what === 'cards' || what === 'all') rasterCache.clear();
+  if (what === 'upstream' || what === 'all') { cache.clear(); negatives.clear(); }
+  if (what === 'all') {
+    stats.rasterHits = stats.rasterMisses = stats.fetchHits = stats.fetchMisses = 0;
+  }
+  return before;
+}
+
 module.exports = {
+  cacheStats,
+  clearCache,
   svgPlaceholder,
   svgEvent,
   eventUrl,

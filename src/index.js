@@ -20,6 +20,8 @@ const child_process = require('child_process');
 const path = require('path');
 
 const { builder } = require('./manifest');
+const crypto = require('crypto');
+const cardWarmer = require('./services/CardWarmer');
 const { handleCatalog, handleMeta } = require('./catalog');
 const { handleStream } = require('./streams');
 const { PORT, BASE_URL, getRequestBaseUrl } = require('./config');
@@ -92,11 +94,98 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
+/**
+ * Warm the cards for every sport tab. Runs at boot and after a catalog refresh,
+ * so the first person to open a tab finds the work already done.
+ */
+function startWarm() {
+  return cardWarmer.warm(async () => {
+    const { manifest } = require('./manifest');
+    const ids = (manifest.catalogs || []).map(c => c.id).filter(id => !/_(teams|upcoming)$/.test(id));
+    const posters = [];
+    const logos = [];
+    for (const id of ids) {
+      try {
+        const { metas } = await handleCatalog('tv', id, {}, {});
+        const part = cardWarmer.urlsFrom(metas);
+        posters.push(...part.posters);
+        logos.push(...part.logos);
+      } catch {
+        // One tab failing to enumerate costs that tab's warmth, nothing else.
+      }
+    }
+    return { posters, logos };
+  }).catch(err => console.error('[CardWarmer]', err.message));
+}
+
 // Serve the web debugger UI and Configuration Page
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'dashboard.html'));
+});
+
+/**
+ * Anything that changes state is guarded. This addon is meant to be reachable
+ * from the internet -- that is how a phone gets at it -- so an unguarded button
+ * that empties a cache or restarts a sync is a button anyone can press, all day.
+ *
+ * With ADMIN_TOKEN set, the token is the key. Without one, only callers on the
+ * loopback or a private network may act, which covers a LAN and a reverse proxy
+ * on the same host while leaving the open internet with a read-only view.
+ */
+function isAdmin(req) {
+  const token = process.env.ADMIN_TOKEN;
+  if (token) {
+    const given = req.get('x-admin-token') || req.query.token || '';
+    return given.length === token.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(token));
+  }
+  const ip = String(req.ip || '').replace(/^::ffff:/, '');
+  return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(ip) || ip === '::1' || ip === '';
+}
+
+function requireAdmin(req, res) {
+  if (isAdmin(req)) return true;
+  res.status(403).json({
+    error: 'This action is limited to the local network. Set ADMIN_TOKEN on the '
+      + 'container and pass it as ?token= to use it from anywhere.'
+  });
+  return false;
+}
+
+app.get('/api/cache/stats', (req, res) => {
+  res.json({
+    images: imageService.cacheStats(),
+    warmer: cardWarmer.status(),
+    matches: container.resolve('cacheService').getMatches().length,
+    admin: isAdmin(req),
+    tokenRequired: !!process.env.ADMIN_TOKEN,
+    uptimeSeconds: Math.round(process.uptime()),
+    memoryMb: Math.round(process.memoryUsage().rss / 1048576)
+  });
+});
+
+app.post('/api/cache/clear', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const what = String(req.query.what || 'all');
+  res.json({ cleared: imageService.clearCache(what), what });
+});
+
+app.post('/api/cache/warm', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  if (cardWarmer.status().running) return res.json({ started: false, reason: 'already running', warmer: cardWarmer.status() });
+  startWarm();
+  res.json({ started: true, warmer: cardWarmer.status() });
+});
+
+app.post('/api/cache/warm/cancel', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  cardWarmer.cancel();
+  res.json({ cancelled: true, warmer: cardWarmer.status() });
 });
 
 app.get(['/configure', '/:config/configure'], (req, res) => {
@@ -1104,6 +1193,18 @@ app.listen(PORT, BIND_HOST, () => {
   console.log(`║  ${(BASE_URL + '/manifest.json').padEnd(52)}║`);
   console.log('╚══════════════════════════════════════════════════════╝');
   console.log('');
+
+  // Make the cards before anyone asks. Delayed so the providers have answered
+  // and the catalog is real: warming an empty catalog just warms nothing.
+  setTimeout(() => {
+    console.log('[CardWarmer] warming catalog art in the background');
+    startWarm();
+  }, 45000);
+
+  // And again on a long cycle, to pick up fixtures that have since appeared.
+  setInterval(() => {
+    if (!cardWarmer.status().running) startWarm();
+  }, 6 * 60 * 60 * 1000);
 });
 
 
