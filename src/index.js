@@ -129,13 +129,45 @@ function startWarm() {
 }
 
 // Serve the web debugger UI and Configuration Page
+app.use(guardStaticPages);
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
 app.get('/', requirePage, (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-app.get('/dashboard', (req, res) => {
+app.get('/login', (req, res) => {
+  if (isAuthed(req)) return res.redirect('/');
+  res.sendFile(path.join(__dirname, '..', 'public', 'login.html'));
+});
+
+/** Exchange AUTH_KEY for the site cookie. */
+app.post('/api/login', (req, res) => {
+  const key = process.env.AUTH_KEY;
+  if (!key) return res.json({ authenticated: true, keyRequired: false });
+  if (throttled(req)) return res.status(429).json({ error: 'Too many failed sign-ins. Wait a few minutes.' });
+  if (!isAuthed(req)) {
+    noteFailure(req);
+    return res.status(403).json({ error: 'That password was not accepted.' });
+  }
+  FAILURES.delete(failureKey(req));
+  res.cookie(AUTH_COOKIE, mintTicket(key), {
+    httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 30 * 24 * 3600 * 1000
+  });
+  res.json({ authenticated: true, keyRequired: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  res.clearCookie(AUTH_COOKIE);
+  res.clearCookie(ADMIN_COOKIE);
+  res.json({ authenticated: false });
+});
+
+app.get('/api/site/auth', (req, res) => {
+  res.json({ authenticated: isAuthed(req), keyRequired: !!process.env.AUTH_KEY });
+});
+
+app.get('/dashboard', requirePage, (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'dashboard.html'));
 });
 
@@ -210,12 +242,16 @@ function cookieValue(req, name) {
   return '';
 }
 
-const TICKET_COOKIE = 'ls_admin';
+// Two doors with two keys. AUTH_KEY opens the site -- the catalog page and the
+// configure page. ADMIN_TOKEN opens the dashboard and the buttons that change
+// state. Someone you let in to browse is not thereby allowed to empty a cache.
+const AUTH_COOKIE = 'ls_auth';
+const ADMIN_COOKIE = 'ls_admin';
 
 function isAdmin(req) {
   const token = process.env.ADMIN_TOKEN;
   if (token) {
-    if (ticketValid(cookieValue(req, TICKET_COOKIE), token)) return true;
+    if (ticketValid(cookieValue(req, ADMIN_COOKIE), token)) return true;
     const given = req.get('x-admin-token') || req.query.token || '';
     // Compare as bytes. A password with any character outside ASCII has a byte
     // length that differs from its string length, and timingSafeEqual throws on
@@ -266,7 +302,7 @@ app.post('/api/cache/login', (req, res) => {
   const token = process.env.ADMIN_TOKEN;
   if (!token) return res.json({ authenticated: isAdmin(req), tokenRequired: false });
   if (!requireAdmin(req, res)) return;
-  res.cookie(TICKET_COOKIE, mintTicket(token), {
+  res.cookie(ADMIN_COOKIE, mintTicket(token), {
     httpOnly: true,      // script cannot read it, so a page flaw cannot leak it
     sameSite: 'lax',
     secure: req.secure,  // https here, so it never travels in the clear
@@ -276,20 +312,44 @@ app.post('/api/cache/login', (req, res) => {
 });
 
 app.post('/api/cache/logout', (req, res) => {
-  res.clearCookie(TICKET_COOKIE);
+  res.clearCookie(ADMIN_COOKIE);
   res.json({ authenticated: false });
 });
 
+/** May this caller see the site at all? The admin key opens every door. */
+function isAuthed(req) {
+  const key = process.env.AUTH_KEY;
+  if (!key) return true;                       // no site key configured: open
+  if (isAdmin(req)) return true;               // admin implies access
+  if (ticketValid(cookieValue(req, AUTH_COOKIE), key)) return true;
+  const given = req.get('x-auth-key') || req.query.key || '';
+  const a = Buffer.from(String(given), 'utf8');
+  const b = Buffer.from(key, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 /**
- * The pages a person reads are behind the password; the endpoints an addon
- * reads cannot be, because Nuvio and AIOStreams have no way to sign in and the
- * catalog would simply stop working. What stays open is sports listings and
- * artwork -- no settings, no state, nothing about the household.
+ * The pages a person reads are behind AUTH_KEY; the endpoints an addon reads
+ * cannot be, because Nuvio and AIOStreams have no way to sign in and the catalog
+ * would simply stop working. What stays open is sports listings and artwork --
+ * no settings, no state, nothing about the household.
  */
 function requirePage(req, res, next) {
-  if (!process.env.ADMIN_TOKEN || isAdmin(req)) return next();
-  if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'Sign in to the dashboard first.' });
-  return res.redirect('/dashboard');
+  if (isAuthed(req)) return next();
+  if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'Sign in first.' });
+  return res.redirect('/login');
+}
+
+/**
+ * express.static sits in front of these routes and would hand out the very
+ * files they guard -- /index.html reaches the page that /  refuses. Anything
+ * ending .html goes through the site gate first, except the login page itself,
+ * which has to be reachable by someone who cannot yet get in.
+ */
+function guardStaticPages(req, res, next) {
+  if (!/\.html?$/i.test(req.path)) return next();
+  if (/^\/login\.html?$/i.test(req.path)) return next();
+  return requirePage(req, res, next);
 }
 
 app.get('/api/cache/stats', (req, res) => {
