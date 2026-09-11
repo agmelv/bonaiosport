@@ -268,8 +268,12 @@ function mapMatchToMetaPreview(match, config = {}) {
   // is the more specific answer and wins.
   const collegeBadge = match.category === 'college' ? sportBadge : null;
 
-  let logo = collegeBadge || bundledBadge || leagueLogo || competitionBadge || sportBadge
-    || matchLogo || team1Logo || channelLogo || null;
+  // A channel's own logo outranks its sport's mark: NFL Network is more use in
+  // the corner than a generic football. It sat last while the sport mark only
+  // existed for a couple of categories, and giving every sport one put a
+  // pictogram in front of all nine channels' branding.
+  let logo = collegeBadge || bundledBadge || leagueLogo || competitionBadge || channelLogo
+    || sportBadge || matchLogo || team1Logo || null;
 
   // Matchup card from the resolved crest candidates. The provider's poster
   // rides along as the fallback, so /img/matchup can degrade to it when a
