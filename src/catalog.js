@@ -61,6 +61,9 @@ function formatKickoff(dateObj, timeZone) {
  * provider, merge guard and filter agrees on and does not change; this is only
  * what the reader sees, and it should match the tab the card sits in.
  */
+// Competitions worth naming on the card in place of the broad category.
+const COMPETITION_LABEL = { nfl: 'NFL', cfl: 'CFL', afl: 'AFL' };
+
 const CATEGORY_LABEL = {
   american_football: 'FOOTBALL',
   // Soccer's internal name is `football`, so once the gridiron tab is called
@@ -69,7 +72,9 @@ const CATEGORY_LABEL = {
   football: 'SOCCER'
 };
 
-function categoryLabel(category) {
+function categoryLabel(category, competition) {
+  const named = COMPETITION_LABEL[String(competition || '')];
+  if (named) return named;
   const key = String(category || '');
   return CATEGORY_LABEL[key] || key.toUpperCase();
 }
@@ -320,7 +325,9 @@ function mapMatchToMetaPreview(match, config = {}) {
   // The competition worked out from the two crests, for the fixtures no feed
   // names a league for. Every rugby fixture arrives with an empty league field,
   // and ESPN's scoreboard reaches only part of the soccer calendar.
-  const competition = matchup ? leagueBadges.competitionFor(matchup.aLogo, matchup.bLogo) : null;
+  const competition = match._competition !== undefined
+    ? match._competition
+    : (matchup ? leagueBadges.competitionFor(matchup.aLogo, matchup.bLogo) : null);
   const competitionBadge = leagueBadges.badgeForCompetition(competition);
 
   // A competition this addon carries its own mark for. Those exist precisely
@@ -437,13 +444,13 @@ function mapMatchToMetaPreview(match, config = {}) {
   const statusStr = is247 
     ? '24/7 Live Network' 
     : (isLive ? '🔴 LIVE NOW' : `Kickoff at ${timeString}${relativeTimeStr}`);
-  const desc = `${leagueStr}📅 Category: ${categoryLabel(match.category)}\n⏰ Status: ${statusStr}`;
+  const desc = `${leagueStr}📅 Category: ${categoryLabel(match.category, match._competition)}\n⏰ Status: ${statusStr}`;
 
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
     type: 'tv',
     name: `${prefix}${displayTitle}`,
-    genres: [categoryLabel(match.category)],
+    genres: [categoryLabel(match.category, match._competition)],
     poster: poster,
     posterShape: 'landscape',
     background: background,
@@ -509,6 +516,15 @@ async function handleCatalog(type, id, extra, config) {
     } else {
       filteredMatches = []; // If no config, return empty
     }
+  } else if (categoryMatch === 'american_football') {
+    // The NFL tab. Everything gridiron and Australian arrives filed as
+    // american_football, so the competition the crests named is what separates
+    // them -- there is no category to do it with.
+    filteredMatches = matches.filter(m => m.category === 'american_football' && !isChannel(m) && m._competition === 'nfl');
+  } else if (categoryMatch === 'other_football') {
+    // Everything else under that heading: the CFL, the AFL, and any fixture
+    // whose competition could not be named.
+    filteredMatches = matches.filter(m => m.category === 'american_football' && !isChannel(m) && m._competition !== 'nfl');
   } else if (categoryMatch === 'channels') {
     // Always-on channels, gathered in one place. A channel has no kickoff, which
     // is what separates it from a fixture.

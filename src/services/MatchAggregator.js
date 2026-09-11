@@ -148,6 +148,7 @@ const _SAME_SPORT = new Set(['college', 'american_football']);
 const teamLogos = require('./TeamLogoService');
 const eventMarks = require('./EventMarkService');
 const { getChannelLogo } = require('./ChannelLogoService');
+const leagueBadges = require('./LeagueBadgeService');
 
 /**
  * A fixture's identity, independent of how any provider spelled it.
@@ -568,6 +569,20 @@ class MatchAggregator {
     });
 
     // Filter out matches that are already over (kickoff was > 24 hours ago)
+    // Which competition each fixture belongs to, worked out once from the
+    // crests rather than per request. The tabs need it to tell an NFL game from
+    // a CFL one -- both arrive filed as american_football -- and the card needs
+    // it for the badge.
+    for (const match of finalMatches) {
+      if (match._competition !== undefined) continue;
+      try {
+        const pair = teamLogos.resolveMatchup(match);
+        match._competition = pair ? leagueBadges.competitionFor(pair.aLogo, pair.bLogo) : null;
+      } catch {
+        match._competition = null;
+      }
+    }
+
     const activeMatches = finalMatches.filter(match => {
       let kickoff = 0;
       if (match.date) {
