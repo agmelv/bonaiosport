@@ -14,6 +14,49 @@ const leagueBadges = require('./services/LeagueBadgeService');
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
+ * A kickoff as somebody reads it aloud: "1:00 PM (ET)".
+ *
+ * The zone is named by its abbreviation where one exists, which is what a
+ * viewer recognises -- the IANA identifier the config stores is a database key,
+ * and "13:00 (America/New_York)" made people decode both halves.
+ *
+ * Only the US-style zones have a real abbreviation. Asking for one elsewhere
+ * returns prose ("United Kingdom Time", "India Time"), which is longer than the
+ * identifier it replaced, so anything that is not plainly a set of letters
+ * falls back to the offset: GMT+1, GMT+5:30, UTC.
+ */
+function zoneLabel(dateObj, timeZone) {
+  const name = style => {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: style }).formatToParts(dateObj);
+      return (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
+    } catch {
+      return '';
+    }
+  };
+  const generic = name('shortGeneric');
+  // "ET", "PT", "MST", "AKT" -- but not "GMT+0" or "São Paulo Time".
+  if (/^[A-Z]{2,5}$/.test(generic)) return generic;
+  return name('short');
+}
+
+/** "1:00 PM (ET)", in the viewer's zone when they named one. */
+function formatKickoff(dateObj, timeZone) {
+  const opts = { hour: 'numeric', minute: '2-digit', hour12: true };
+  if (timeZone) opts.timeZone = timeZone;
+  let time;
+  try {
+    time = dateObj.toLocaleTimeString('en-US', opts);
+  } catch {
+    // An unknown zone in a saved config should cost the label, not the time.
+    time = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    timeZone = undefined;
+  }
+  const zone = zoneLabel(dateObj, timeZone);
+  return zone ? `${time} (${zone})` : time;
+}
+
+/**
  * What a category is called on the card. The internal name is the key every
  * provider, merge guard and filter agrees on and does not change; this is only
  * what the reader sees, and it should match the tab the card sits in.
@@ -352,13 +395,7 @@ function mapMatchToMetaPreview(match, config = {}) {
   if (match.date && !isNaN(parseInt(match.date)) && parseInt(match.date) > 0) {
      const dateObj = new Date(parseInt(match.date));
      releasedIso = dateObj.toISOString();
-     const options = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }; // 24-hour format (00-23), never AM/PM
-     
-     if (config && config.timezone) {
-       options.timeZone = config.timezone;
-     }
-     
-     timeString = dateObj.toLocaleTimeString('en-US', options) + (options.timeZone ? ` (${options.timeZone})` : '');
+     timeString = formatKickoff(dateObj, config && config.timezone);
      
      const now = Date.now();
      const diff = dateObj.getTime() - now;
@@ -406,7 +443,7 @@ function mapMatchToMetaPreview(match, config = {}) {
     id: `nuvio_sport_${match.id}`,
     type: 'tv',
     name: `${prefix}${displayTitle}`,
-    genres: [match.category.toUpperCase()],
+    genres: [categoryLabel(match.category)],
     poster: poster,
     posterShape: 'landscape',
     background: background,
