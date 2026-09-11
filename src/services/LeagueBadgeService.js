@@ -42,7 +42,9 @@ function crestKey(url) {
 function rankOf(slug) {
   if (/^(fifa\.|club\.friendly)/.test(slug)) return 3;
   if (/^(uefa|conmebol|concacaf|caf|afc)\./.test(slug)) return 2;
-  if (slug === 'rugby-champions' || slug === 'rugby-international') return 2;
+  // Club rugby outranks the cups and the international game, the same way a
+  // domestic league outranks a continental cup in soccer.
+  if (/^rugby-(champions|challenge|six-nations|championship|international|test|nations|lions|tri-nations|wwc)$/.test(slug)) return 2;
   return 1;
 }
 
@@ -84,9 +86,21 @@ const BUNDLED = {
   'rugby-top14': 'rugby-top14.png',
   'rugby-champions': 'rugby-champions.png',
   'rugby-urc': 'rugby-urc.png',
-  'rugby-super': 'rugby-super.png',
-  'rugby-international': 'rugby-international.png',
   'rugby-six-nations': 'rugby-six-nations.png',
+  'rugby-super': 'rugby-super.png',
+  // The three defunct Super Rugby formats still carry the competition's mark.
+  'rugby-super-aotearoa': 'rugby-super.png',
+  'rugby-super-au': 'rugby-super.png',
+  'rugby-super-tt': 'rugby-super.png',
+  // Test rugby under one governing mark: World Rugby runs the World Cup, and a
+  // Fiji-Canada test belongs to no competition narrower than that.
+  'rugby-international': 'rugby-international.png',
+  'rugby-test': 'rugby-international.png',
+  'rugby-nations': 'rugby-international.png',
+  'rugby-championship': 'rugby-international.png',
+  'rugby-lions': 'rugby-international.png',
+  'rugby-tri-nations': 'rugby-international.png',
+  'rugby-wwc': 'rugby-international.png',
   cfl: 'cfl.png'
 };
 

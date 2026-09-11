@@ -66,13 +66,33 @@ const LEAGUES = {
   'mens-college-hockey': 'hockey/mens-college-hockey',
   'womens-college-hockey': 'hockey/womens-college-hockey',
   'afl': 'australian-football/afl',
-  // Rugby is split across league ids rather than named slugs. These five are
-  // the ones that actually carry crests and cover what the feeds list: the
-  // English top flight, France, the European cup, Test nations, and the NRL.
+  // Rugby is split across league ids rather than named slugs. Every competition
+  // ESPN publishes is fetched: the five we started with covered the English
+  // top flight, France, the European cup, World Cup nations and the NRL, which
+  // left Bristol, Canada and the USA with no crest anywhere.
   'rugby-prem': 'rugby/267979',
   'rugby-top14': 'rugby/270559',
   'rugby-champions': 'rugby/271937',
+  'rugby-challenge': 'rugby/272073',
+  'rugby-urc': 'rugby/270557',
+  'rugby-super': 'rugby/242041',
+  'rugby-super-aotearoa': 'rugby/289271',
+  'rugby-super-au': 'rugby/289272',
+  'rugby-super-tt': 'rugby/289277',
+  'rugby-six-nations': 'rugby/180659',
+  'rugby-championship': 'rugby/244293',
   'rugby-international': 'rugby/164205',
+  'rugby-test': 'rugby/289234',
+  'rugby-nations': 'rugby/17567',
+  'rugby-lions': 'rugby/268565',
+  'rugby-tri-nations': 'rugby/289274',
+  'rugby-mlr': 'rugby/289262',
+  'rugby-currie': 'rugby/270555',
+  'rugby-npc': 'rugby/270563',
+  'rugby-urba': 'rugby/2009',
+  'rugby-urba-14': 'rugby/289279',
+  'rugby-anglo-welsh': 'rugby/236461',
+  'rugby-wwc': 'rugby/289237',
   'rugby-league': 'rugby/3'
 };
 

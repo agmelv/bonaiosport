@@ -58,7 +58,14 @@ const CATEGORY_LEAGUES = {
   hockey: ['nhl', 'mens-college-hockey', 'womens-college-hockey'],
   football: ['soccer'],
   college: ['college-football', 'mens-college-basketball', 'mens-college-hockey'],
-  rugby: ['rugby-prem', 'rugby-champions', 'rugby-top14', 'rugby-international', 'rugby-league']
+  // Club competitions before the international ones: a bare "Newcastle" in a
+  // rugby feed is the Falcons, not a country.
+  rugby: ['rugby-prem', 'rugby-urc', 'rugby-top14', 'rugby-super', 'rugby-league',
+    'rugby-champions', 'rugby-challenge', 'rugby-mlr', 'rugby-currie', 'rugby-npc',
+    'rugby-super-aotearoa', 'rugby-super-au', 'rugby-super-tt', 'rugby-anglo-welsh',
+    'rugby-urba', 'rugby-urba-14',
+    'rugby-six-nations', 'rugby-championship', 'rugby-international', 'rugby-test',
+    'rugby-nations', 'rugby-lions', 'rugby-tri-nations', 'rugby-wwc']
 };
 
 // Youth and reserve sides carry the senior badge, so "England U21" resolves
