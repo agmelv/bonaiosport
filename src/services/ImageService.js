@@ -322,10 +322,16 @@ function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
  * 27KB against 147KB for a full catalog page of artwork.
  */
 // mozjpeg squeezes a card from 21 KB to 15 KB and costs 1.9x the CPU to do it
-// (109 ms a card against 58 ms, measured on the two-core host this runs on).
+// (133 ms a card against 67 ms, measured on the two-core host this runs on).
 // Loading a tab is dozens of cards at once, so that trade was buying 6 KB with
-// a pegged CPU. Quality 82 on the ordinary encoder lands at 17 KB and 56 ms.
-const RASTER_QUALITY = 82;
+// a pegged CPU.
+//
+// The quality number itself is close to free on the ordinary encoder: every
+// setting from 82 to 95 rendered within the same 67-85 ms band on that host,
+// which is run-to-run noise rather than a difference. What it buys is size --
+// 17 KB at 82, 21 KB at 88, 35 KB at 95. So 90: visibly cleaner gradients and
+// crest edges for about 4 KB, and no measurable CPU.
+const RASTER_QUALITY = 90;
 const rasterCache = new Map();
 // A single tab can hold 600 cards. At 160 the cache evicted faster than a
 // scroll could fill it, so every pass down the list re-rendered the lot; 1200
