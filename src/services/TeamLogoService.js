@@ -220,6 +220,21 @@ function lookupTeam(side, category, leaguesOverride = null) {
             || (ALIASES[unqualified] ? resolve(ALIASES[unqualified], leagues) : null);
     }
   }
+  // "Saint" and "St." are the same word, and neither side is consistent about
+  // which it writes: ESPN itself stores "St. Lawrence" beside "Saint Anselm",
+  // and the feeds are no better. Swapping one for the other preserves identity
+  // exactly -- no other name differs only by that word -- so it is safe to try
+  // both ways round.
+  if (!result && /\b(?:saint|st)\b/.test(key)) {
+    const swapped = /\bsaint\b/.test(key)
+      ? key.replace(/\bsaint\b/g, 'st')
+      : key.replace(/\bst\b/g, 'saint');
+    if (swapped !== key) {
+      result = resolve(swapped, leagues)
+            || (ALIASES[swapped] ? resolve(ALIASES[swapped], leagues) : null)
+            || resolve(stripAffix(swapped), leagues);
+    }
+  }
   if (!result && AGE_GROUP.test(key)) {
     const senior = key.replace(AGE_GROUP, '');
     result = resolve(senior, leagues)

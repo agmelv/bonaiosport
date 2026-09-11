@@ -216,16 +216,43 @@ const LEAGUE_CATEGORY = {
  * crest is the fixture telling us what it is. Only consulted for the two
  * football tabs, so college basketball and hockey keep their own categories.
  */
+const _NCAA_CREST = /\/teamlogos\/ncaa\//i;
+
+/**
+ * Is this a college fixture, judged by the crests?
+ *
+ * One NCAA crest is enough when the other side resolved to nothing. College
+ * teams play college teams, and a professional opponent would have resolved to
+ * its own league's crest rather than to nothing -- so an unknown opposite a
+ * known NCAA side is another college, usually one of the smaller divisions
+ * ESPN keeps no table for. Requiring both meant a single unlisted opponent
+ * filed the whole fixture alongside the NFL.
+ *
+ * A crest that resolved to a professional league still says no, which is what
+ * keeps a college-named pro side out.
+ */
+// Where a college fixture can turn up. Wider than _SAME_SPORT, which governs
+// which categories may merge with each other and must stay narrow.
+const _COLLEGIATE_CATEGORIES = new Set(['college', 'american_football', 'basketball', 'hockey', 'baseball']);
+
 function _collegiateByCrest(match) {
-  if (!match || !_SAME_SPORT.has(match.category)) return false;
+  if (!match || !_COLLEGIATE_CATEGORIES.has(match.category)) return false;
   let m;
   try {
     m = teamLogos.resolveMatchup(match);
   } catch {
     return false;
   }
-  if (!m || !m.aLogo || !m.bLogo) return false;
-  return /\/teamlogos\/ncaa\//i.test(m.aLogo) && /\/teamlogos\/ncaa\//i.test(m.bLogo);
+  if (!m) return false;
+
+  const a = m.aLogo, b = m.bLogo;
+  const aNcaa = !!a && _NCAA_CREST.test(a);
+  const bNcaa = !!b && _NCAA_CREST.test(b);
+  if (aNcaa && bNcaa) return true;
+  // One known college, one nobody knows.
+  if (aNcaa && !b) return true;
+  if (bNcaa && !a) return true;
+  return false;
 }
 
 /**
@@ -414,9 +441,13 @@ class MatchAggregator {
 
         const trueCategory = _categoryFromLeague(match);
         if (trueCategory && match.category !== trueCategory) match.category = trueCategory;
-        if (match.category === 'american_football' && _collegiateByCrest(match)) {
+        // College games belong in College whatever the sport: a college hockey
+        // fixture in the Hockey tab is the same misfiling as a college football
+        // one beside the NFL.
+        if (match.category !== 'college' && _collegiateByCrest(match)) {
+          const FROM = { american_football: 'football', basketball: 'basketball', hockey: 'hockey', baseball: 'baseball' };
+          match._collegeSport = FROM[match.category] || null;
           match.category = 'college';
-          match._collegeSport = 'football';
         }
         // Which college sport, for the card's badge.
         if (match.category === 'college' && !match._collegeSport) {
