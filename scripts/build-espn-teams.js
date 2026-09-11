@@ -32,9 +32,26 @@ const LEAGUE_LOGOS = {};
 // the whole catalog.
 const TEAM_NAMES = {};
 
+// Which competitions each crest turns up in, keyed by crest rather than by name.
+// A card already knows the crest it resolved for each side, so a crest is the
+// one identifier that needs no disambiguation to look a competition up by.
+const CREST_COMPS = {};
+
+// Each competition's own badge, keyed by the slug above rather than by the
+// numeric id an event uid carries. LEAGUE_LOGOS keys by that id for the
+// per-game path; this is for the path that works the league out from the crests.
+const COMP_CRESTS = {};
+
 function crestKey(url) {
-  const m = /\/teamlogos\/([^/]+)\/\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url || ''));
-  return m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : '';
+  const s = String(url || '');
+  // ESPN files most crests as teamlogos/<league>/500/<id>.png, but rugby adds a
+  // "teams" segment and the CFL's badges come from TheSportsDB entirely. A key
+  // that only matched the first shape left rugby and the CFL out of every index
+  // built from it.
+  const m = /\/teamlogos\/([^/]+)\/(?:teams\/)?\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(s);
+  if (m) return `${m[1].toLowerCase()}/${m[2].toLowerCase()}`;
+  const other = /\/([^/?#]+)\.(?:png|svg|jpg)(?:[?#]|$)/i.exec(s);
+  return other ? other[1].toLowerCase() : '';
 }
 
 const LEAGUES = {
@@ -211,7 +228,10 @@ function keysFor(team) {
  * a different order, and comparing URLs would call that a name collision and
  * drop a perfectly good key.
  */
-function addTeams(candidates, teams, slug) {
+function addTeams(candidates, teams, slug, comp) {
+  // `slug` picks the crest-naming rules and the output bucket; `comp` names the
+  // actual competition when one bucket holds many, as soccer's does.
+  const competition = comp || slug;
   for (const team of teams) {
     const logo = logoFor(team, slug);
     const ck = crestKey(logo);
@@ -226,6 +246,10 @@ function addTeams(candidates, teams, slug) {
     // outcome the matcher exists to avoid.
     const id = String(team.id);
     const canonical = normalize(team.displayName);
+    if (ck) {
+      const comps = CREST_COMPS[ck] || (CREST_COMPS[ck] = []);
+      if (!comps.includes(competition)) comps.push(competition);
+    }
     for (const k of keysFor(team)) {
       if (!candidates.has(k)) {
         candidates.set(k, { ids: new Set(), logos: new Set(), logo: null, primaries: new Set(), primaryLogo: null });
@@ -288,10 +312,10 @@ async function fetchLeagueCrest(apiPath) {
 
 async function buildLeagueCrests(paths) {
   let ok = 0;
-  for (const apiPath of paths) {
+  for (const [slug, apiPath] of paths) {
     try {
       const crest = await fetchLeagueCrest(apiPath);
-      if (crest) { LEAGUE_LOGOS[crest.id] = crest.logo; ok++; }
+      if (crest) { LEAGUE_LOGOS[crest.id] = crest.logo; COMP_CRESTS[slug] = crest.logo; ok++; }
     } catch {
       // A competition without a crest costs that league's badge, nothing else.
     }
@@ -310,8 +334,13 @@ async function main() {
     addTeams(candidates, teams, slug);
     const { map, dropped } = finish(candidates);
     if (slug === 'cfl') {
+      // ESPN publishes no CFL crests, so these come from TheSportsDB and are
+      // grafted on after the fact -- which means they also have to be recorded
+      // as belonging to the CFL by hand, since addTeams never saw them.
       for (const [name, logo] of Object.entries(CFL_BADGES)) {
         for (const k of keysForName(name)) if (!map[k]) map[k] = logo;
+        const ck = crestKey(logo);
+        if (ck && !(CREST_COMPS[ck] || []).includes('cfl')) (CREST_COMPS[ck] = CREST_COMPS[ck] || []).push('cfl');
       }
     }
     out[slug] = map;
@@ -327,7 +356,7 @@ async function main() {
     try {
       const teams = await fetchLeague(comp, `soccer/${comp}`);
       if (!teams.length) { skipped.push(comp); continue; }
-      addTeams(soccer, teams, 'soccer');
+      addTeams(soccer, teams, 'soccer', comp);
       ok++;
       console.log(`  ${comp.padEnd(26)} ${teams.length}`);
     } catch {
@@ -350,8 +379,8 @@ async function main() {
   // League crests, collected from the same responses the teams came from.
   process.stdout.write('\nfetching league crests ... ');
   const crestPaths = [
-    ...Object.values(LEAGUES),
-    ...SOCCER.map(comp => `soccer/${comp}`)
+    ...Object.entries(LEAGUES),
+    ...SOCCER.map(comp => [comp, `soccer/${comp}`])
   ];
   const crestCount = await buildLeagueCrests(crestPaths);
   console.log(`${crestCount}/${crestPaths.length} leagues`);
@@ -363,6 +392,10 @@ async function main() {
   const leagueDest = path.join(path.dirname(dest), 'espn-leagues.json');
   fs.writeFileSync(leagueDest, JSON.stringify(LEAGUE_LOGOS));
   console.log(`wrote ${path.relative(process.cwd(), leagueDest)} — ${Object.keys(LEAGUE_LOGOS).length} league crests`);
+
+  const compDest = path.join(path.dirname(dest), 'espn-crest-competitions.json');
+  fs.writeFileSync(compDest, JSON.stringify({ crests: CREST_COMPS, competitions: COMP_CRESTS }));
+  console.log(`wrote ${path.relative(process.cwd(), compDest)} — ${Object.keys(CREST_COMPS).length} crests across ${Object.keys(COMP_CRESTS).length} competitions`);
 }
 
 main().catch(err => { console.error(err.message); process.exit(1); });

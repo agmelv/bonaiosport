@@ -6,6 +6,7 @@ const imageService = require('./services/ImageService');
 const teamLogoService = require('./services/TeamLogoService');
 const homeAway = require('./services/HomeAwayService');
 const eventMarks = require('./services/EventMarkService');
+const leagueBadges = require('./services/LeagueBadgeService');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
@@ -248,7 +249,18 @@ function mapMatchToMetaPreview(match, config = {}) {
       : null);
   const sportBadge = match.category === 'college'
     ? (COLLEGE_BADGE[collegeSport] || SPORT_BADGE.college)
-    : (SPORT_BADGE[match.category] || null);
+    : (SPORT_BADGE[match.category] || leagueBadges.sportMark(match.category) || null);
+
+  // The competition worked out from the two crests, for the fixtures no feed
+  // names a league for. Every rugby fixture arrives with an empty league field,
+  // and ESPN's scoreboard reaches only part of the soccer calendar.
+  const competition = matchup ? leagueBadges.competitionFor(matchup.aLogo, matchup.bLogo) : null;
+  const competitionBadge = leagueBadges.badgeForCompetition(competition);
+
+  // A competition this addon carries its own mark for. Those exist precisely
+  // where ESPN's crest is useless -- one generic ball for all four rugby
+  // competitions, and nothing at all for the CFL -- so the mark outranks it.
+  const bundledBadge = competition && leagueBadges.BUNDLED[competition] ? competitionBadge : null;
 
   // For a college game the governing body outranks the conference: every
   // college fixture carries an NCAA mark, so the corner reads the same whether
@@ -256,7 +268,8 @@ function mapMatchToMetaPreview(match, config = {}) {
   // is the more specific answer and wins.
   const collegeBadge = match.category === 'college' ? sportBadge : null;
 
-  let logo = collegeBadge || leagueLogo || sportBadge || matchLogo || team1Logo || channelLogo || null;
+  let logo = collegeBadge || bundledBadge || leagueLogo || competitionBadge || sportBadge
+    || matchLogo || team1Logo || channelLogo || null;
 
   // Matchup card from the resolved crest candidates. The provider's poster
   // rides along as the fallback, so /img/matchup can degrade to it when a
@@ -415,10 +428,13 @@ async function handleCatalog(type, id, extra, config) {
   let filteredMatches = matches;
 
   if (categoryMatch === 'live') {
-    filteredMatches = matches.filter(m => isMatchLive(m));
+    // A channel with no kickoff counts as live by definition, which put all
+    // nine of them at the top of Live above the games actually being played.
+    // Channels have their own tab; Live is for what is on right now.
+    filteredMatches = matches.filter(m => isMatchLive(m) && !isChannel(m));
   } else if (categoryMatch === 'upcoming') {
     const now = Date.now();
-    filteredMatches = matches.filter(m => !isMatchLive(m) && (parseInt(m.date) || 0) > now);
+    filteredMatches = matches.filter(m => !isChannel(m) && !isMatchLive(m) && (parseInt(m.date) || 0) > now);
   } else if (categoryMatch === 'teams') {
     if (typeof conf.teams === 'string' && conf.teams.trim()) {
       const favoriteTeams = conf.teams.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
