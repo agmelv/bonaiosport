@@ -102,7 +102,10 @@ function _teamsSimilar(a, b) {
  */
 function _tryExtractTeams(title) {
   const clean = _compoundify(_stripNoise(title));
-  const parts = clean.split(/\s(?:vs?\.?|@|[-–—])\s/i);
+  // "at" as well as "vs"/"@": the feeds write "Florida A&M Rattlers at Miami
+  // Hurricanes" for the same fixture another feed calls "Miami vs Florida A&M",
+  // and a title that didn't parse into two sides could never be compared as one.
+  const parts = clean.split(/\s(?:vs?\.?|at|@|[-–—])\s/i);
   if (parts.length === 2) {
     return [_tokenize(parts[0]).join(' '), _tokenize(parts[1]).join(' ')];
   }
@@ -166,6 +169,10 @@ function _categoryFromLeague(match) {
   // "American Major League Soccer" and friends: a league whose name says the
   // sport outright.
   if (/\bsoccer\b|\bmls\b|premier league|la ?liga|bundesliga|serie a|ligue 1|eredivisie|champions league/.test(raw)) return 'football';
+  // Deliberately NOT matching every NCAA football league name here. "NCAA
+  // Division 1 Football" would pull 124 college games out of the College
+  // catalog and into American Football, which is a different decision than
+  // "stop filing NFL games under soccer" and not one to make as a side effect.
   if (/\bncaaf\b|college football/.test(raw)) return 'american_football';
   return null;
 }
