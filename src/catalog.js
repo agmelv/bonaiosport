@@ -178,7 +178,11 @@ function mapMatchToMetaPreview(match, config = {}) {
   // Channel logos are keyed by naive substring, so "<Team> vs <Team> | ESPN"
   // used to take ESPN's wordmark as its poster. Only consult the channel table
   // for titles that are actually channels, i.e. not a two-sided fixture.
-  const channelLogo = matchup ? null : getChannelLogo(match.title);
+  // Consulted for anything that isn't a real fixture — not merely anything
+  // whose title lacks a separator. "NFL vs RedZone" splits like a fixture and
+  // isn't one, which is why the channel with the best-looking artwork in the
+  // catalog was the one showing none.
+  const channelLogo = isFixture ? null : getChannelLogo(match.title);
   const team1Logo = match.team1 && match.team1.logo ? normalizeImageUrl(match.team1.logo) : null;
   const matchPoster = match.poster ? normalizeImageUrl(match.poster) : null;
   const matchThumb = match.thumbnail_url ? normalizeImageUrl(match.thumbnail_url) : null;
