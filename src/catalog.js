@@ -245,16 +245,21 @@ function mapMatchToMetaPreview(match, config = {}) {
   // otherwise the governing mark for the sport, which is more use than the home
   // side's crest repeated at badge size.
   //
-  // The NCAA marks are served from this addon rather than hot-linked: Wikimedia
+  // The NCAA mark is served from this addon rather than hot-linked: Wikimedia
   // rate-limits a browser user-agent, and ESPN's "ncaa_football" is a generic
   // silhouette, not the NCAA's own mark.
   const SPORT_BADGE = {
     college: `${BASE_URL}/marks/ncaa.png`,
     rugby: 'https://a.espncdn.com/redesign/assets/img/icons/ESPN-icon-rugby.png'
   };
+  // A college game shows the ball it is played with. The NCAA mark stands in
+  // only for a college fixture whose sport nothing names, which is the one case
+  // where there is no ball to show.
   const COLLEGE_BADGE = {
-    football: `${BASE_URL}/marks/ncaa-football.png`,
-    basketball: `${BASE_URL}/marks/ncaa-basketball.png`
+    football: eventMarks.SPORT_ICONS.american_football,
+    basketball: eventMarks.SPORT_ICONS.basketball,
+    hockey: eventMarks.SPORT_ICONS.hockey,
+    baseball: eventMarks.SPORT_ICONS.baseball
   };
   // Which NCAA mark the corner gets. The league names the sport when the feed
   // sends one; failing that ESPN's own crest for the competition does
