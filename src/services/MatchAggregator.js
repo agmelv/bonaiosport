@@ -204,6 +204,27 @@ const LEAGUE_CATEGORY = {
  * an exact league name we know, so a league we have never seen leaves the
  * provider's own choice alone.
  */
+/**
+ * Collegiate by the crests themselves.
+ *
+ * Most providers don't send a league at all, so a college fixture filed as
+ * `american_football` had nothing to correct it — App State against East
+ * Carolina sat in the professional tab. Both sides resolving to an ESPN NCAA
+ * crest is the fixture telling us what it is. Only consulted for the two
+ * football tabs, so college basketball and hockey keep their own categories.
+ */
+function _collegiateByCrest(match) {
+  if (!match || !_SAME_SPORT.has(match.category)) return false;
+  let m;
+  try {
+    m = teamLogos.resolveMatchup(match);
+  } catch {
+    return false;
+  }
+  if (!m || !m.aLogo || !m.bLogo) return false;
+  return /\/teamlogos\/ncaa\//i.test(m.aLogo) && /\/teamlogos\/ncaa\//i.test(m.bLogo);
+}
+
 function _categoryFromLeague(match) {
   const raw = match && match.league ? String(match.league).toLowerCase().trim() : '';
   if (!raw) return null;
@@ -346,6 +367,7 @@ class MatchAggregator {
         // would also fail to merge with its correctly-filed duplicate.
         const trueCategory = _categoryFromLeague(match);
         if (trueCategory && match.category !== trueCategory) match.category = trueCategory;
+        if (match.category === 'american_football' && _collegiateByCrest(match)) match.category = 'college';
 
         const pre = this._precompute(match);
         let idx = -1;
