@@ -146,6 +146,8 @@ function _upstreamIds(e) {
 const _SAME_SPORT = new Set(['college', 'american_football']);
 
 const teamLogos = require('./TeamLogoService');
+const eventMarks = require('./EventMarkService');
+const { getChannelLogo } = require('./ChannelLogoService');
 
 /**
  * A fixture's identity, independent of how any provider spelled it.
@@ -295,6 +297,10 @@ class MatchAggregator {
       // fixture, which is exact identity rather than a similarity guess.
       up: _upstreamIds(e),
       ident: _identity(e),
+      // The channel this listing is, if it is one. A channel's name resolves to
+      // a logo; a fixture's does not, which makes this a clean test for the
+      // difference as well as an identity for the channel itself.
+      chan: getChannelLogo(title) || null,
       norm: _compoundify(_stripNoise(title)).replace(/\s+/g, ' ').trim(),
       digits: (title.match(/\d+/g) || []).sort().join(',')
     };
@@ -317,6 +323,13 @@ class MatchAggregator {
     if (p1.up && p2.up && p1.up.size && p2.up.size) {
       for (const u of p1.up) if (p2.up.has(u)) return true;
     }
+    // 0b. The same channel, however a feed spelled it. streamed.pk lists NFL
+    //     RedZone once properly and again the next day as the mangled "NFL vs
+    //     RedZone"; both resolve to the one logo. A channel has no legs to
+    //     confuse, so this is checked before the date guard that keeps two
+    //     nights of the same fixture apart.
+    if (p1.chan && p2.chan && p1.chan === p2.chan) return true;
+
     // 1. Category mismatch guard.
     //
     // `college` and `american_football` are the same sport filed under two
@@ -404,14 +417,9 @@ class MatchAggregator {
           match.category = 'college';
           match._collegeSport = 'football';
         }
+        // Which college sport, for the card's badge.
         if (match.category === 'college' && !match._collegeSport) {
-          // Which college sport, for the card's badge. The league names it when
-          // the provider sends one; otherwise the tab it arrived in does.
-          const lg = String(match.league || '').toLowerCase();
-          if (/basketball/.test(lg)) match._collegeSport = 'basketball';
-          else if (/football/.test(lg)) match._collegeSport = 'football';
-          else if (/hockey/.test(lg)) match._collegeSport = 'hockey';
-          else if (/baseball/.test(lg)) match._collegeSport = 'baseball';
+          match._collegeSport = eventMarks.collegeSport(match.league);
         }
 
         const pre = this._precompute(match);
@@ -457,7 +465,18 @@ class MatchAggregator {
         // Canonical naming: prefer a team-vs-team fixture title over a
         // channel-like listing title, so the merged event keeps the most
         // informative name regardless of which provider arrived first.
-        if (!existing._titleIsFixture && pre.teams) {
+        // A channel keeps its own name. "NFL vs RedZone" parses as a fixture
+        // and would otherwise win the rule below, renaming the channel after
+        // the feed's own mistake.
+        const isChannelGroup = !!(pre.chan && finalPres[idx].chan);
+        if (isChannelGroup) {
+          if (pre.teams && !finalPres[idx].teams) {
+            // incoming is the mangled one: keep what we have
+          } else if (!pre.teams && finalPres[idx].teams) {
+            existing.title = match.title;
+            finalPres[idx] = { ...finalPres[idx], teams: null, tokens: pre.tokens, norm: pre.norm, digits: pre.digits };
+          }
+        } else if (!existing._titleIsFixture && pre.teams) {
           existing.title = match.title;
           existing._titleIsFixture = true;
           // Take the better title, but keep the group's own date and identity:

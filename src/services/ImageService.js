@@ -17,6 +17,8 @@
  * No new dependencies: fetches use undici (already in the dependency tree).
  */
 
+const fs = require('fs');
+const path = require('path');
 const { request, Agent, interceptors } = require('undici');
 
 // The soccer feeds serve every crest as a 302 to their CDN. Plain request()
@@ -434,6 +436,34 @@ function evictIfNeeded() {
   for (let i = 0; i < excess; i++) cache.delete(byAccess[i][0]);
 }
 
+const MARKS_DIR = path.join(require('../config').PUBLIC_DIR, 'marks');
+
+/**
+ * Read a bundled mark straight from disk. Returns null for anything that is
+ * not one of ours, including any path that tries to climb out of the folder.
+ */
+function localMark(url) {
+  let name;
+  try {
+    name = new URL(url).pathname.match(/^\/marks\/([A-Za-z0-9._-]+)$/)?.[1];
+  } catch { return null; }
+  if (!name || name.includes('..')) return null;
+
+  const hit = markCache.get(name);
+  if (hit !== undefined) return hit;
+
+  let result = null;
+  try {
+    const buffer = fs.readFileSync(path.join(MARKS_DIR, name));
+    result = { buffer, contentType: name.endsWith('.svg') ? 'image/svg+xml' : 'image/png' };
+  } catch {
+    result = null;
+  }
+  markCache.set(name, result);
+  return result;
+}
+const markCache = new Map();
+
 /**
  * Fetch a remote image once, validate it, cache it. Returns
  * { buffer, contentType } or null on any failure.
@@ -441,6 +471,13 @@ function evictIfNeeded() {
 async function getImage(rawUrl) {
   const url = normalizeUrl(rawUrl);
   if (!url) return null;
+
+  // Our own bundled marks come off disk. They are addressed by URL so a card
+  // can name one the same way it names a crest, but fetching them over the
+  // network would make a card depend on this container still answering at the
+  // address baked into the URL when the card was minted.
+  const local = localMark(url);
+  if (local) return local;
 
   const now = Date.now();
   const neg = negatives.get(url);

@@ -13,11 +13,16 @@ const eventMarks = require('./services/EventMarkService');
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
- * An always-on channel rather than a fixture. Channels carry no kickoff, which
- * is the one thing every fixture has and no channel does.
+ * An always-on channel rather than a fixture. Most carry no kickoff at all,
+ * which is the one thing every fixture has and no channel does. A few are
+ * scheduled anyway -- the feed gives NFL RedZone a Sunday start -- and those
+ * are still channels: their names resolve to a channel logo, and no fixture's
+ * name does.
  */
 function isChannel(m) {
-  return !!m && (m.category === 'networks' || !m.date);
+  if (!m) return false;
+  if (m.category === 'networks' || !m.date) return true;
+  return !!getChannelLogo(m.title);
 }
 
 /**
@@ -232,11 +237,26 @@ function mapMatchToMetaPreview(match, config = {}) {
     football: `${BASE_URL}/marks/ncaa-football.png`,
     basketball: `${BASE_URL}/marks/ncaa-basketball.png`
   };
+  // Which NCAA mark the corner gets. The league names the sport when the feed
+  // sends one; failing that ESPN's own crest for the competition does
+  // (ESPN-icon-football-college, ncaa_basketball). The plain NCAA mark stands in
+  // when nothing says which sport this is.
+  const collegeSport = match._collegeSport
+    || eventMarks.collegeSport(match.league)
+    || (/football/i.test(leagueLogo || '') ? 'football'
+      : /basketball/i.test(leagueLogo || '') ? 'basketball'
+      : null);
   const sportBadge = match.category === 'college'
-    ? (COLLEGE_BADGE[match._collegeSport] || SPORT_BADGE.college)
+    ? (COLLEGE_BADGE[collegeSport] || SPORT_BADGE.college)
     : (SPORT_BADGE[match.category] || null);
 
-  let logo = leagueLogo || sportBadge || matchLogo || team1Logo || channelLogo || null;
+  // For a college game the governing body outranks the conference: every
+  // college fixture carries an NCAA mark, so the corner reads the same whether
+  // the feed named a conference or nothing at all. Everywhere else the league
+  // is the more specific answer and wins.
+  const collegeBadge = match.category === 'college' ? sportBadge : null;
+
+  let logo = collegeBadge || leagueLogo || sportBadge || matchLogo || team1Logo || channelLogo || null;
 
   // Matchup card from the resolved crest candidates. The provider's poster
   // rides along as the fallback, so /img/matchup can degrade to it when a

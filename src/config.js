@@ -67,4 +67,9 @@ const BASE_URL = (
   `http://${getLocalIp()}:${PORT}`                              // Local dev fallback to LAN IP
 ).replace(/\/$/, '');                                           // Strip trailing slash if any
 
-module.exports = { PORT, BASE_URL, getLocalIp, getRequestBaseUrl };
+// Static assets shipped with the addon. This file and the bundled dist/index.js
+// both sit one level below the app root, so one expression covers running from
+// source and running the build.
+const PUBLIC_DIR = require('path').join(__dirname, '..', 'public');
+
+module.exports = { PORT, BASE_URL, PUBLIC_DIR, getLocalIp, getRequestBaseUrl };

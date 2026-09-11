@@ -66,4 +66,20 @@ function markFor(title, category, league) {
   return sport ? { mark: sport, mark2: null, kicker: null } : null;
 }
 
-module.exports = { markFor, SERIES, SPORT_ICONS };
+/**
+ * Which college sport a league name describes, or null when it does not say.
+ *
+ * Feeds name the same competition either way round: "NCAA Division 1 Football"
+ * one day and the bare "NCAAF" the next. Basketball is tested first so NCAAB is
+ * not read as the NCAA + F of NCAAF.
+ */
+function collegeSport(league) {
+  const lg = String(league || '').toLowerCase();
+  if (/basketball|ncaa[bmw]\b/.test(lg)) return 'basketball';
+  if (/football|ncaaf\b/.test(lg)) return 'football';
+  if (/hockey|ncaah\b/.test(lg)) return 'hockey';
+  if (/baseball/.test(lg)) return 'baseball';
+  return null;
+}
+
+module.exports = { markFor, collegeSport, SERIES, SPORT_ICONS };
