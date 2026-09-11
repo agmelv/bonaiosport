@@ -393,7 +393,19 @@ function mapMatchToMetaPreview(match, config = {}) {
   }
   
   const matchBackground = match.background ? normalizeImageUrl(match.background) : null;
-  let background = matchBackground ? (buildImg(matchBackground, posterText, color) || poster) : poster;
+
+  // The detail page behind a fixture should be the same card the catalog shows,
+  // drawn wide. It was the provider's own artwork, so opening a fixture threw
+  // away the crests and colours the tile had just established -- and provider
+  // art is whatever they happened to upload, often for a different fixture.
+  const wideMatchup = bothSides
+    ? imageService.matchupUrl(BASE_URL, {
+      ...matchup, color, fallback: matchPoster, w: 1280, h: 720
+    })
+    : null;
+
+  let background = wideMatchup
+    || (matchBackground ? (buildImg(matchBackground, posterText, color) || poster) : poster);
 
   let timeString = match.category === 'networks' ? '24/7 Stream' : 'Live Now';
   let relativeTimeStr = '';

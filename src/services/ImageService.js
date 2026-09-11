@@ -616,7 +616,7 @@ function placeholderUrl(baseUrl, text, color) {
  * which image actually exists is made where it can be known — at fetch time —
  * instead of guessed here. Returns null when neither side has a candidate.
  */
-function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '333333', fallback = null }) {
+function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '333333', fallback = null, w = null, h = null }) {
   const A = (Array.isArray(aLogos) ? aLogos : [aLogo]).filter(Boolean).slice(0, 2);
   const B = (Array.isArray(bLogos) ? bLogos : [bLogo]).filter(Boolean).slice(0, 2);
   if (!A.length && !B.length) return null;
@@ -631,6 +631,8 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '3333
   if (B[1]) q.push(`bl2=${encodeURIComponent(B[1])}`);
   const fb = normalizeUrl(fallback);
   if (fb) q.push(`fb=${encodeURIComponent(fb)}`);
+  if (w) q.push(`w=${w}`);
+  if (h) q.push(`h=${h}`);
   q.push(`v=${RENDER_VERSION}`);
   return `${baseUrl}/img/matchup?${q.join('&')}`;
 }

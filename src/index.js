@@ -506,9 +506,18 @@ app.get('/img/matchup', async (req, res) => {
 
   // One-sided cards get a shorter TTL too: the missing crest may just have
   // been an upstream hiccup, and the next request should get a chance at it.
+  // A background wants the same card drawn larger. Bounded, because the size
+  // is in the URL and rasterising is the expensive part of serving one.
+  const size = {};
+  const wq = parseInt(req.query.w, 10);
+  const hq = parseInt(req.query.h, 10);
+  if (wq >= 200 && wq <= 1920) size.w = wq;
+  if (hq >= 200 && hq <= 1080) size.h = hq;
+
   const svg = imageService.svgMatchup(a, b, A && A.entry, B && B.entry, color, {
     aUrl: A ? A.url : null,
-    bUrl: B ? B.url : null
+    bUrl: B ? B.url : null,
+    ...size
   });
   return imageService.sendCard(req, res, svg, A && B
     ? 'public, max-age=86400, stale-while-revalidate=604800'
