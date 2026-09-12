@@ -10,6 +10,23 @@
  * before the bare-"inter" rule, otherwise "Inter Miami" would compound to
  * "intermilan" and collide with Inter Milan.
  */
+/**
+ * Plain ASCII, so an accent is a letter rather than a word break.
+ *
+ * _tokenize keeps only [a-z0-9] and drops anything shorter than three
+ * characters, so "Köln" became "k ln" and then nothing at all -- no token
+ * survived to be compared, and no alias below could have rescued it however it
+ * was written. The same silence hid Atlético, Beşiktaş and Mönchengladbach.
+ * The bayern m[uü]nchen rule below is the workaround this replaces.
+ */
+function _fold(t) {
+  return String(t == null ? '' : t)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/ø/gi, 'o').replace(/æ/gi, 'ae').replace(/œ/gi, 'oe')
+    .replace(/ß/g, 'ss').replace(/đ/gi, 'd').replace(/ł/gi, 'l')
+    .replace(/ı/gi, 'i');
+}
+
 function _compoundify(t) {
   const aliases = [
     // Football (Soccer)
@@ -41,6 +58,23 @@ function _compoundify(t) {
     [/\bal[\s\-]hilal\b/g, 'alhilal'],
     [/\bal[\s\-]ahly\b/g, 'alahly'],
     [/\bboca\s*juniors\b|\bca\s*boca\b/g, 'bocajuniors'],
+    // Clubs two feeds genuinely call by different names. Only real dual names
+    // belong here -- a spelling that merely differs by an accent or a club
+    // suffix is already handled by _fold and _stripNoise, and an entry that
+    // maps a name to itself buys nothing while widening the blast radius.
+    // Every one below was a listing that appeared twice in the live catalog.
+    [/\bkoln\b|\bcologne\b/g, 'cologne'],
+    [/\bathletic\s*(?:club|bilbao)\b/g, 'athleticbilbao'],
+    [/\bmonchengladbach\b|\bgladbach\b|\bborussia\s*m\b/g, 'gladbach'],
+    [/\bsporting\s*(?:cp|lisbon|clube\s*de\s*portugal)\b/g, 'sportingcp'],
+    [/\bjuventus\b|\bjuve\b/g, 'juventus'],
+    [/\bbarcelona\b|\bbarca\b/g, 'barcelona'],
+    [/\batletico\s*madrid\b|\batleti\b/g, 'atleticomadrid'],
+    [/\breal\s*betis\b|\bbetis\b/g, 'realbetis'],
+    [/\bdynamo\s*(?:kyiv|kiev)\b/g, 'dynamokyiv'],
+    [/\bzenit(\s*st\s*petersburg)?\b/g, 'zenit'],
+    [/\bpsv(\s*eindhoven)?\b/g, 'psv'],
+    [/\bbesiktas\b/g, 'besiktas'],
     // American Football
     [/\bkansas\s*city\s*chiefs\b|\bkc\s*chiefs\b|\bchiefs\b/g, 'kansascitychiefs'],
     [/\bseattle\s*seahawks\b|\bseahawks\b/g, 'seattleseahawks'],
@@ -60,7 +94,7 @@ function _compoundify(t) {
     [/\bdenver\s*nuggets\b|\bnuggets\b/g, 'denvernuggets'],
     [/\bmilwaukee\s*bucks\b|\bbucks\b/g, 'milwaukeebucks'],
   ];
-  let r = t.toLowerCase();
+  let r = _fold(t).toLowerCase();
   for (const [regex, rep] of aliases) r = r.replace(regex, rep);
   return r;
 }
@@ -125,7 +159,17 @@ function _tryExtractTeams(title) {
 function _upstreamIds(e) {
   const out = new Set();
   const push = (v) => {
-    const m = /(\d{5,})$/.exec(String(v || ''));
+    const s = String(v || '');
+    // A hex-encoded URL is not an event number. TimStreams keys each source by
+    // the hex of its stream URL, and hex is all [0-9a-f], so the tail of one
+    // reads as a long number: every embed whose URL ends "-usa" encodes to a
+    // string ending 757361. Every listing carrying a US channel therefore
+    // claimed upstream event 757361 and matched all the others here -- before
+    // the category, date and title guards, because this rule is identity
+    // rather than similarity. Fifteen college games collapsed into one that
+    // way, and the rest of TimStreams' football vanished from the catalog.
+    if (s.length >= 16 && /^[0-9a-f]+$/i.test(s)) return;
+    const m = /(\d{5,})$/.exec(s);
     if (m) out.add(m[1]);
   };
   push(e && e.id);
