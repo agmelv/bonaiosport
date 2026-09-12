@@ -77,15 +77,17 @@ function zoneLabel(dateObj, timeZone) {
 }
 
 /** "1:00 PM (ET)", in the viewer's zone when they named one. */
-function formatKickoff(dateObj, timeZone) {
-  const opts = { hour: 'numeric', minute: '2-digit', hour12: true };
+function formatKickoff(dateObj, timeZone, hour12 = true) {
+  // 24-hour wants a padded hour: 09:30, not 9:30, which is what that clock
+  // looks like everywhere it is used. 12-hour keeps the bare hour.
+  const opts = { hour: hour12 ? 'numeric' : '2-digit', minute: '2-digit', hour12 };
   if (timeZone) opts.timeZone = timeZone;
   let time;
   try {
     time = dateObj.toLocaleTimeString('en-US', opts);
   } catch {
     // An unknown zone in a saved config should cost the label, not the time.
-    time = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    time = dateObj.toLocaleTimeString('en-US', { hour: hour12 ? 'numeric' : '2-digit', minute: '2-digit', hour12 });
     timeZone = undefined;
   }
   const zone = zoneLabel(dateObj, timeZone);
@@ -475,7 +477,7 @@ function mapMatchToMetaPreview(match, config = {}) {
   if (match.date && !isNaN(parseInt(match.date)) && parseInt(match.date) > 0) {
      const dateObj = new Date(parseInt(match.date));
      releasedIso = dateObj.toISOString();
-     timeString = formatKickoff(dateObj, config && config.timezone);
+     timeString = formatKickoff(dateObj, config && config.timezone, !(config && config.timeFormat === '24'));
      
      const now = Date.now();
      const diff = dateObj.getTime() - now;

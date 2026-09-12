@@ -461,6 +461,14 @@
         <select id="timezone" style="width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--card-border); border-radius: 12px; color: #fff; font-size: 15px; box-sizing: border-box; font-family: 'Inter', sans-serif; transition: all 0.2s; outline: none; cursor: pointer;">
         </select>
       </div>
+      <div class="input-group" style="margin-bottom: 0;">
+        <label>Clock format for those times</label>
+        <div class="toggle-row" id="timeFormat">
+          <button type="button" class="toggle active" data-value="12">12-hour</button>
+          <button type="button" class="toggle" data-value="24">24-hour</button>
+        </div>
+        <p class="hint" id="timeFormatPreview" style="margin: 8px 0 0;"></p>
+      </div>
     </div>
 
     <div class="section">
@@ -983,6 +991,40 @@
       const active = streamOrderRow.querySelector('.toggle.active');
       return active ? active.dataset.value : 'none';
     };
+
+    // Clock format. Unlike stream order this one is not clearable -- a time has
+    // to be written one way or the other -- so clicking the active button
+    // leaves it active rather than turning it off.
+    const timeFormatRow = document.getElementById('timeFormat');
+    const timeFormatValue = () => {
+      const active = timeFormatRow.querySelector('.toggle.active');
+      return active ? active.dataset.value : '12';
+    };
+    // Shown against the chosen zone so the setting is legible before saving:
+    // the same instant, written the way the cards will write it.
+    function paintTimePreview() {
+      const el = document.getElementById('timeFormatPreview');
+      if (!el) return;
+      const tz = timezoneSelect.value;
+      const opts = { hour: 'numeric', minute: '2-digit', hour12: timeFormatValue() === '12' };
+      if (tz) opts.timeZone = tz;
+      let sample;
+      try {
+        sample = new Date().toLocaleTimeString('en-US', opts);
+      } catch (e) {
+        delete opts.timeZone;
+        sample = new Date().toLocaleTimeString('en-US', opts);
+      }
+      el.textContent = 'Kickoffs will read like ' + sample + '.';
+    }
+    timeFormatRow.addEventListener('click', e => {
+      const btn = e.target.closest('.toggle');
+      if (!btn) return;
+      e.preventDefault();
+      timeFormatRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t === btn));
+      paintTimePreview();
+      updateLink();
+    });
     const timezoneSelect = document.getElementById('timezone');
 
     // Attempt to load existing config from URL
@@ -1123,6 +1165,11 @@
         if (loading) loading.textContent = 'Could not load the tab list (' + err.message + ').';
       });
 
+    if (existingConfig.timeFormat === '24') {
+      timeFormatRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t.dataset.value === '24'));
+    }
+    paintTimePreview();
+
     if (existingConfig.streamOrder === 'web' || existingConfig.streamOrder === 'none') {
       // 'none' matches no button, which is exactly how "neither" is stored.
       streamOrderRow.querySelectorAll('.toggle').forEach(t =>
@@ -1192,6 +1239,9 @@
       const order = streamOrderValue();
       if (order === 'web' || order === 'none') config.streamOrder = order;
 
+      // 12-hour is the default, so only 24 needs carrying.
+      if (timeFormatValue() === '24') config.timeFormat = '24';
+
       // Only carried when they differ from the addon's own, so an untouched
       // config stays as short as it was.
       const catOrder = catalogOrderValue();
@@ -1234,7 +1284,7 @@
       applyHideDisabled();
       updateLink();
     });
-    timezoneSelect.addEventListener('change', updateLink);
+    timezoneSelect.addEventListener('change', () => { paintTimePreview(); updateLink(); });
     [...checkboxes, ...sourceCheckboxes].forEach(cb => {
       cb.addEventListener('change', (e) => {
         const label = e.target.closest('.checkbox-label');
