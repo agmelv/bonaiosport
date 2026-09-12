@@ -159,6 +159,33 @@
     }
     .cat-row .cat-name:focus { outline: none; border-color: #5a5a64; }
     .cat-row .cat-default { font-size: 11px; color: #7d828a; min-width: 74px; text-align: right; }
+    .cat-item { margin-bottom: 6px; }
+    .cat-expand {
+      flex: 0 0 auto; width: 34px; height: 38px; display: flex; align-items: center;
+      justify-content: center; background: none; border: 0; color: #7d828a; cursor: pointer;
+      font-size: 12px; border-radius: 8px;
+    }
+    .cat-expand:hover { color: #fff; background: rgba(255,255,255,.05); }
+    .cat-expand[aria-expanded="true"] { color: var(--accent, #e50914); transform: rotate(180deg); }
+    .cat-opts {
+      margin: 2px 0 10px 34px; padding: 10px 12px; border-radius: 10px;
+      background: rgba(255,255,255,.03); border: 1px solid #2c2c33;
+    }
+    .opt { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+    .opt-text { flex: 1; min-width: 0; }
+    .opt-text b { display: block; font-size: 13.5px; font-weight: 600; color: #e8e8ea; }
+    .opt-text span { font-size: 11.5px; color: #8b8f95; line-height: 1.35; }
+    /* iOS-style switch, to match what the rest of these settings look like. */
+    .sw { flex: 0 0 auto; width: 44px; height: 25px; border-radius: 999px; background: #3a3a42;
+          border: 0; cursor: pointer; position: relative; transition: background .18s; padding: 0; }
+    .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 19px; height: 19px;
+                 border-radius: 50%; background: #fff; transition: transform .18s; }
+    .sw[aria-checked="true"] { background: #6c5ce7; }
+    .sw[aria-checked="true"]::after { transform: translateX(19px); }
+    .opt input[type="number"] {
+      width: 84px; font: inherit; font-size: 14px; padding: 7px 10px; background: #1f1f24;
+      color: #e8e8ea; border: 1px solid #3a3a40; border-radius: 8px;
+    }
     .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .toggle {
       flex: 1; min-width: 150px; background: #1e1e22; color: #c9ced4; border: 1px solid #3a3a40;
@@ -457,9 +484,96 @@
       + '</svg></span>';
 
     function catalogRows() { return Array.from(catalogList.querySelectorAll('.cat-row')); }
+    function catalogItems() { return Array.from(catalogList.querySelectorAll('.cat-item')); }
+
+    // Each tab's own settings. Only what differs from the default travels, so a
+    // tab left alone adds nothing to the URL.
+    const CATALOG_OPTIONS = [
+      { key: 'hidden',    label: 'Hide this tab',   hint: 'Remove it from the addon entirely' },
+      { key: 'searchOnly', label: 'Search only',    hint: 'Only appears when you search' },
+      { key: 'noSearch',  label: 'Disable search',  hint: 'No search box on this tab' },
+      { key: 'shuffle',   label: 'Shuffle',         hint: 'Randomise the order of items' },
+      { key: 'reverse',   label: 'Reverse order',   hint: 'Show the list back to front' }
+    ];
+
+    function optionsPanel(id, saved) {
+      const wrap = document.createElement('div');
+      wrap.className = 'cat-opts';
+      wrap.hidden = true;
+      wrap.dataset.for = id;
+
+      for (const opt of CATALOG_OPTIONS) {
+        const row = document.createElement('div');
+        row.className = 'opt';
+        row.innerHTML = '<div class="opt-text"><b></b><span></span></div>';
+        row.querySelector('b').textContent = opt.label;
+        row.querySelector('span').textContent = opt.hint;
+
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'sw';
+        sw.dataset.key = opt.key;
+        sw.setAttribute('role', 'switch');
+        sw.setAttribute('aria-label', opt.label);
+        sw.setAttribute('aria-checked', saved && saved[opt.key] ? 'true' : 'false');
+        sw.addEventListener('click', () => {
+          const on = sw.getAttribute('aria-checked') === 'true';
+          sw.setAttribute('aria-checked', on ? 'false' : 'true');
+          // Search only and Disable search contradict each other, so turning one
+          // on turns the other off rather than leaving both set.
+          if (!on && (opt.key === 'searchOnly' || opt.key === 'noSearch')) {
+            const other = opt.key === 'searchOnly' ? 'noSearch' : 'searchOnly';
+            const el = wrap.querySelector('.sw[data-key="' + other + '"]');
+            if (el) el.setAttribute('aria-checked', 'false');
+          }
+          if (!on && (opt.key === 'shuffle' || opt.key === 'reverse')) {
+            const other = opt.key === 'shuffle' ? 'reverse' : 'shuffle';
+            const el = wrap.querySelector('.sw[data-key="' + other + '"]');
+            if (el) el.setAttribute('aria-checked', 'false');
+          }
+          updateLink();
+        });
+        row.appendChild(sw);
+        wrap.appendChild(row);
+      }
+
+      // Only meaningful alongside Shuffle, which is why it sits under it.
+      const hours = document.createElement('div');
+      hours.className = 'opt';
+      hours.innerHTML = '<div class="opt-text"><b>Keep the shuffle for</b>'
+        + '<span>Hours before reshuffling. 0 reshuffles every time.</span></div>';
+      const num = document.createElement('input');
+      num.type = 'number';
+      num.min = '0';
+      num.max = '168';
+      num.className = 'cat-hours';
+      num.value = String((saved && saved.shufflePersistHours) || 0);
+      num.setAttribute('aria-label', 'Hours to keep the shuffle');
+      num.addEventListener('input', () => updateLink());
+      hours.appendChild(num);
+      wrap.appendChild(hours);
+      return wrap;
+    }
+
+    function catalogOptionsValue() {
+      const out = {};
+      for (const item of catalogItems()) {
+        const id = item.dataset.id;
+        const panel = item.querySelector('.cat-opts');
+        if (!panel) continue;
+        const opts = {};
+        for (const sw of panel.querySelectorAll('.sw')) {
+          if (sw.getAttribute('aria-checked') === 'true') opts[sw.dataset.key] = true;
+        }
+        const hours = Number(panel.querySelector('.cat-hours').value) || 0;
+        if (opts.shuffle && hours > 0) opts.shufflePersistHours = hours;
+        if (Object.keys(opts).length) out[id] = opts;
+      }
+      return out;
+    }
 
     function catalogOrderValue() {
-      return catalogRows().map(r => r.dataset.id).join(',');
+      return catalogItems().map(r => r.dataset.id).join(',');
     }
 
     function catalogNamesValue() {
@@ -482,13 +596,18 @@
       };
       const sorted = catalogs.slice().sort((a, b) => rank(a.id) - rank(b.id));
 
+      const savedOpts = (saved && saved.catalogOptions) || {};
       catalogList.innerHTML = '';
       for (const cat of sorted) {
+        // The row and its settings move together, so dragging carries both.
+        const item = document.createElement('div');
+        item.className = 'cat-item';
+        item.dataset.id = cat.id;
+        item.dataset.defaultIndex = String(catalogs.findIndex(c => c.id === cat.id));
+
         const row = document.createElement('div');
         row.className = 'cat-row';
         row.dataset.id = cat.id;
-        // Where this tab sits in the addon's own manifest, so Reset can restore it.
-        row.dataset.defaultIndex = String(catalogs.findIndex(c => c.id === cat.id));
         row.innerHTML = GRIP_SVG;
 
         const input = document.createElement('input');
@@ -500,9 +619,26 @@
         input.setAttribute('aria-label', 'Name for ' + cat.name);
         input.addEventListener('input', () => updateLink());
         row.appendChild(input);
-        catalogList.appendChild(row);
+
+        const panel = optionsPanel(cat.id, savedOpts[cat.id]);
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'cat-expand';
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('aria-label', 'Settings for ' + cat.name);
+        toggle.textContent = '▾';
+        toggle.addEventListener('click', () => {
+          const open = toggle.getAttribute('aria-expanded') === 'true';
+          toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+          panel.hidden = open;
+        });
+        row.appendChild(toggle);
+
+        item.appendChild(row);
+        item.appendChild(panel);
+        catalogList.appendChild(item);
       }
-      makeReorderable(catalogList, '.cat-row', () => updateLink());
+      makeReorderable(catalogList, '.cat-item', () => updateLink());
     }
 
     document.getElementById('catalogReset').addEventListener('click', e => {
@@ -512,7 +648,9 @@
         input.value = input.dataset.original;
       }
       // Back to the manifest's own order.
-      const byDefault = catalogRows().sort((a, b) => Number(a.dataset.defaultIndex) - Number(b.dataset.defaultIndex));
+      for (const sw of catalogList.querySelectorAll('.sw')) sw.setAttribute('aria-checked', 'false');
+      for (const n of catalogList.querySelectorAll('.cat-hours')) n.value = '0';
+      const byDefault = catalogItems().sort((a, b) => Number(a.dataset.defaultIndex) - Number(b.dataset.defaultIndex));
       for (const row of byDefault) catalogList.appendChild(row);
       updateLink();
     });
@@ -722,6 +860,8 @@
       if (catOrder && catOrder !== defaultCatalogOrder) config.catalogOrder = catOrder;
       const catNames = catalogNamesValue();
       if (Object.keys(catNames).length) config.catalogNames = catNames;
+      const catOpts = catalogOptionsValue();
+      if (Object.keys(catOpts).length) config.catalogOptions = catOpts;
 
       if (Object.keys(config).length > 0) {
         const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));

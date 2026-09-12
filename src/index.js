@@ -989,6 +989,31 @@ app.get('/:config?/manifest.json', (req, res, next) => {
       .map(x => x.c);
   }
 
+  // Per-tab options: hide it, make it searchable or not, or make it appear only
+  // when searched. The first three are manifest-level; shuffle and reverse are
+  // about the items inside and are applied where the catalog is built.
+  const catalogOptions = (parsedConfig.catalogOptions && typeof parsedConfig.catalogOptions === 'object')
+    ? parsedConfig.catalogOptions
+    : {};
+
+  newManifest.catalogs = newManifest.catalogs.filter(c => !(catalogOptions[c.id] || {}).hidden);
+
+  for (const cat of newManifest.catalogs) {
+    const opts = catalogOptions[cat.id] || {};
+    const extra = Array.isArray(cat.extra) ? cat.extra : [];
+
+    if (opts.noSearch) {
+      cat.extra = extra.filter(e => e.name !== 'search');
+    } else if (opts.searchOnly) {
+      // A required extra is how a catalog says "only when asked for": clients
+      // cannot render it on a board without one, so it surfaces through search
+      // and nowhere else.
+      cat.extra = extra.map(e => (e.name === 'search' ? { ...e, isRequired: true } : e));
+      if (!cat.extra.some(e => e.name === 'search')) cat.extra.push({ name: 'search', isRequired: true });
+    }
+    if (Array.isArray(cat.extra) && !cat.extra.length) delete cat.extra;
+  }
+
   if (parsedConfig.catalogNames && typeof parsedConfig.catalogNames === 'object') {
     for (const cat of newManifest.catalogs) {
       const renamed = parsedConfig.catalogNames[cat.id];

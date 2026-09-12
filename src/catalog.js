@@ -122,6 +122,31 @@ function categoryLabel(category, competition) {
  * are still channels: their names resolve to a channel logo, and no fixture's
  * name does.
  */
+/**
+ * Shuffle, but hold the same shuffle for a while when asked to.
+ *
+ * A fresh order on every request makes a list impossible to come back to -- the
+ * thing someone half-remembers has moved by the time they look again. So the
+ * ordering is seeded: the same seed yields the same order, and the seed only
+ * changes when its window does. Zero hours means a new order every time, which
+ * is what the plain toggle asks for.
+ */
+function shuffleStable(list, persistHours) {
+  const window = persistHours > 0
+    ? Math.floor(Date.now() / (persistHours * 3600 * 1000))
+    : Math.random();
+  let seed = Math.floor(Number(window) * 1e6) % 2147483647;
+  if (seed <= 0) seed += 2147483646;
+  const next = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function isChannel(m) {
   if (!m) return false;
   if (m.category === 'networks' || !m.date) return true;
@@ -619,6 +644,14 @@ async function handleCatalog(type, id, extra, config) {
   // Fire-and-forget, before the mapping work, so the warming has the longest
   // possible head start on the click it is meant to cover.
   prewarmTopMatches(filteredMatches, conf);
+
+  // Per-tab ordering, applied after the sort above so it is the last word.
+  const catOpts = (conf.catalogOptions && conf.catalogOptions[id]) || {};
+  if (catOpts.shuffle) {
+    filteredMatches = shuffleStable(filteredMatches, Number(catOpts.shufflePersistHours) || 0);
+  } else if (catOpts.reverse) {
+    filteredMatches = [...filteredMatches].reverse();
+  }
 
   let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf));
 
