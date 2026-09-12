@@ -2,6 +2,15 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 
+// Words that are initials in a channel name, for turning a feed slug back into
+// the name people know the channel by.
+const CHANNEL_ACRONYMS = new Set(['espn', 'nfl', 'nba', 'mlb', 'nhl', 'tv', 'abc', 'cbs', 'nbc', 'fox', 'sec', 'acc', 'ufc', 'f1', 'bt', 'tnt', 'hbo', 'usa']);
+function channelNameFromSlug(slug) {
+  return String(slug).split('-').filter(Boolean)
+    .map(w => (CHANNEL_ACRONYMS.has(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
 class StreamedPkProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -115,6 +124,38 @@ class StreamedPkProvider extends BaseProvider {
           ) : '';
           const homeBadge = item.teams && item.teams.home && item.teams.home.badge ? `https://streamed.pk/api/images/proxy/${item.teams.home.badge}` : '';
           const awayBadge = item.teams && item.teams.away && item.teams.away.badge ? `https://streamed.pk/api/images/proxy/${item.teams.away.badge}` : '';
+
+          // A 24/7 item can carry a whole channel under an event's title.
+          // streamed.pk files its ESPN feed (admin-espn) under "US Open" beside
+          // a Roland-Garros stream, which hid ESPN, ESPN2, ESPN Deportes and ABC
+          // behind a tennis tournament. A feed named for a channel becomes that
+          // channel, listed -- and merged with the same channel elsewhere --
+          // under its real name. resolveStream reads each source's own
+          // streamSource/streamId, so the split feed plays exactly as before.
+          if (is247Channel) {
+            const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (let i = sources.length - 1; i >= 0; i--) {
+              const src = sources[i];
+              const slug = /^admin-(.+)$/.exec(String(src.streamId || ''));
+              if (!slug || src.streamSource !== 'admin') continue;
+              const channelName = channelNameFromSlug(slug[1]);
+              if (norm(channelName) === norm(item.title)) continue;
+              sources.splice(i, 1);
+              matches.push(new MatchEntity({
+                // Its own prefix: the parent item's id can be the very same
+                // slug ("US Open" is item admin-espn), and the stream lookup
+                // takes the first match by id.
+                id: `spk_ch_${src.streamId}`,
+                title: channelName,
+                category: 'networks',
+                status: '',
+                date: '',
+                popular: '1',
+                sources: [src]
+              }));
+            }
+            if (sources.length === 0) continue;
+          }
 
           matches.push(new MatchEntity({
             id: `spk_${item.id}`,

@@ -3,34 +3,181 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { parseTimezone } = require('../timezone');
 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+
+// A channel's source id is its player URL behind this marker, so resolveStream
+// can tell a 24/7 channel from an event without looking anything up.
+const CHANNEL_PREFIX = 'ch:';
+
+// The channel list is one origin that has changed domains before; both names
+// answer with the same data.
+// Player pages rate-limit hard -- a sweep of about a hundred got this server's
+// address a 429 that outlasted the hour. So a decoded playlist URL is kept
+// until shortly before its token expires (the token carries its own expiry,
+// about four hours out), and after a 429 no player page is asked for a while.
+const DECODED_TTL_MS = 3 * 60 * 60 * 1000;
+const TOKEN_MARGIN_MS = 15 * 60 * 1000;
+const BENCH_AFTER_429_MS = 10 * 60 * 1000;
+const DECODED_CACHE_MAX = 500;
+
+// The expiry a CDNLive playlist token carries: base64 of "id:expiryMs:host:sig".
+function tokenExpiry(url) {
+  const m = /[?&]token=([^&]+)/.exec(String(url || ''));
+  if (!m) return 0;
+  try {
+    const parts = Buffer.from(decodeURIComponent(m[1]).replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+      .toString('utf8').split(':');
+    const ms = Number(parts[1]);
+    return Number.isFinite(ms) && ms > Date.now() ? ms : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+const CHANNEL_LIST_URLS = [
+  'https://api.cdnlivetv.tv/api/v1/channels/?user=cdnlivetv&plan=free',
+  'https://api.cdnlivetv.is/api/v1/channels/?user=cdnlivetv&plan=free'
+];
+
 class CdnLiveProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
     this.name = 'CDNLiveTV';
     this.apiUrl = 'https://api.cdnlivetv.tv/api/v1/events/sports/?user=cdnlivetv&plan=free';
-    
+    this._decoded = new Map();   // player URL -> { url, expiresAt }
+    this._benchedUntil = 0;
+
     this.fetchMain = this.circuitBreaker.wrap(`${this.name}_fetchMain`, async () => {
-      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
+      const headers = { 'User-Agent': UA };
       const res = await this.proxyFetch(this.apiUrl, { headers, signal: AbortSignal.timeout(20000) });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       return await res.json();
     });
+
+    // The 24/7 channels. A second source for ESPN, Fox Sports, the league
+    // networks and the rest that does not run through TimStreams' embeds, so
+    // one site going dark no longer empties the Channels tab.
+    this.fetchChannels = this.circuitBreaker.wrap(`${this.name}_channels`, async () => {
+      let lastErr = null;
+      for (const url of CHANNEL_LIST_URLS) {
+        try {
+          const res = await this.proxyFetch(url, {
+            headers: { 'User-Agent': UA },
+            signal: AbortSignal.timeout(20000)
+          });
+          if (!res.ok) throw new Error(`channel list responded ${res.status}`);
+          return await res.json();
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('no channel list host answered');
+    });
   }
 
   async getMatches() {
+    const [events, channels] = await Promise.all([
+      this.getEventMatches(),
+      this.getChannelMatches()
+    ]);
+    return [...events, ...channels];
+  }
+
+  /**
+   * The channel list, as dateless `networks` entries.
+   *
+   * Only channels the list marks online. Every offline one tried answered 503,
+   * so listing them would add rows that never play; the list is re-read on each
+   * catalog refresh, so a channel that comes back reappears on its own.
+   *
+   * One entry per name, and a US channel wins over a same-named foreign one --
+   * this is mostly a US audience, and two rows called ESPN is a bug to them.
+   * Names are left as the list writes them so they merge with the same channel
+   * from TimStreams, iptv-org and USA TV rather than sitting beside it.
+   *
+   * Plain ESPN is missing from the list though its player plays, so it is
+   * added by hand while the list still lacks it.
+   *
+   * Nothing is resolved here. The API allows 100 requests a minute and player
+   * pages rate-limit sooner, so a stream is decoded only when somebody opens
+   * the channel.
+   */
+  async getChannelMatches() {
+    try {
+      const data = await this.fetchChannels.fire();
+      const list = data && Array.isArray(data.channels) ? data.channels : [];
+      const nameOf = (c) => String((c && c.name) || '').trim().toLowerCase();
+
+      // Only the countries worth carrying. The list reuses names across
+      // countries -- "ESPN" three times, "ESPN 2" four, "beIN SPORTS 1" three --
+      // and a foreign feed that merged by name into the US channel would put a
+      // Portuguese commentary track behind the ESPN row. US, UK and Canadian
+      // brands are what the other channel sources carry under the same names.
+      const countries = new Set((process.env.CDNLIVE_COUNTRIES || 'us,gb,ca')
+        .split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+      const online = list.filter(c =>
+        c && c.name && typeof c.url === 'string' && /^https?:\/\//i.test(c.url)
+        && c.status === 'online' && countries.has(String(c.code || '').toLowerCase()));
+
+      // Plain US ESPN is absent though its player plays. Checked against US
+      // entries specifically: foreign ESPNs are listed, so "is ESPN listed"
+      // would say yes and the real one would never be added.
+      const usListed = new Set(list.filter(c => c && c.code === 'us').map(nameOf));
+      if (countries.has('us') && !usListed.has('espn')) {
+        online.push({
+          name: 'ESPN',
+          code: 'us',
+          url: 'https://cdnlivetv.tv/api/v1/channels/player/?name=ESPN&code=us&user=cdnlivetv&plan=free',
+          image: '',
+          status: 'online'
+        });
+      }
+
+      const usNames = new Set(online.filter(c => c.code === 'us').map(nameOf));
+      const seen = new Set();
+      const picked = [];
+      for (const c of online) {
+        const key = nameOf(c);
+        if (c.code !== 'us' && usNames.has(key)) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        picked.push(c);
+      }
+
+      return picked.map(c => {
+        const title = String(c.name).trim();
+        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        return new MatchEntity({
+          id: `cdn_ch_${c.code || 'xx'}_${slug}`,
+          title,
+          category: 'networks',
+          date: '0',
+          popular: '0',
+          league: 'Live TV',
+          thumbnail_url: typeof c.image === 'string' ? c.image : '',
+          sources: [{ source: 'cdnlive', id: CHANNEL_PREFIX + c.url }]
+        });
+      });
+    } catch (err) {
+      console.error(`[${this.name}] Failed to get channels:`, err.message);
+      return [];
+    }
+  }
+
+  async getEventMatches() {
     const matches = [];
     try {
       const data = await this.fetchMain.fire();
       const sportsData = data?.['cdn-live-tv'] || {};
-      
+
       // CDNLive mostly provides Football/Soccer
       const soccerEvents = sportsData['Soccer'] || sportsData['Football'] || [];
-      
+
       if (Array.isArray(soccerEvents)) {
         for (const item of soccerEvents) {
           const matchId = item.gameID || `${item.homeTeam}-vs-${item.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
           const title = `${item.homeTeam || ''} vs ${item.awayTeam || ''}`;
-          
+
           let status = 'upcoming';
           if (item.status === 'live' || item.status === 'in') status = 'live';
 
@@ -52,94 +199,119 @@ class CdnLiveProvider extends BaseProvider {
     return matches;
   }
 
+  /**
+   * The signed playlist URL a CDNLive player page hides, or ''.
+   *
+   * The page builds the URL at runtime from several base64 fragments joined by
+   * a decoder function; the decoder is found by shape, then each fragment it is
+   * called with is decoded and concatenated. Shared by events and channels,
+   * which use the same player.
+   */
+  async decodePlayer(playerUrl) {
+    const cached = this._decoded.get(playerUrl);
+    if (cached && cached.expiresAt > Date.now()) return cached.url;
+    if (Date.now() < this._benchedUntil) return '';
+
+    const { safeFetch } = require('../impitClient');
+    const playerRes = await safeFetch(playerUrl, {
+      headersTimeout: 15000, bodyTimeout: 15000,
+      headers: { 'User-Agent': UA, 'Referer': 'https://cdnlivetv.tv/' },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (playerRes.status === 429) {
+      // Hammering a rate-limited host only extends the limit. Callers fall back
+      // to the web player, which the viewer opens from their own address.
+      this._benchedUntil = Date.now() + BENCH_AFTER_429_MS;
+      console.warn(`[${this.name}] player pages are rate-limiting this server; pausing lookups for ${BENCH_AFTER_429_MS / 60000} min`);
+      return '';
+    }
+    if (!(playerRes.status >= 200 && playerRes.status < 300)) return '';
+
+    const html = await playerRes.text();
+    const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
+    if (!decoderMatch) return '';
+    const decoderName = decoderMatch[1];
+    const concatMatch = html.match(new RegExp(`var\\s+([a-zA-Z0-9_]+)\\s*=\\s*${decoderName}\\([^;]+;`));
+    if (!concatMatch) return '';
+
+    const varRegex = new RegExp(`${decoderName}\\(([a-zA-Z0-9_]+)\\)`, 'g');
+    const vars = [];
+    let m;
+    while ((m = varRegex.exec(concatMatch[0])) !== null) vars.push(m[1]);
+
+    let url = '';
+    for (const v of vars) {
+      const valMatch = html.match(new RegExp(`var\\s+${v}\\s*=\\s*'([^']+)'`));
+      if (valMatch && valMatch[1]) {
+        let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        try { url += Buffer.from(b64, 'base64').toString('utf8'); } catch (e) { /* skip fragment */ }
+      }
+    }
+    if (url) {
+      const exp = tokenExpiry(url);
+      const expiresAt = exp ? Math.min(exp - TOKEN_MARGIN_MS, Date.now() + DECODED_TTL_MS) : Date.now() + DECODED_TTL_MS;
+      if (this._decoded.size >= DECODED_CACHE_MAX) this._decoded.delete(this._decoded.keys().next().value);
+      if (expiresAt > Date.now()) this._decoded.set(playerUrl, { url, expiresAt });
+    }
+    return url;
+  }
+
+  /**
+   * A direct stream when the player decodes, otherwise the player itself as a
+   * web stream. The title carries the provider name on purpose: the stream
+   * label builder recognises this source by "cdnlive" in the title, and a bare
+   * channel name fell through to the Streamed.pk default -- wrong label, and
+   * the wrong Referer for playback.
+   */
+  async resolvePlayer(playerUrl, name) {
+    try {
+      const m3u8Url = await this.decodePlayer(playerUrl);
+      if (m3u8Url) {
+        return [new StreamEntity({
+          name: 'CDNLiveTV',
+          title: `CDNLiveTV (${name})`,
+          url: m3u8Url,
+          behaviorHints: {
+            notWebReady: true,
+            proxyHeaders: {
+              request: { Origin: 'https://cdnlivetv.tv', Referer: 'https://cdnlivetv.tv/', 'User-Agent': UA }
+            }
+          },
+          resolution: 'HD'
+        })];
+      }
+    } catch (e) {
+      console.warn(`[${this.name}] Failed to extract m3u8 for ${playerUrl}:`, e.message);
+    }
+    return [new StreamEntity({
+      name: 'CDNLiveTV',
+      title: `CDNLiveTV (${name}) (Web Player)`,
+      externalUrl: playerUrl,
+      resolution: 'HD'
+    })];
+  }
+
   async resolveStream(sourceId, matchCategory, matchTitle) {
+    if (typeof sourceId === 'string' && sourceId.startsWith(CHANNEL_PREFIX)) {
+      return this.resolvePlayer(sourceId.slice(CHANNEL_PREFIX.length), matchTitle || 'Channel');
+    }
+
     const streams = [];
     try {
-      // Re-fetch (or use cache if circuitBreaker had a cache, but it doesn't. Since it's called 
-      // individually, we fetch. In real production we might cache this in cacheService)
       const data = await this.fetchMain.fire();
       const sportsData = data?.['cdn-live-tv'] || {};
       const soccerEvents = sportsData['Soccer'] || sportsData['Football'] || [];
-      
-      const item = soccerEvents.find(e => 
-        (e.gameID === sourceId) || 
+
+      const item = soccerEvents.find(e =>
+        (e.gameID === sourceId) ||
         (`${e.homeTeam}-vs-${e.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-') === sourceId)
       );
 
-      if (item && item.channels && Array.isArray(item.channels)) {
+      if (item && Array.isArray(item.channels)) {
         for (const [idx, ch] of item.channels.entries()) {
-          if (ch.url) {
-            try {
-              const { safeFetch } = require('../impitClient');
-              const playerRes = await safeFetch(ch.url, {
-                headersTimeout: 15000, bodyTimeout: 15000,
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                  'Referer': 'https://cdnlivetv.tv/'
-                },
-                signal: AbortSignal.timeout(10000)
-              });
-              
-              if (playerRes.status >= 200 && playerRes.status < 300) {
-                const html = await playerRes.text();
-                const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
-                if (decoderMatch) {
-                  const decoderName = decoderMatch[1];
-                  const concatRegex = new RegExp(`var\\s+([a-zA-Z0-9_]+)\\s*=\\s*${decoderName}\\([^;]+;`);
-                  const concatMatch = html.match(concatRegex);
-                  
-                  if (concatMatch) {
-                    const varRegex = new RegExp(`${decoderName}\\(([a-zA-Z0-9_]+)\\)`, 'g');
-                    let match;
-                    const vars = [];
-                    while ((match = varRegex.exec(concatMatch[0])) !== null) {
-                      vars.push(match[1]);
-                    }
-                    
-                    let m3u8Url = '';
-                    for (const v of vars) {
-                      const valMatch = html.match(new RegExp(`var\\s+${v}\\s*=\\s*'([^']+)'`));
-                      if (valMatch && valMatch[1]) {
-                        let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
-                        while (b64.length % 4) b64 += '=';
-                        try { m3u8Url += Buffer.from(b64, 'base64').toString('utf8'); } catch(e) {}
-                      }
-                    }
-                    
-                    if (m3u8Url) {
-                      streams.push(new StreamEntity({
-                        name: `CDNLiveTV`,
-                        title: ch.channel_name || `CDNLive Stream ${idx + 1}`,
-                        url: m3u8Url,
-                        behaviorHints: {
-                          notWebReady: true,
-                          proxyHeaders: {
-                            request: {
-                              "Origin": "https://cdnlivetv.tv",
-                              "Referer": "https://cdnlivetv.tv/",
-                              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-                            }
-                          }
-                        },
-                        resolution: 'HD'
-                      }));
-                      continue;
-                    }
-                  }
-                }
-              }
-            } catch (e) {
-              console.warn(`[${this.name}] Failed to extract m3u8 for ${ch.url}:`, e.message);
-            }
-            
-            // Fallback
-            streams.push(new StreamEntity({
-              name: `CDNLiveTV`,
-              title: ch.channel_name || `CDNLive Stream ${idx + 1} (Web Player)`,
-              externalUrl: ch.url,
-              resolution: 'HD'
-            }));
-          }
+          if (!ch.url) continue;
+          streams.push(...await this.resolvePlayer(ch.url, ch.channel_name || `CDNLive Stream ${idx + 1}`));
         }
       }
     } catch (err) {
