@@ -55,7 +55,7 @@ function selectSources(matchSources, config) {
 
   if (config && typeof config.sources === 'string') {
     const enabled = config.sources.split(',');
-    const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'streamfree', 'timstreams', 'sportyhunter', 'streamsports', 'iptv-org', 'embedindia', 'embedst', 'streamedpk'];
+    const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'streamfree', 'timstreams', 'sportyhunter', 'streamsports', 'iptv-org', 'embedindia', 'embedst', 'streamedpk', 'usatv'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
@@ -66,7 +66,7 @@ function selectSources(matchSources, config) {
     });
   }
 
-  const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'streamfree', 'timstreams', 'sportyhunter', 'streamsports', 'iptv-org', 'embedst', 'streamedpk'];
+  const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'streamfree', 'timstreams', 'sportyhunter', 'streamsports', 'iptv-org', 'embedst', 'streamedpk', 'usatv'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -128,6 +128,9 @@ async function resolveSource(src, match, config) {
     } else if (sourceName === 'streamedpk') {
       const provider = container.resolve('streamedPkProvider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+    } else if (sourceName === 'usatv') {
+      const provider = container.resolve('usaTvProvider');
+      resStreams = await provider.resolveStream(src.id, match.category, match.title);
     } else if (sourceName.startsWith('yaml_')) {
       const yamlProviders = container.resolve('yamlProviders');
       const pName = sourceName.replace('yaml_', '');
