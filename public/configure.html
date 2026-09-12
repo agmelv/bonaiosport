@@ -230,18 +230,6 @@
                 gap: 10px; margin-top: 12px; padding: 12px; border-radius: 14px;
                 background: #17171c; border: 1px solid #2f2f37; font-size: 13px; color: #c9ced4; }
     .cat-bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex;
-             align-items: center; justify-content: center; padding: 20px; z-index: 100; }
-    .modal-card { width: 100%; max-width: 420px; background: #16161a; border: 1px solid #2f2f37;
-                  border-radius: 18px; padding: 20px; }
-    .modal-head { display: flex; align-items: center; margin-bottom: 16px; }
-    .modal-head h3 { margin: 0; flex: 1; font-size: 17px; }
-    .modal-x { background: none; border: 0; color: #8b8f95; font-size: 16px; cursor: pointer; }
-    .modal-label { display: block; font-size: 12px; color: #8b8f95; margin: 12px 0 6px; }
-    .modal-input { width: 100%; font: inherit; font-size: 15px; padding: 11px 13px; border-radius: 10px;
-                   background: #1f1f24; color: #e8e8ea; border: 1px solid #3a3a40; }
-    .modal-input:disabled { opacity: .55; }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
     .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .toggle {
       flex: 1; min-width: 150px; background: #1e1e22; color: #c9ced4; border: 1px solid #3a3a40;
@@ -421,7 +409,7 @@
 
     <div class="section">
       <h3>Catalog Management</h3>
-      <p class="hint">Drag to reorder. Tap the eye to show or hide a tab, the pencil to rename it, and ⋯ for the rest.</p>
+      <p class="hint">Drag to reorder, type to rename. Tap the eye to show or hide a tab, and ⋯ for the rest.</p>
 
       <div class="cat-legend">
         <span><i class="dot on"></i> Shown</span>
@@ -450,23 +438,6 @@
       </div>
     </div>
 
-    <div id="renameModal" class="modal" hidden>
-      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
-        <div class="modal-head">
-          <h3 id="renameTitle">Edit tab</h3>
-          <button type="button" class="modal-x" id="renameClose" aria-label="Close">✕</button>
-        </div>
-        <label class="modal-label" for="renameName">Name</label>
-        <input id="renameName" type="text" class="modal-input" autocomplete="off">
-        <label class="modal-label" for="renameType">Type</label>
-        <input id="renameType" type="text" class="modal-input" value="tv" disabled
-               title="Every tab in this addon is a live TV catalog">
-        <div class="modal-actions">
-          <button type="button" class="chip" id="renameCancel">Cancel</button>
-          <button type="button" class="chip primary" id="renameSave">Save</button>
-        </div>
-      </div>
-    </div>
 
     <div class="section">
       <h3>Stream Order</h3>
@@ -736,8 +707,6 @@
       sep();
       entry('Move to top', null, () => { catalogList.prepend(item); updateLink(); });
       entry('Move to bottom', null, () => { catalogList.appendChild(item); updateLink(); });
-      sep();
-      entry('Rename', null, () => openRename(item));
 
       document.body.appendChild(menu);
       const box = anchor.getBoundingClientRect();
@@ -746,30 +715,6 @@
       menu.style.top = (window.scrollY + box.bottom + 6) + 'px';
       openMenu = menu;
     }
-
-    // ---- rename dialog -----------------------------------------------------
-    let renaming = null;
-    const renameModal = document.getElementById('renameModal');
-    function openRename(item) {
-      renaming = item;
-      const input = item.querySelector('.cat-name');
-      document.getElementById('renameName').value = input.value;
-      document.getElementById('renameTitle').textContent = 'Edit ' + item.dataset.name;
-      renameModal.hidden = false;
-      document.getElementById('renameName').focus();
-    }
-    function closeRename() { renameModal.hidden = true; renaming = null; }
-    document.getElementById('renameClose').addEventListener('click', closeRename);
-    document.getElementById('renameCancel').addEventListener('click', closeRename);
-    renameModal.addEventListener('click', e => { if (e.target === renameModal) closeRename(); });
-    document.getElementById('renameSave').addEventListener('click', () => {
-      if (!renaming) return;
-      const value = document.getElementById('renameName').value.trim();
-      const input = renaming.querySelector('.cat-name');
-      input.value = value || input.dataset.original;
-      closeRename();
-      updateLink();
-    });
 
     function renderCatalogs(catalogs, saved) {
       const order = saved && saved.catalogOrder ? String(saved.catalogOrder).split(',') : [];
@@ -813,14 +758,6 @@
         input.setAttribute('aria-label', 'Name for ' + cat.name);
         input.addEventListener('input', () => updateLink());
         row.appendChild(input);
-
-        const pencil = document.createElement('button');
-        pencil.type = 'button';
-        pencil.className = 'icon-btn';
-        pencil.textContent = '✏️';
-        pencil.setAttribute('aria-label', 'Rename ' + cat.name);
-        pencil.addEventListener('click', () => openRename(item));
-        row.appendChild(pencil);
 
         const eye = document.createElement('button');
         eye.type = 'button';
