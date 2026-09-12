@@ -1855,6 +1855,17 @@
         if (res.ok && body.saved) {
           // The server owns the id, so take whatever it minted.
           if (body.id) profileId = body.id;
+          // The address bar still holds the config as it was when this page
+          // opened -- /saved/configure redirects to a snapshot of it, and that
+          // snapshot does not move when a save does. Reloading would rebuild
+          // the form from it and the change would look thrown away; saving
+          // again from that page would write the snapshot back over what was
+          // just stored. Point the bar at the profile's own address instead,
+          // which always redirects to whatever is currently saved.
+          const home = profileId === 'default'
+            ? '/saved/configure'
+            : (profileId ? '/p/' + profileId + '/configure' : location.pathname);
+          try { history.replaceState(null, '', home); } catch (e) { /* not fatal */ }
           saveBtn.innerText = 'SAVED';
           saveBtn.style.background = '#10b981';
           await refreshSaveUi();
