@@ -73,6 +73,30 @@
     }
     .btn.secondary:hover { background: #2f2f37; }
 
+    /* The heading is the field. Its own caret colour because the h1 paints its
+       text with a gradient through -webkit-text-fill-color: transparent, and a
+       caret inheriting that is a caret you cannot see. */
+    .addon-name {
+      caret-color: var(--accent);
+      outline: none;
+      border-radius: 8px;
+      padding: 0 6px;
+      min-width: 40px;
+      border-bottom: 2px dashed transparent;
+      transition: border-color .15s, background .15s;
+    }
+    .addon-name:hover { border-bottom-color: rgba(255,255,255,.22); }
+    .addon-name:focus {
+      border-bottom-color: var(--accent);
+      background: rgba(255,255,255,.04);
+    }
+    .addon-name:empty::before {
+      content: 'Name this addon';
+      -webkit-text-fill-color: var(--text-muted);
+      opacity: .7;
+    }
+    .addon-name-hint { text-align: center; margin: 6px 0 0; }
+
     .footer-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -424,7 +448,10 @@
   <div class="container">
     <div class="header">
       <img src="/logo.png" alt="Nuvio Live Sports" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
-      <h1><span class="dot"></span> Nuvio Sports</h1>
+      <h1><span class="dot"></span><span id="addonName" class="addon-name" contenteditable="plaintext-only"
+          spellcheck="false" role="textbox" aria-label="Addon name, as it appears in Stremio"
+          title="Type to rename this addon">Nuvio Sports</span></h1>
+      <p class="hint addon-name-hint">Type above to rename the addon. This is the name your player shows.</p>
       <p class="subtitle">Customize your ultimate live sports dashboard.</p>
     </div>
 
@@ -1004,6 +1031,35 @@
       return active ? active.dataset.value : 'none';
     };
 
+    // The addon's own name, typed into the heading.
+    const DEFAULT_ADDON_NAME = 'Nuvio Sports';
+    const addonNameEl = document.getElementById('addonName');
+    // Read as text, never as markup: this goes into a URL that is handed around,
+    // and the same bound the catalog names use applies here.
+    const addonNameValue = () =>
+      (addonNameEl.textContent || '')
+        .replace(/[\u0000-\u001f\u007f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40);
+
+    addonNameEl.addEventListener('input', () => updateLink());
+    // Enter would otherwise put a line break inside a heading.
+    addonNameEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); addonNameEl.blur(); }
+    });
+    // plaintext-only is not everywhere yet, so paste is flattened by hand too.
+    addonNameEl.addEventListener('paste', e => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\s+/g, ' ');
+      document.execCommand('insertText', false, text);
+    });
+    // Emptied entirely, it goes back to the default rather than leaving the
+    // addon nameless in a player's list.
+    addonNameEl.addEventListener('blur', () => {
+      if (!addonNameValue()) { addonNameEl.textContent = DEFAULT_ADDON_NAME; updateLink(); }
+    });
+
     // Clock format. Unlike stream order this one is not clearable -- a time has
     // to be written one way or the other -- so clicking the active button
     // leaves it active rather than turning it off.
@@ -1177,6 +1233,10 @@
         if (loading) loading.textContent = 'Could not load the tab list (' + err.message + ').';
       });
 
+    if (typeof existingConfig.addonName === 'string' && existingConfig.addonName.trim()) {
+      addonNameEl.textContent = existingConfig.addonName.trim().slice(0, 40);
+    }
+
     if (existingConfig.timeFormat === '24') {
       timeFormatRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t.dataset.value === '24'));
     }
@@ -1253,6 +1313,10 @@
 
       // 12-hour is the default, so only 24 needs carrying.
       if (timeFormatValue() === '24') config.timeFormat = '24';
+
+      // Only when it has actually been changed, so an untouched config stays short.
+      const chosenName = addonNameValue();
+      if (chosenName && chosenName !== DEFAULT_ADDON_NAME) config.addonName = chosenName;
 
       // Only carried when they differ from the addon's own, so an untouched
       // config stays as short as it was.

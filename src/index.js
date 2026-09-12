@@ -1047,6 +1047,18 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     if (Array.isArray(cat.extra) && !cat.extra.length) delete cat.extra;
   }
 
+  // The name typed into the configure page's heading. Bounded and stripped the
+  // same way a catalog name is: it arrives from a URL anyone can edit, and it
+  // ends up rendered in somebody's player. The id is deliberately untouched --
+  // that is what an install is keyed on, so renaming stays a rename rather than
+  // becoming a second addon sitting beside the first.
+  if (typeof parsedConfig.addonName === 'string' && parsedConfig.addonName.trim()) {
+    newManifest.name = parsedConfig.addonName
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 40);
+  }
+
   if (parsedConfig.catalogNames && typeof parsedConfig.catalogNames === 'object') {
     for (const cat of newManifest.catalogs) {
       const renamed = parsedConfig.catalogNames[cat.id];
