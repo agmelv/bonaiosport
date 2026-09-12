@@ -8,10 +8,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // waiting beats handing back an empty list.
 const SOURCE_DEADLINE_MS = Number(process.env.STREAM_DEADLINE_MS) || 3500;
 const SOURCE_HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS) || 9000;
-// How much longer to wait for sources that are still resolving once some have
-// already answered. Completeness on the first open is worth a few seconds;
-// asking the viewer to refresh until the list stops changing is not.
-const SOURCE_STRAGGLER_MS = Number(process.env.STREAM_STRAGGLER_MS) || 2500;
+// Once some sources have answered and others have not, keep waiting while the
+// stragglers are still ARRIVING, and stop when they go quiet for this long.
+// A fixed extension was tried first and is the wrong shape: too short and the
+// slowest sources are still cut off, too long and every match with one hung
+// source pays it in full. Progress is the thing worth waiting on.
+const SOURCE_QUIET_MS = Number(process.env.STREAM_QUIET_MS) || 1200;
 
 // Source selection (shared by handleStream and prewarmMatch)
 function selectSources(matchSources, config) {
@@ -360,6 +362,8 @@ async function handleStream(type, id, config) {
   // for the next request instead of holding up this one.
   const collected = [];
   let finished = 0;
+  const startedAt = Date.now();
+  let lastProgressAt = startedAt;
   let markAllDone;
   const allDone = new Promise(resolve => { markAllDone = resolve; });
 
@@ -368,6 +372,7 @@ async function handleStream(type, id, config) {
       value => { if (Array.isArray(value)) collected.push(...value); },
       () => { /* a failed source is one fewer option, not an error */ }
     ).finally(() => {
+      lastProgressAt = Date.now();
       if (++finished === resolvePromises.length) markAllDone();
     });
   }
@@ -387,18 +392,21 @@ async function handleStream(type, id, config) {
   // the case the deadline was measured against in the first place. Worst case
   // moves from 3.5 s to 6 s, and only for a cold open of a match whose sources
   // are slow rather than absent.
-  if (collected.length > 0 && finished < resolvePromises.length) {
-    await Promise.race([allDone, sleep(SOURCE_STRAGGLER_MS)]);
-  }
-
-  // Only when nothing at all has landed. Waiting for a fuller list was tried and
-  // measured worse: on matches whose sources are simply empty, holding on for
-  // six streams spent the whole extra budget to gain nothing -- a mean of 8.5 s
-  // to return one stream, where stopping early returned the same one stream in
-  // three. Sources that are slow rather than empty are handled by warming them
-  // before the click, not by waiting longer after it.
-  if (collected.length === 0 && finished < resolvePromises.length) {
-    await Promise.race([allDone, sleep(SOURCE_HARD_DEADLINE_MS - SOURCE_DEADLINE_MS)]);
+  // Past the deadline, keep waiting only while sources are still arriving.
+  //
+  // A source that answers restarts the clock; a stretch of silence ends it. So
+  // a match whose sources are merely slow returns complete, and a match with
+  // one source that has hung pays about a second beyond the last real answer
+  // rather than the whole remaining budget.
+  //
+  // When nothing at all has landed the quiet rule does not apply and the wait
+  // runs to the hard deadline, which is the behaviour the deadline was measured
+  // against: on matches whose sources are simply empty, holding on for a fuller
+  // list spent the whole budget to gain nothing.
+  while (finished < resolvePromises.length) {
+    if (Date.now() - startedAt >= SOURCE_HARD_DEADLINE_MS) break;
+    if (collected.length > 0 && Date.now() - lastProgressAt >= SOURCE_QUIET_MS) break;
+    await Promise.race([allDone, sleep(200)]);
   }
 
   streams.push(...collected);
