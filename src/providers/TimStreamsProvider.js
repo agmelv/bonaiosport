@@ -7,11 +7,17 @@ class TimStreamsProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
     this.name = 'TimStreams';
-    this.apiUrl = 'https://timst.cfd/api/live-upcoming';
-    
+
+    // Every host this site is known to answer on, newest first. It has moved
+    // before -- timstreams.st is dead and timst.cfd is where it lives now -- so
+    // the working one is chosen at runtime instead of being pinned here. None
+    // of this needs configuring; TIMSTREAMS_HOSTS only exists so an operator
+    // can name a domain that did not exist when this was written, without
+    // editing source and rebuilding.
+    this.hosts = BaseProvider.hostList('TIMSTREAMS_HOSTS', ['timst.cfd', 'timstreams.st']);
+
     this.fetchData = this.circuitBreaker.wrap(`${this.name}_fetch`, async () => {
-      const res = await this.proxyFetch(this.apiUrl, { signal: AbortSignal.timeout(15000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await this.fetchFromHosts('/api/live-upcoming');
       return await res.json();
     });
   }
@@ -129,7 +135,9 @@ class TimStreamsProvider extends BaseProvider {
       const res = await this.proxyFetch(embedUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-          'Referer': 'https://timst.cfd/'
+          // Follows whichever host answered, so a rotation cannot leave this
+          // pointing at a domain the embed host no longer recognises.
+          'Referer': `https://${this.activeHost}/`
         },
         signal: AbortSignal.timeout(10000)
       });

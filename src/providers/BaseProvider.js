@@ -13,6 +13,11 @@ function getCfProxyUrl() {
 }
 
 class BaseProvider {
+  // How long a host that just failed is passed over. Long enough that a dead
+  // mirror is not re-tried every request, short enough that a site coming back
+  // up is picked up on its own without a restart.
+  static HOST_BENCH_MS = Number(process.env.HOST_BENCH_MS) || 5 * 60 * 1000;
+
   constructor({ circuitBreaker }) {
     this.circuitBreaker = circuitBreaker;
     this.name = 'BaseProvider';
@@ -92,12 +97,100 @@ class BaseProvider {
       method: options.method || 'GET',
       headers: options.headers || {},
       body: options.body,
-      timeoutMs: 15000,
+      // Callers that are trying several hosts in turn need a shorter leash than
+      // fifteen seconds, or one dead mirror spends the whole request budget.
+      timeoutMs: options.timeoutMs || 15000,
     };
 
     // safeFetch tries impit first (browser TLS fingerprint), falls back to
     // undici automatically — works on Windows, Linux x64, ARM64, musl, etc.
     return await _safeFetch(url, reqOptions);
+  }
+
+  /**
+   * The hosts this provider will try, in order.
+   *
+   * These sites rotate domains -- timstreams.st went dark and came back as
+   * timst.cfd, cdnlivetv has been both .tv and .is -- and a provider pinned to
+   * one hostname dies the day that happens. Everyone self-hosting then has to
+   * wait for a source edit and a rebuild to get their streams back, which is
+   * not something to ask of someone who just wanted to run the addon.
+   *
+   * So a provider names every host it knows and the fetch below picks whichever
+   * is answering. `envVar` is an escape hatch, not a requirement: nothing needs
+   * setting for the known hosts to work, but if the site moves somewhere nobody
+   * has heard of yet, an operator can point at it without touching source.
+   */
+  static hostList(envVar, known) {
+    const extra = String(process.env[envVar] || '')
+      .split(',')
+      .map(h => h.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+      .filter(Boolean);
+    // Operator's hosts first -- they are the ones with current information.
+    return [...new Set([...extra, ...known])];
+  }
+
+  /**
+   * Fetch `path` from whichever of `this.hosts` is alive, and remember which.
+   *
+   * Ordinary calls cost one request: the host that worked last time is tried
+   * first and almost always answers. The search only happens after a failure.
+   *
+   * A host that fails is benched for a while rather than retried on every call,
+   * because the expensive case is a dead mirror sitting at the front of the
+   * list burning a timeout per request. With the bench and the remembered
+   * winner, a rotation costs one slow request and then goes back to full speed.
+   */
+  async fetchFromHosts(path, options = {}) {
+    const hosts = this.hosts || [];
+    if (!hosts.length) throw new Error(`${this.name}: no hosts configured`);
+
+    this._benched = this._benched || new Map();
+    const now = Date.now();
+    const benched = h => (this._benched.get(h) || 0) > now;
+
+    // Last winner first, then anything not currently benched, then the benched
+    // ones as a last resort -- a bench is a hint, never a refusal to try.
+    const ordered = [
+      ...(this._activeHost ? [this._activeHost] : []),
+      ...hosts.filter(h => h !== this._activeHost && !benched(h)),
+      ...hosts.filter(h => h !== this._activeHost && benched(h)),
+    ];
+
+    // Per-host leash. Several of these in series still has to fit inside the
+    // stream path's own deadline, so it is well under proxyFetch's default.
+    const perHost = options.timeoutMs || 6000;
+    let lastErr = null;
+
+    for (const host of ordered) {
+      try {
+        const res = await this.proxyFetch(`https://${host}${path}`, { ...options, timeoutMs: perHost });
+        if (!res.ok) {
+          lastErr = new Error(`HTTP ${res.status} from ${host}`);
+          this._benched.set(host, Date.now() + BaseProvider.HOST_BENCH_MS);
+          continue;
+        }
+        if (this._activeHost !== host) {
+          console.log(`[${this.name}] using host ${host}`);
+          this._activeHost = host;
+        }
+        this._benched.delete(host);
+        return res;
+      } catch (err) {
+        lastErr = err;
+        this._benched.set(host, Date.now() + BaseProvider.HOST_BENCH_MS);
+      }
+    }
+
+    // Every host failed, so the remembered winner is stale: drop it rather than
+    // keep sending the next call to a host that just refused.
+    this._activeHost = null;
+    throw lastErr || new Error(`${this.name}: every host failed`);
+  }
+
+  /** The host currently answering, for building Referer/Origin that match. */
+  get activeHost() {
+    return this._activeHost || (this.hosts && this.hosts[0]) || null;
   }
 
   /**
