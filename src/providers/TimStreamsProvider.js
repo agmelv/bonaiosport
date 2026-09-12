@@ -21,9 +21,73 @@ class TimStreamsProvider extends BaseProvider {
       const res = await this.fetchFromHosts('/api/live-upcoming');
       return await res.json();
     });
+
+    // The 24/7 channels, which the schedule above never lists on their own:
+    // ESPN, ESPN2, ESPNU, SEC Network and the rest only ever appeared as the
+    // embed behind some college game. The same site publishes them as a list,
+    // each keyed to an embed that plays whether or not a game is on.
+    this.fetchChannels = this.circuitBreaker.wrap(`${this.name}_channels`, async () => {
+      const res = await this.fetchFromHosts('/api/channels');
+      return await res.json();
+    });
   }
 
   async getMatches() {
+    const [events, channels] = await Promise.all([
+      this.getEventMatches(),
+      this.getChannelMatches()
+    ]);
+    return [...events, ...channels];
+  }
+
+  /**
+   * The 24/7 channel list, as dateless `networks` entries so they land in the
+   * Channels tab and merge with the same channel from any other source.
+   *
+   * Sources are keyed exactly as an event's are -- the hex of the embed URL --
+   * so resolveStream, extraction and the manifest proxy all work unchanged.
+   * The upstream `logo` is left out on purpose: it is a thumbnail, not a mark
+   * (ABC's is a generic promo still), and the curated channel logo, when the
+   * name has one, is what the card should be drawn from.
+   */
+  async getChannelMatches() {
+    try {
+      const data = await this.fetchChannels.fire();
+      const list = data && Array.isArray(data.channels) ? data.channels : [];
+      const genres = new Map(
+        (Array.isArray(data && data.genres) ? data.genres : []).map(g => [g.id, g.name])
+      );
+      const out = [];
+      for (const c of list) {
+        if (!c || c.vip || !c.name || !c.url) continue;
+        const sources = (c.streams || [])
+          .filter(st => st && !st.vip && typeof st.url === 'string' && /^https?:\/\//.test(st.url))
+          .map(st => ({
+            source: 'timstreams',
+            id: Buffer.from(st.url).toString('hex'),
+            name: st.name || 'Stream',
+            url: st.url
+          }));
+        if (!sources.length) continue;
+        out.push(new MatchEntity({
+          id: `ts_ch_${c.url}`,
+          title: String(c.name).trim(),
+          category: 'networks',
+          date: '0',
+          popular: '0',
+          league: String(genres.get(c.genre) || 'Live TV'),
+          thumbnail_url: typeof c.logo === 'string' ? c.logo : '',
+          sources
+        }));
+      }
+      return out;
+    } catch (error) {
+      console.error(`[${this.name}] Error fetching channels:`, error.message);
+      return [];
+    }
+  }
+
+  async getEventMatches() {
     const matches = [];
     try {
       const data = await this.fetchData.fire();
