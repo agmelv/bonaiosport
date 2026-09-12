@@ -196,6 +196,7 @@ const teamLogos = require('./TeamLogoService');
 const eventMarks = require('./EventMarkService');
 const { getChannelLogo } = require('./ChannelLogoService');
 const leagueBadges = require('./LeagueBadgeService');
+const { moreSpecific } = require('../channelGenres');
 
 /**
  * A fixture's identity, independent of how any provider spelled it.
@@ -569,6 +570,8 @@ class MatchAggregator {
         if (!existing.thumbnail_url && match.thumbnail_url) existing.thumbnail_url = match.thumbnail_url;
         if (!existing.background && match.background) existing.background = match.background;
         if (!existing.league && match.league) existing.league = match.league;
+        // Two sources can file one channel differently; keep the more specific group.
+        existing.genre = moreSpecific(existing.genre, match.genre) || '';
         if (!existing.team1 && match.team1) existing.team1 = match.team1;
         else if (existing.team1 && !existing.team1.logo && match.team1 && match.team1.logo) existing.team1.logo = match.team1.logo;
         if (!existing.team2 && match.team2) existing.team2 = match.team2;

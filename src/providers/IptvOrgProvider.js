@@ -1,4 +1,5 @@
 const dns = require('dns').promises;
+const { normalizeGenre, moreSpecific } = require('../channelGenres');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -78,6 +79,22 @@ class IptvOrgProvider extends BaseProvider {
         if (!best || logoScore(l) > logoScore(best)) logoFor.set(l.channel, l);
       }
 
+      // A name index over every channel it has a logo for, in any country, kept
+      // for channels other sources list. Primary names only: an alternate name
+      // is how "US Open" came to match a local TV station's call sign. Each
+      // entry remembers its country so the caller can insist on the right one.
+      const byName = new Map();
+      const nameKey = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/\+/g, 'plus').replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+      for (const c of data.channels) {
+        if (!c || !c.name || !logoFor.has(c.id)) continue;
+        const k = nameKey(c.name);
+        if (!byName.has(k)) byName.set(k, []);
+        byName.get(k).push({ country: c.country, url: logoFor.get(c.id).url });
+      }
+      this._logoByName = byName;
+      this._nameKey = nameKey;
+
       const streamsFor = new Map();
       for (const s of data.streams) {
         if (!s || !s.channel || typeof s.url !== 'string') continue;
@@ -131,6 +148,9 @@ class IptvOrgProvider extends BaseProvider {
           date: '0',
           popular: '0',
           league: 'Live TV',
+          // iptv-org gives several categories; the most specific one names the group.
+          genre: (Array.isArray(c.categories) ? c.categories : [])
+            .map(normalizeGenre).filter(Boolean).reduce(moreSpecific, null) || '',
           thumbnail_url: logo,
           logo,
           sources: usable.map(s => ({
@@ -152,6 +172,25 @@ class IptvOrgProvider extends BaseProvider {
       console.error(`[${this.name}] Error fetching channels:`, error.message);
       return [];
     }
+  }
+
+  /**
+   * A logo for a channel another source listed, or null. Only a channel in the
+   * wanted country (the US when the name does not say) is accepted, so a name
+   * shared across countries cannot borrow a foreign channel's mark.
+   */
+  logoForName(name, country) {
+    if (!this._logoByName || !name) return null;
+    const hits = this._logoByName.get(this._nameKey(name));
+    if (!hits) return null;
+    const want = String(country || 'US').toUpperCase();
+    // The wanted country first. Failing that, a name only one country uses is
+    // not ambiguous -- Fox Cricket and Fox League exist only in Australia -- so
+    // its logo is accepted; a name several countries share is not.
+    const countries = new Set(hits.map(h => h.country));
+    const hit = hits.find(h => h.country === want) || (countries.size === 1 ? hits[0] : null);
+    if (!hit) return null;
+    return hit.url.startsWith('//') ? `https:${hit.url}` : hit.url;
   }
 
   async resolveStream(sourceId, matchCategory, matchTitle) {

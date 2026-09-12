@@ -8,6 +8,8 @@ const homeAway = require('./services/HomeAwayService');
 const eventMarks = require('./services/EventMarkService');
 const leagueBadges = require('./services/LeagueBadgeService');
 const { SEARCH_TWIN_SUFFIX } = require('./manifest');
+const channelLogoIndex = require('./services/ChannelLogoIndex');
+const { inferGenre, genreOrder } = require('./channelGenres');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
@@ -200,6 +202,29 @@ function shuffleStable(list, persistHours) {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
+}
+
+// iptv-org's logo for a channel name, when that provider has loaded. Resolved
+// lazily from the container so this module does not import a provider.
+function iptvLogoFor(title) {
+  try {
+    const p = container.resolve('iptvOrgProvider');
+    if (!p || typeof p.logoForName !== 'function') return null;
+    const words = String(title || '').trim().split(/\s+/);
+    const last = (words[words.length - 1] || '').toUpperCase();
+    const COUNTRY = { USA: 'US', US: 'US', UK: 'UK', IE: 'IE', NZ: 'NZ', AU: 'AU', CA: 'CA', PL: 'PL' };
+    if (words.length > 1 && COUNTRY[last]) {
+      return p.logoForName(words.slice(0, -1).join(' '), COUNTRY[last]);
+    }
+    return p.logoForName(title, 'US');
+  } catch (e) {
+    return null;
+  }
+}
+
+// A channel's group: what its source said, or what its name gives away.
+function channelGenre(m) {
+  return (m && m.genre) || inferGenre(m && m.title);
 }
 
 function isChannel(m) {
@@ -403,7 +428,13 @@ function mapMatchToMetaPreview(match, config = {}) {
   const matchPoster = match.poster ? normalizeImageUrl(match.poster) : null;
   const matchThumb = match.thumbnail_url ? normalizeImageUrl(match.thumbnail_url) : null;
   const matchLogo = match.logo ? normalizeImageUrl(match.logo) : null;
-  const channelMark = is247Channel ? (matchLogo || channelLogo || matchThumb) : null;
+  // The artwork a source sent comes last: for too many channels it is a promo
+  // still rather than a logo. Before it, the curated logo set filed by country,
+  // then iptv-org's own logo for a same-named channel in the same country.
+  const indexedLogo = is247Channel && !matchLogo && !channelLogo
+    ? (channelLogoIndex.lookup(match.title) || iptvLogoFor(match.title))
+    : null;
+  const channelMark = is247Channel ? (matchLogo || channelLogo || indexedLogo || matchThumb) : null;
 
   // The competition's crest is what belongs in the card's logo slot. Before
   // this it was the home side's own crest or, far more often, a dead URL whose
@@ -497,7 +528,9 @@ function mapMatchToMetaPreview(match, config = {}) {
       text: prettifyName(match.title), mark: channelMark, kicker: '24/7', color,
       // A channel logo is drawn to stand on its own; the white tile a sport
       // badge needs reads as a sticker over the card.
-      plate: false
+      plate: false,
+      // The logo already names the channel.
+      name: false
     }) || buildImg(channelMark, posterText, color) || fallbackPoster;
     logo = channelMark;
   } else if (channelLogo) {
@@ -595,7 +628,7 @@ function mapMatchToMetaPreview(match, config = {}) {
     id: `nuvio_sport_${match.id}`,
     type: 'tv',
     name: `${prefix}${displayTitle}`,
-    genres: [categoryLabel(match.category, match._competition)],
+    genres: [is247 ? channelGenre(match) : categoryLabel(match.category, match._competition)],
     poster: poster,
     posterShape: 'landscape',
     background: background,
@@ -676,6 +709,10 @@ async function handleCatalog(type, id, extra, config) {
     // Always-on channels, gathered in one place. A channel has no kickoff, which
     // is what separates it from a fixture.
     filteredMatches = matches.filter(m => isChannel(m));
+    // The genre picker. "All" is what a player sends when the genre is required
+    // only to keep the tab off the home board, so it means no filter.
+    const wantedGenre = extra && typeof extra.genre === 'string' && extra.genre !== 'All' ? extra.genre : null;
+    if (wantedGenre) filteredMatches = filteredMatches.filter(m => channelGenre(m) === wantedGenre);
   } else if (categoryMatch === 'other') {
     filteredMatches = matches.filter(m => !TOP_LEVEL_CATEGORIES.includes(m.category) && !isChannel(m));
   } else if (categoryMatch !== 'catalog') {
@@ -721,6 +758,15 @@ async function handleCatalog(type, id, extra, config) {
     if (dateA > 0 && dateB > 0) return dateA - dateB;
     return 0;
   });
+
+  // Several hundred channels read as a wall in the order the sources sent them.
+  // Grouped by genre, then alphabetical inside each group. Before the per-tab
+  // shuffle and reverse below, which still have the last word.
+  if (categoryMatch === 'channels') {
+    filteredMatches.sort((a, b) =>
+      genreOrder(channelGenre(a)) - genreOrder(channelGenre(b))
+      || String(a.title).localeCompare(String(b.title), 'en', { sensitivity: 'base' }));
+  }
 
   // Fire-and-forget, before the mapping work, so the warming has the longest
   // possible head start on the click it is meant to cover.

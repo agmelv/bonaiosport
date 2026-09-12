@@ -1,4 +1,5 @@
 const BaseProvider = require('./BaseProvider');
+const { normalizeGenre } = require('../channelGenres');
 const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
@@ -57,6 +58,21 @@ class TimStreamsProvider extends BaseProvider {
       const genres = new Map(
         (Array.isArray(data && data.genres) ? data.genres : []).map(g => [g.id, g.name])
       );
+      // Channels whose embed plays but which the index does not list. SEC
+      // Network is the one that matters: its embed answers with a valid
+      // playlist through the manifest proxy, the site uses it behind SEC games,
+      // and it is simply absent from /api/channels. Added only while the index
+      // still lacks a channel of that name, so the day it appears upstream the
+      // upstream entry wins.
+      const listed = new Set(list.map(c => String((c && c.name) || '').trim().toLowerCase()));
+      for (const extra of TimStreamsProvider.UNLISTED_CHANNELS) {
+        if (listed.has(extra.name.toLowerCase())) continue;
+        list.push({
+          url: extra.slug, name: extra.name, genre: null, vip: false,
+          streams: [{ name: 'TimStreams', url: `https://epiembeds.online/embed/${extra.slug}`, vip: false }]
+        });
+      }
+
       const out = [];
       for (const c of list) {
         if (!c || c.vip || !c.name || !c.url) continue;
@@ -76,6 +92,7 @@ class TimStreamsProvider extends BaseProvider {
           date: '0',
           popular: '0',
           league: String(genres.get(c.genre) || 'Live TV'),
+          genre: normalizeGenre(genres.get(c.genre)) || '',
           thumbnail_url: typeof c.logo === 'string' ? c.logo : '',
           sources
         }));
@@ -297,5 +314,12 @@ class TimStreamsProvider extends BaseProvider {
     return streams;
   }
 }
+
+// Embeds verified to play through the manifest proxy but missing from the
+// site's own channel index. Each was checked before being added here -- SEC+
+// and ACCNX were tried the same way and answer 502, so they are not.
+TimStreamsProvider.UNLISTED_CHANNELS = [
+  { name: 'SEC Network', slug: 'sec-usa' }
+];
 
 module.exports = TimStreamsProvider;

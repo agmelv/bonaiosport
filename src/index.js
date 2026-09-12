@@ -644,11 +644,18 @@ app.get('/img/event', async (req, res) => {
   if (!M) {
     return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), 'public, max-age=300');
   }
+  // A channel cover sits its logo straight on flat grey, so a logo that ships
+  // on its own solid rectangle has that rectangle taken out first.
+  const cover = req.query.plate === '0' && req.query.notext === '1';
+  const entry = cover
+    ? ((await imageService.knockoutBackground(M.entry.buffer)) || M.entry)
+    : M.entry;
   return imageService.sendCard(
     req, res,
-    imageService.svgEvent(text, M.entry, color, {
+    imageService.svgEvent(text, entry, color, {
       kicker: req.query.kicker || '',
-      plate: req.query.plate !== '0'
+      plate: req.query.plate !== '0',
+      name: req.query.notext !== '1'
     }),
     'public, max-age=86400, stale-while-revalidate=604800'
   );
@@ -1340,11 +1347,21 @@ app.get('/:config?/manifest.json', (req, res, next) => {
       if (!next.some(e => e.name === 'search')) next = [...next, { name: 'search', isRequired: true }];
       next = next.filter(e => e.name !== 'genre');
     } else if (opts.noHome) {
-      if (!next.some(e => e.name === 'genre')) {
+      const own = next.find(e => e.name === 'genre');
+      if (!own) {
         next = [{ name: 'genre', options: ['All'], isRequired: true }, ...next];
+      } else {
+        // A tab with real genres (Channels) keeps them as the choice. Required,
+        // to stay off the board, with All first so the default is the whole tab.
+        const options = ['All', ...(own.options || []).filter(o => o !== 'All')];
+        next = next.map(e => (e.name === 'genre' ? { ...e, options, isRequired: true } : e));
       }
     } else {
-      next = next.filter(e => e.name !== 'genre');
+      // Only the off-board placeholder goes. A tab's own genre list stays, as an
+      // optional filter, so it is on the board and still has a picker.
+      next = next
+        .filter(e => !(e.name === 'genre' && Array.isArray(e.options) && e.options.length === 1 && e.options[0] === 'All'))
+        .map(e => (e.name === 'genre' ? { ...e, isRequired: false } : e));
     }
 
     cat.extra = next;

@@ -10,7 +10,7 @@ function toMillis(value) {
 }
 
 class MatchEntity {
-  constructor({ id, title, category, date, timestamp, status, popular, sources, league, team1, team2, thumbnail_url, poster, logo, background }) {
+  constructor({ id, title, category, date, timestamp, status, popular, sources, league, team1, team2, thumbnail_url, poster, logo, background, genre }) {
     this.id = id || '';
     this.title = title || 'Unknown Match';
     this.category = category || 'other';
@@ -31,6 +31,8 @@ class MatchEntity {
     this.poster = poster || '';
     this.logo = logo || '';
     this.background = background || '';
+    // A 24/7 channel's group in the Channels tab: one of channelGenres.GENRES.
+    this.genre = genre || '';
   }
 }
 

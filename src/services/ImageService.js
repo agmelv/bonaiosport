@@ -391,12 +391,125 @@ async function sendCard(req, res, svg, cacheControl) {
  * (WWE, AEW, MotoGP, the boxing glove) are drawn in black and vanish against a
  * dark gradient without it.
  */
+// The flat grey a channel cover is painted in. Logos are drawn for a neutral
+// dark ground, and one even tone across every channel reads as a set where
+// per-channel gradients read as noise.
+const COVER_GREY = '333436';
+
+// Background knockout results, keyed by the source image's hash.
+const knockoutCache = new Map();
+const KNOCKOUT_CACHE_MAX = 600;
+
+/**
+ * Make a logo's solid backdrop transparent, so it sits on the cover's grey.
+ *
+ * Plenty of channel logos arrive as a mark on a white or black rectangle, which
+ * on a grey cover is a box pasted on a box. The backdrop is found from the
+ * border: if most of the edge is one colour and not already transparent, that
+ * colour is flood-filled inward from the edge and cleared, then the pixels just
+ * inside the cleared area are faded rather than cut, so the edge does not leave
+ * a hard fringe. Filling from the edge rather than removing the colour
+ * everywhere is what keeps white lettering inside a logo on a white backdrop.
+ *
+ * Returns null -- use the image as it is -- for anything that does not look
+ * like a logo on a plain backdrop: already transparent, a busy edge (a photo),
+ * or a fill that clears almost nothing or almost everything.
+ */
+async function knockoutBackground(buffer) {
+  if (!buffer) return null;
+  const key = crypto.createHash('sha1').update(buffer).digest('base64');
+  if (knockoutCache.has(key)) return knockoutCache.get(key);
+  let result = null;
+  try {
+    const { data, info } = await sharp(buffer, { failOn: 'none' })
+      .resize({ width: 900, height: 900, fit: 'inside', withoutEnlargement: true })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height, C = info.channels;
+    if (W && H && C === 4) {
+      const edge = [];
+      for (let x = 0; x < W; x++) edge.push(x, (H - 1) * W + x);
+      for (let y = 1; y < H - 1; y++) edge.push(y * W, y * W + W - 1);
+
+      let clear = 0, r = 0, g = 0, b = 0;
+      for (const p of edge) {
+        const i = p * 4;
+        if (data[i + 3] < 250) clear++;
+        r += data[i]; g += data[i + 1]; b += data[i + 2];
+      }
+      r /= edge.length; g /= edge.length; b /= edge.length;
+      const dist = (i) => Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b);
+      const TOL = 42;
+      let uniform = 0;
+      for (const p of edge) if (dist(p * 4) <= TOL) uniform++;
+
+      if (clear / edge.length < 0.2 && uniform / edge.length >= 0.9) {
+        const cleared = new Uint8Array(W * H);
+        const stack = edge.slice();
+        let count = 0;
+        while (stack.length) {
+          const p = stack.pop();
+          if (cleared[p]) continue;
+          if (dist(p * 4) > TOL) continue;
+          cleared[p] = 1;
+          data[p * 4 + 3] = 0;
+          count++;
+          const x = p % W;
+          if (x > 0) stack.push(p - 1);
+          if (x < W - 1) stack.push(p + 1);
+          if (p >= W) stack.push(p - W);
+          if (p < W * (H - 1)) stack.push(p + W);
+        }
+        const share = count / (W * H);
+        // What is left must still show up on dark grey. A black wordmark on a
+        // white rectangle is legible in its box and nearly invisible without
+        // it, so when the kept pixels are mostly dark the backdrop stays.
+        let lum = 0, kept = 0;
+        for (let p = 0; p < W * H; p++) {
+          if (cleared[p]) continue;
+          const i = p * 4;
+          if (data[i + 3] < 128) continue;
+          lum += (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+          kept++;
+        }
+        const legible = kept > 0 && lum / kept >= 0.28;
+        if (legible && share >= 0.05 && share <= 0.97) {
+          // Soften the boundary: a pixel touching the cleared area keeps an
+          // alpha in proportion to how far its colour is from the backdrop.
+          const SOFT = TOL * 3;
+          for (let p = 0; p < W * H; p++) {
+            if (cleared[p]) continue;
+            const x = p % W;
+            const touches = (x > 0 && cleared[p - 1]) || (x < W - 1 && cleared[p + 1])
+              || (p >= W && cleared[p - W]) || (p < W * (H - 1) && cleared[p + W]);
+            if (!touches) continue;
+            const d = dist(p * 4);
+            if (d < SOFT) data[p * 4 + 3] = Math.round(data[p * 4 + 3] * (d / SOFT));
+          }
+          const png = await sharp(data, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
+          result = { buffer: png, contentType: 'image/png' };
+        }
+      }
+    }
+  } catch (e) {
+    result = null;
+  }
+  if (knockoutCache.size >= KNOCKOUT_CACHE_MAX) knockoutCache.delete(knockoutCache.keys().next().value);
+  knockoutCache.set(key, result);
+  return result;
+}
+
 function svgEvent(text, entry, color, opts = {}) {
   // `plate` is the white tile the mark is seated on. A sport's badge needs it
   // -- those marks are line art that disappears on a dark card -- but a TV
   // channel's logo is already designed to sit on its own and the tile reads as
   // a sticker pasted over the artwork. Channels ask for it off.
-  const { w = 800, h = 450, kicker = '', plate: showPlate = true } = opts;
+  // `name` is the title typed under the mark. A channel's logo already says
+  // which channel it is, so a channel cover drops it and lets the logo carry
+  // the card on its own -- larger, and centred in the frame rather than
+  // parked above where the name used to go.
+  const { w = 800, h = 450, kicker = '', plate: showPlate = true, name: showName = true } = opts;
   const base = accentColor(color).slice(1);
   const seated = luminance(base) > 0.55 ? shade(base, -0.45)
     : luminance(base) > 0.32 ? shade(base, -0.28)
@@ -414,6 +527,17 @@ function svgEvent(text, entry, color, opts = {}) {
   // which is what keeps a dark logo from dissolving into a dark card.
   const markSize = 144;
   const mark = showPlate ? markSize : 176;
+  // A bare, nameless cover gives the logo a wide box in the middle of the card.
+  // preserveAspectRatio fits it inside, so a wordmark grows to the width and a
+  // round badge to the height, and neither is cropped.
+  const cover = !showPlate && !showName;
+  // A cover is the logo and nothing else, so it gets most of the frame: 40px
+  // of margin either side and a box tall enough for a round badge, centred in
+  // the card with room above it for the 24/7 line.
+  const boxW = cover ? 720 : mark;
+  const boxH = cover ? 320 : mark;
+  const boxX = cover ? (w - boxW) / 2 : plateX + (plate - mark) / 2;
+  const boxY = cover ? (h - boxH) / 2 : plateY + (plate - mark) / 2;
 
   const lines = wrapLines(text, 26, 3);
   const fs = lines.length >= 3 ? 34 : lines.length === 2 ? 40 : 44;
@@ -448,12 +572,14 @@ function svgEvent(text, entry, color, opts = {}) {
       <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000000" flood-opacity="0.5"/>
     </filter>
   </defs>
-  <rect width="${w}" height="${h}" fill="url(#pbg)"/>
-  <rect width="${w}" height="${h}" fill="url(#pglow)"/>
+  ${cover
+    ? `<rect width="${w}" height="${h}" fill="#${COVER_GREY}"/>`
+    : `<rect width="${w}" height="${h}" fill="url(#pbg)"/>
+  <rect width="${w}" height="${h}" fill="url(#pglow)"/>`}
   ${kickerEl}
   ${uri ? `${showPlate ? `<rect x="${plateX.toFixed(1)}" y="${plateY}" width="${plate}" height="${plate}" rx="30" fill="#ffffff" fill-opacity="0.95" filter="url(#pdrop)"/>` : ''}
-  <image x="${(plateX + (plate - mark) / 2).toFixed(1)}" y="${(plateY + (plate - mark) / 2).toFixed(1)}" width="${mark}" height="${mark}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"${showPlate ? '' : ' filter="url(#pdrop)"'}/>` : ''}
-  ${textEls}
+  <image x="${boxX.toFixed(1)}" y="${boxY.toFixed(1)}" width="${boxW}" height="${boxH}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"${showPlate || cover ? '' : ' filter="url(#pdrop)"'}/>` : ''}
+  ${showName ? textEls : ''}
 </svg>`;
 }
 
@@ -604,7 +730,7 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
  * Build the /img/event URL. Carries a second mark so a series logo that fails
  * to load still leaves the card its sport icon.
  */
-function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333', plate = true }) {
+function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333', plate = true, name = true }) {
   if (!mark) return null;
   const q = [
     `text=${encodeURIComponent(text || '')}`,
@@ -614,6 +740,7 @@ function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '3
   if (mark2) q.push(`mark2=${encodeURIComponent(mark2)}`);
   if (kicker) q.push(`kicker=${encodeURIComponent(kicker)}`);
   if (!plate) q.push('plate=0');
+  if (!name) q.push('notext=1');
   q.push(`v=${RENDER_VERSION}`);
   return `${baseUrl}/img/event?${q.join('&')}`;
 }
@@ -687,6 +814,7 @@ module.exports = {
   clearCache,
   svgPlaceholder,
   svgEvent,
+  knockoutBackground,
   eventUrl,
   rasterize,
   sendCard,

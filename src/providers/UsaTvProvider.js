@@ -1,4 +1,5 @@
 const dns = require('dns').promises;
+const { normalizeGenre } = require('../channelGenres');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -165,6 +166,7 @@ class UsaTvProvider extends BaseProvider {
           date: '0',
           popular: '0',
           league: Array.isArray(m.genres) && m.genres.length ? String(m.genres[0]) : 'Live TV',
+          genre: normalizeGenre(Array.isArray(m.genres) ? m.genres[0] : null) || '',
           thumbnail_url: poster,
           // The card's corner badge, and what the wide card below is drawn from.
           logo,
