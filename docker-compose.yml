@@ -20,4 +20,14 @@ services:
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
       # Pause between cards while warming the poster cache in the background.
       - WARM_GAP_MS=${WARM_GAP_MS:-250}
+      # Where a saved configuration is written. The volume below is what
+      # makes it outlive a rebuild.
+      - DATA_DIR=/data
+    volumes:
+      # Settings saved from /configure. Without this the container keeps
+      # them until it is next rebuilt and then quietly starts over.
+      - aiosports-data:/data
     restart: unless-stopped
+
+volumes:
+  aiosports-data:

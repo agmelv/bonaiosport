@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nuvio Live Sports | Premium Setup</title>
+  <title>AIOSports | Setup</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@700;900&display=swap"
     rel="stylesheet">
   <style>
@@ -450,7 +450,7 @@
       <img src="/logo.png" alt="Nuvio Live Sports" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
       <h1><span class="dot"></span><span id="addonName" class="addon-name" contenteditable="plaintext-only"
           spellcheck="false" role="textbox" aria-label="Addon name, as it appears in Stremio"
-          title="Type to rename this addon">Nuvio Sports</span></h1>
+          title="Type to rename this addon">AIOSports</span></h1>
       <p class="hint addon-name-hint">Type above to rename the addon. This is the name your player shows.</p>
       <p class="subtitle">Customize your ultimate live sports dashboard.</p>
     </div>
@@ -557,6 +557,9 @@
         <button type="button" class="toggle" data-value="web">🌐 Web</button>
       </div>
     </div>
+
+    <button id="saveBtn" class="btn" hidden>SAVE CHANGES</button>
+    <p class="hint" id="saveNote" hidden></p>
 
     <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
     <button id="copyBtn" class="btn secondary">COPY LINK (FOR NUVIO APP)</button>
@@ -1032,7 +1035,7 @@
     };
 
     // The addon's own name, typed into the heading.
-    const DEFAULT_ADDON_NAME = 'Nuvio Sports';
+    const DEFAULT_ADDON_NAME = 'AIOSports';
     const addonNameEl = document.getElementById('addonName');
     // Read as text, never as markup: this goes into a URL that is handed around,
     // and the same bound the catalog names use applies here.
@@ -1261,6 +1264,7 @@
       }
     }
 
+    let currentConfig = {};
     let currentManifestUrl = '';
 
     function updateLink() {
@@ -1333,10 +1337,75 @@
         manifestUrl = window.location.origin + '/' + encoded + '/manifest.json';
       }
 
+      currentConfig = config;
       currentManifestUrl = manifestUrl;
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
     }
+
+    // Save writes these settings to the server, where /saved/manifest.json
+    // reads them. Install that URL once and later saves reach the player on
+    // their own -- which is the whole point, since every other route out of
+    // this page mints a new URL and means installing the addon again.
+    const saveBtn = document.getElementById('saveBtn');
+    const saveNote = document.getElementById('saveNote');
+
+    async function refreshSaveUi() {
+      let gate = { authenticated: false }, state = {};
+      try { gate = await (await fetch('/api/site/auth')).json(); } catch (e) {}
+      try { state = await (await fetch('/api/config/saved')).json(); } catch (e) {}
+      // Offered only to someone who has signed in. On an open instance there is
+      // no sign-in to do, so it is offered there too.
+      const canSave = gate.authenticated !== false;
+      saveBtn.hidden = !canSave;
+      saveNote.hidden = !canSave;
+      if (!canSave) return;
+      if (state.exists) {
+        saveNote.innerHTML = 'Saved settings are served at <code>' + (state.url || '/saved/manifest.json') +
+          '</code> — install that once and Save is all you need afterwards.';
+      } else {
+        saveNote.textContent = 'Save these settings to a fixed address, so changing them later does not mean installing the addon again.';
+      }
+      if (state.durable === false) {
+        saveNote.innerHTML += '<br><strong>Note:</strong> nothing is mounted for storage, so a saved config is lost when the container is rebuilt.';
+      }
+    }
+
+    saveBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const original = saveBtn.innerText;
+      saveBtn.disabled = true;
+      saveBtn.innerText = 'SAVING…';
+      try {
+        const res = await fetch('/api/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(currentConfig)
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body.saved) {
+          saveBtn.innerText = 'SAVED';
+          saveBtn.style.background = '#10b981';
+          await refreshSaveUi();
+        } else {
+          saveBtn.innerText = 'COULD NOT SAVE';
+          saveBtn.style.background = '#b91c1c';
+          if (body.error) { saveNote.hidden = false; saveNote.textContent = body.error; }
+        }
+      } catch (err) {
+        saveBtn.innerText = 'COULD NOT SAVE';
+        saveBtn.style.background = '#b91c1c';
+        saveNote.hidden = false;
+        saveNote.textContent = 'Cannot reach the server: ' + err.message;
+      }
+      setTimeout(() => {
+        saveBtn.innerText = original;
+        saveBtn.style.background = '';
+        saveBtn.disabled = false;
+      }, 2200);
+    });
+
+    refreshSaveUi();
 
     copyBtn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1346,7 +1415,7 @@
         copyBtn.style.background = '#10b981';
         setTimeout(() => {
           copyBtn.innerText = originalText;
-          copyBtn.style.background = '#333';
+          copyBtn.style.background = '';
         }, 2000);
       });
     });

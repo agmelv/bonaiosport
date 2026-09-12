@@ -1,5 +1,5 @@
 /**
- * index.js — Nuvio Live Sports Addon Entry Point
+ * index.js — AIOSports Addon Entry Point
  *
  * Builds a single Express server that serves:
  *   - /manifest.json          → addon manifest (via SDK getRouter)
@@ -28,6 +28,7 @@ const { getRouter } = require('stremio-addon-sdk');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const child_process = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const { builder } = require('./manifest');
 const crypto = require('crypto');
@@ -126,6 +127,24 @@ app.set(
 
 app.use(cors());
 
+// /saved/... is the saved configuration, wearing the URL of an ordinary one.
+//
+// Rewriting here rather than adding routes means every path that already
+// understands a config segment -- the manifest, the SDK's catalog, meta and
+// stream routes, even /configure -- keeps working without knowing this exists.
+// It has to run before all of them, which is why it sits this early.
+app.use((req, res, next) => {
+  if (!/^\/saved(\/|$|\?)/.test(req.url)) return next();
+  const saved = loadSavedConfig();
+  if (!saved) {
+    return res.status(404).json({
+      error: 'Nothing saved yet. Open /configure, set it up, and press Save.'
+    });
+  }
+  req.url = '/' + encodeConfigSegment(saved) + req.url.slice('/saved'.length);
+  next();
+});
+
 /**
  * Warm the cards for every sport tab. Runs at boot and after a catalog refresh,
  * so the first person to open a tab finds the work already done.
@@ -187,6 +206,47 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/site/auth', (req, res) => {
   res.json({ authenticated: isAuthed(req), keyRequired: !!process.env.AUTH_KEY });
+});
+
+/**
+ * Whether a saved configuration exists, and whether saving one is worth doing.
+ *
+ * `durable` is the honest part: in a container with nothing mounted at DATA_DIR,
+ * a save survives a restart but not the next rebuild, and someone should be told
+ * that before they rely on it rather than after they lose their settings.
+ */
+app.get('/api/config/saved', (req, res) => {
+  const saved = loadSavedConfig();
+  res.json({
+    exists: !!saved,
+    durable: savedConfigIsDurable(),
+    url: getRequestBaseUrl(req) + '/saved/manifest.json'
+  });
+});
+
+app.post('/api/config/save', express.json({ limit: '64kb' }), (req, res) => {
+  // The configure page is what AUTH_KEY guards, and this is that page's save
+  // button, so it is gated the same way: signed in, or the site is open anyway.
+  if (!isAuthed(req)) {
+    return res.status(403).json({ error: 'Sign in before saving.' });
+  }
+  const config = req.body;
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return res.status(400).json({ error: 'Expected a configuration object.' });
+  }
+  try {
+    writeSavedConfig(config);
+  } catch (err) {
+    return res.status(500).json({
+      error: `Could not write ${SAVED_CONFIG_FILE}: ${err.message}. ` +
+             'Mount a volume there (see the README) or set DATA_DIR somewhere writable.'
+    });
+  }
+  res.json({
+    saved: true,
+    durable: savedConfigIsDurable(),
+    url: getRequestBaseUrl(req) + '/saved/manifest.json'
+  });
 });
 
 app.get('/dashboard', requirePage, (req, res) => {
@@ -957,6 +1017,68 @@ app.use((req, res, next) => {
  * Decodes a config URL segment. Accepts URL-encoded JSON or base64url JSON.
  * Returns null when the segment is not a valid config.
  */
+/**
+ * The saved configuration, and the fixed address that serves it.
+ *
+ * Settings normally travel inside the addon's own URL, which means changing one
+ * mints a different URL and the addon has to be installed again to pick it up.
+ * Saved settings live here instead, behind a URL that never changes: install
+ * /saved/manifest.json once and later edits arrive without touching the player.
+ *
+ * One saved configuration per instance, because one AUTH_KEY is one identity --
+ * everybody who can sign in is the same person as far as this server knows.
+ */
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const SAVED_CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+
+let _savedConfig;   // undefined = not read yet, null = none saved
+
+function loadSavedConfig() {
+  if (_savedConfig !== undefined) return _savedConfig;
+  try {
+    _savedConfig = JSON.parse(fs.readFileSync(SAVED_CONFIG_FILE, 'utf8'));
+    if (!_savedConfig || typeof _savedConfig !== 'object' || Array.isArray(_savedConfig)) _savedConfig = null;
+  } catch (e) {
+    _savedConfig = null;             // nothing saved yet, or unreadable
+  }
+  return _savedConfig;
+}
+
+function writeSavedConfig(config) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  // Written beside the target and renamed, so a crash midway cannot leave a
+  // half-written file that then fails to parse on the next boot.
+  const tmp = SAVED_CONFIG_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(config), 'utf8');
+  fs.renameSync(tmp, SAVED_CONFIG_FILE);
+  _savedConfig = config;
+}
+
+/** Whether this directory will still exist after the container is rebuilt. */
+function savedConfigIsDurable() {
+  try {
+    return fs.existsSync('/.dockerenv') ? fs.existsSync(DATA_DIR) && isMountPoint(DATA_DIR) : true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function isMountPoint(dir) {
+  try {
+    const here = fs.statSync(dir);
+    const up = fs.statSync(path.join(dir, '..'));
+    return here.dev !== up.dev;     // a different device means a volume is mounted
+  } catch (e) {
+    return false;
+  }
+}
+
+function encodeConfigSegment(config) {
+  return Buffer.from(JSON.stringify(config), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 function decodeConfigSegment(configStr) {
   try {
     let parsed;
@@ -1547,7 +1669,7 @@ const BIND_HOST = process.env.HOST || process.env.IP || '0.0.0.0';
 app.listen(PORT, BIND_HOST, () => {
   console.log('');
   console.log('╔══════════════════════════════════════════════════════╗');
-  console.log('║          🔴 Nuvio Live Sports Addon                  ║');
+  console.log('║          🔴 AIOSports                              ║');
   console.log('╠══════════════════════════════════════════════════════╣');
   console.log(`║  Port       : ${String(PORT).padEnd(39)}║`);
   console.log(`║  Public URL : ${BASE_URL.padEnd(39)}║`);
