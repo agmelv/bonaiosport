@@ -158,7 +158,24 @@ app.use((req, res, next) => {
     });
   }
 
-  req.url = '/' + encodeConfigSegment(saved) + req.url.slice(prefixLen);
+  const encoded = encodeConfigSegment(saved);
+  const rest = req.url.slice(prefixLen);
+
+  // The configure PAGE is redirected rather than rewritten, because the page
+  // reads its settings out of its own address bar -- and a rewrite is invisible
+  // there. Left as a rewrite, /p/<uuid>/configure showed the browser a uuid
+  // where the page expected an encoded config, so it decoded nothing, opened on
+  // defaults, and the next Save wrote those defaults over the profile.
+  //
+  // The id rides along as ?profile= so the page still knows which profile it is
+  // editing, and the uuid never has to be decodable for that to work.
+  const asPage = rest.match(/^\/configure\/?(\?(.*))?$/);
+  if (asPage) {
+    const extra = asPage[2] ? '&' + asPage[2] : '';
+    return res.redirect(302, '/' + encoded + '/configure?profile=' + encodeURIComponent(id) + extra);
+  }
+
+  req.url = '/' + encoded + rest;
   next();
 });
 

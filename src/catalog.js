@@ -61,10 +61,28 @@ function prewarmTopMatches(matches, conf) {
  * identifier it replaced, so anything that is not plainly a set of letters
  * falls back to the offset: GMT+1, GMT+5:30, UTC.
  */
+// Building an Intl.DateTimeFormat is expensive -- it loads ICU data -- and this
+// was building one per style per dated fixture, so a catalog of a thousand
+// fixtures paid for up to two thousand of them on every request. There are only
+// ever a handful of distinct (zone, style) pairs, so they are made once.
+const _zoneFormatters = new Map();
+function zoneFormatter(timeZone, style) {
+  const key = (timeZone || '') + '|' + style;
+  let f = _zoneFormatters.get(key);
+  if (f === undefined) {
+    try { f = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: style }); }
+    catch { f = null; }        // an unknown zone: remembered as unusable
+    _zoneFormatters.set(key, f);
+  }
+  return f;
+}
+
 function zoneLabel(dateObj, timeZone) {
   const name = style => {
     try {
-      const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: style }).formatToParts(dateObj);
+      const f = zoneFormatter(timeZone, style);
+      if (!f) return '';
+      const parts = f.formatToParts(dateObj);
       return (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
     } catch {
       return '';

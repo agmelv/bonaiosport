@@ -165,7 +165,10 @@ const TITLE_PREFIX = /^(?:\s|[^\p{L}\p{N}]|live:|live|24\/7)+/iu;
 const MIN_COVERAGE = 0.75;
 
 const cache = new Map();
-const CACHE_MAX = 2000;
+// Big enough to hold a whole catalog render. At 2000 a large build filled it
+// and then threw it away mid-render, repeatedly, so the memo stopped memoising
+// exactly when it was needed most. Each entry is a short key and a URL string.
+const CACHE_MAX = 20000;
 
 function normalize(s) {
   if (!s || typeof s !== 'string') return '';
@@ -259,7 +262,9 @@ function lookupTeam(side, category, leaguesOverride = null) {
     if (extra) result = extra[key] || extra[stripAffix(key)] || null;
   }
 
-  if (cache.size >= CACHE_MAX) cache.clear();
+  // Drop the oldest one rather than all of them: clearing the map threw away
+  // every answer to make room for one.
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
   cache.set(cacheKey, result);
   return result;
 }

@@ -1620,8 +1620,17 @@
       } else if (state.exists) {
         saveCallout.hidden = false;
         saveCallout.className = 'callout';
-        saveCallout.innerHTML = '<strong>Saved.</strong> Install the URL above once — after that, '
-          + 'changes on this page only need Save.';
+        // Only half of this page reaches an installed player on its own. A
+        // manifest is read once, at install: teams, timezone, sources, stream
+        // order and clock format are read per request and arrive immediately,
+        // but which tabs exist, their names and order, and the addon's own name,
+        // logo and description all live in the manifest. Saying "changes only
+        // need Save" was wrong for those, and wrong silently -- the setting
+        // saves, and nothing happens in the player.
+        saveCallout.innerHTML = '<strong>Saved.</strong> Teams, timezone, sources, stream order '
+          + 'and clock format reach your player on their own. Changes to which tabs appear, their '
+          + 'names or order, or the addon\'s own name, logo or description need a reinstall from '
+          + 'the URL above.';
       } else {
         saveCallout.hidden = true;
       }
