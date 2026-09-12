@@ -67,6 +67,10 @@ t(true,  same(ch('NFL RedZone'), ch('NFL vs RedZone')), 'one channel spelled two
 t(false, same(ch('ESPN'), ch('ESPN Deportes')), 'ESPN is not ESPN Deportes')
 t(false, same(ch('NBC Sports Boston'), ch('NBC Sports California')), 'NBC Sports regionals stay apart')
 t(false, same(ch('SportsNet New York'), ch('SportsNet Pittsburgh')), 'SportsNet regionals stay apart')
+// Two letters, and the only thing separating a national feed from a regional
+// one. The tokeniser drops words shorter than three characters, so both the
+// channel rule and the similarity rule below it compare `words` instead.
+t(false, same(ch('Spectrum SportsNet'), ch('Spectrum SportsNet LA')), 'a two-letter regional suffix still counts')
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

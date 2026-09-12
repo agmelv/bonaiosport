@@ -189,6 +189,9 @@ function _upstreamIds(e) {
 // Two catalog names for one sport. A pair drawn from this set may merge.
 const _SAME_SPORT = new Set(['college', 'american_football']);
 
+// Words that only ever join the two sides of a fixture, never name one.
+const _FIXTURE_JOINERS = new Set(['vs', 'v', 'at']);
+
 const teamLogos = require('./TeamLogoService');
 const eventMarks = require('./EventMarkService');
 const { getChannelLogo } = require('./ChannelLogoService');
@@ -374,6 +377,19 @@ class MatchAggregator {
       // difference as well as an identity for the channel itself.
       chan: getChannelLogo(title) || null,
       norm: _compoundify(_stripNoise(title)).replace(/\s+/g, ' ').trim(),
+      // Every word of the normalised title, short ones included, less the words
+      // that only ever join two sides of a fixture. Used by the channel rule
+      // above, where a two-letter suffix is the whole difference between two
+      // regional feeds of one network.
+      words: new Set(
+        _compoundify(_stripNoise(title))
+          .replace(/[^a-z0-9]/g, ' ')
+          .split(/\s+/)
+          .filter(w => w && !_FIXTURE_JOINERS.has(w))
+          // The same naive singular _tokenize applies, so "beIN Sports 1" and
+          // "beIN Sport 1" still read as one channel.
+          .map(w => (w.length > 3 && w.endsWith('s')) ? w.slice(0, -1) : w)
+      ),
       digits: (title.match(/\d+/g) || []).sort().join(',')
     };
   }
@@ -408,10 +424,15 @@ class MatchAggregator {
     // RedZone" and the mangled "NFL vs RedZone" both tokenise to {nfl,redzone}
     // -- while a regional's own city keeps it apart from its siblings.
     if (p1.chan && p2.chan && p1.chan === p2.chan) {
-      if (p1.tokens.size === p2.tokens.size) {
+      // Compared on `words` rather than `tokens`: tokens drop anything under
+      // three characters, which is how "Spectrum SportsNet LA" lost the only
+      // thing separating it from "Spectrum SportsNet". The fixture separators
+      // are excluded instead, so the mangled "NFL vs RedZone" still matches
+      // "NFL RedZone".
+      if (p1.words.size === p2.words.size) {
         let shared = 0;
-        for (const w of p1.tokens) if (p2.tokens.has(w)) shared++;
-        if (shared === p1.tokens.size) return true;
+        for (const w of p1.words) if (p2.words.has(w)) shared++;
+        if (shared === p1.words.size) return true;
       }
     }
 
@@ -468,9 +489,14 @@ class MatchAggregator {
     // 6b. Both channel-like: strict identity only. Distinct channels with shared
     //     branding must never merge.
     if (p1.norm === p2.norm) return true;
+    // On `words`, not `tokens`: tokens drop anything under three characters, so
+    // "Spectrum SportsNet LA" and "Spectrum SportsNet" came through here as the
+    // same two words and merged at a similarity of 1.0. This rule exists to
+    // keep distinct channels that share branding apart, and a two-letter
+    // regional suffix is exactly the branding difference it was missing.
     let common = 0;
-    for (const w of p1.tokens) if (p2.tokens.has(w)) common++;
-    const union = p1.tokens.size + p2.tokens.size - common;
+    for (const w of p1.words) if (p2.words.has(w)) common++;
+    const union = p1.words.size + p2.words.size - common;
     if (union > 0 && common / union >= 0.75) return true;
     return false;
   }
