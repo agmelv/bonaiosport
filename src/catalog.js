@@ -65,17 +65,20 @@ function prewarmTopMatches(matches, conf) {
 // was building one per style per dated fixture, so a catalog of a thousand
 // fixtures paid for up to two thousand of them on every request. There are only
 // ever a handful of distinct (zone, style) pairs, so they are made once.
-const _zoneFormatters = new Map();
-function zoneFormatter(timeZone, style) {
-  const key = (timeZone || '') + '|' + style;
-  let f = _zoneFormatters.get(key);
+const _formatters = new Map();
+function dtf(key, opts) {
+  let f = _formatters.get(key);
   if (f === undefined) {
-    try { f = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: style }); }
+    try { f = new Intl.DateTimeFormat('en-US', opts); }
     catch { f = null; }        // an unknown zone: remembered as unusable
-    _zoneFormatters.set(key, f);
+    // Only a successful build is kept, so the keys are bounded by the valid
+    // zones the configure page offers rather than by anything a caller invents.
+    if (f) _formatters.set(key, f);
   }
   return f;
 }
+const zoneFormatter = (timeZone, style) =>
+  dtf('z|' + (timeZone || '') + '|' + style, { timeZone, timeZoneName: style });
 
 function zoneLabel(dateObj, timeZone) {
   const name = style => {
@@ -100,12 +103,17 @@ function formatKickoff(dateObj, timeZone, hour12 = true) {
   // looks like everywhere it is used. 12-hour keeps the bare hour.
   const opts = { hour: hour12 ? 'numeric' : '2-digit', minute: '2-digit', hour12 };
   if (timeZone) opts.timeZone = timeZone;
+  // toLocaleTimeString builds a formatter of its own on every call, which is the
+  // larger half of the cost -- the same memo covers it. `hour12` is enough of a
+  // key because the hour style is derived from it.
   let time;
-  try {
-    time = dateObj.toLocaleTimeString('en-US', opts);
-  } catch {
+  const f = dtf('t|' + (timeZone || '') + '|' + hour12, opts);
+  if (f) {
+    time = f.format(dateObj);
+  } else {
     // An unknown zone in a saved config should cost the label, not the time.
-    time = dateObj.toLocaleTimeString('en-US', { hour: hour12 ? 'numeric' : '2-digit', minute: '2-digit', hour12 });
+    const bare = { hour: hour12 ? 'numeric' : '2-digit', minute: '2-digit', hour12 };
+    time = dtf('t||' + hour12, bare).format(dateObj);
     timeZone = undefined;
   }
   const zone = zoneLabel(dateObj, timeZone);
