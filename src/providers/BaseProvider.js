@@ -157,14 +157,22 @@ class BaseProvider {
       ...hosts.filter(h => h !== this._activeHost && benched(h)),
     ];
 
-    // Per-host leash. Several of these in series still has to fit inside the
-    // stream path's own deadline, so it is well under proxyFetch's default.
-    const perHost = options.timeoutMs || 6000;
+    // The host we expect to answer gets a full budget; the rest are probes and
+    // get a short one. Giving every candidate the same short leash would have
+    // made a slow-but-working site fail where it used to succeed -- a real
+    // regression traded for a failure case that does not need that long to
+    // detect. Worst case across the list stays under the single-host timeout
+    // this replaced, so no path waits longer than it did before.
+    const firstTimeout = options.timeoutMs || 10000;
+    const probeTimeout = Math.min(firstTimeout, 4000);
     let lastErr = null;
 
-    for (const host of ordered) {
+    for (const [i, host] of ordered.entries()) {
       try {
-        const res = await this.proxyFetch(`https://${host}${path}`, { ...options, timeoutMs: perHost });
+        const res = await this.proxyFetch(`https://${host}${path}`, {
+          ...options,
+          timeoutMs: i === 0 ? firstTimeout : probeTimeout,
+        });
         if (!res.ok) {
           lastErr = new Error(`HTTP ${res.status} from ${host}`);
           this._benched.set(host, Date.now() + BaseProvider.HOST_BENCH_MS);
