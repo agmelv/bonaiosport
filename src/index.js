@@ -1304,15 +1304,40 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     const opts = catalogOptions[cat.id] || {};
     const extra = Array.isArray(cat.extra) ? cat.extra : [];
 
+    // Where a catalog appears is decided by whether it can be loaded with no
+    // parameters. A client puts a catalog on its home board only if it can ask
+    // for it bare; a REQUIRED extra makes that impossible, and the catalog falls
+    // back to the places where the client can offer a choice.
+    //
+    //   nothing required        home board + discover
+    //   genre required          discover only          (opts.noHome)
+    //   search required         search only            (opts.searchOnly)
+    //
+    // So "off the board but still browsable" is a required genre with one
+    // option, which is the trick AIOMetadata uses for the same setting.
+    let next = extra;
+
     if (opts.noSearch) {
-      cat.extra = extra.filter(e => e.name !== 'search');
-    } else if (opts.searchOnly) {
-      // A required extra is how a catalog says "only when asked for": clients
-      // cannot render it on a board without one, so it surfaces through search
-      // and nowhere else.
-      cat.extra = extra.map(e => (e.name === 'search' ? { ...e, isRequired: true } : e));
-      if (!cat.extra.some(e => e.name === 'search')) cat.extra.push({ name: 'search', isRequired: true });
+      next = next.filter(e => e.name !== 'search');
+    } else if (!next.some(e => e.name === 'search')) {
+      next = [...next, { name: 'search', isRequired: false }];
     }
+
+    if (opts.searchOnly) {
+      // Search only: the strongest of the three, so it settles the question and
+      // the board/discover distinction below no longer applies.
+      next = next.map(e => (e.name === 'search' ? { ...e, isRequired: true } : e));
+      if (!next.some(e => e.name === 'search')) next = [...next, { name: 'search', isRequired: true }];
+      next = next.filter(e => e.name !== 'genre');
+    } else if (opts.noHome) {
+      if (!next.some(e => e.name === 'genre')) {
+        next = [{ name: 'genre', options: ['All'], isRequired: true }, ...next];
+      }
+    } else {
+      next = next.filter(e => e.name !== 'genre');
+    }
+
+    cat.extra = next;
     if (Array.isArray(cat.extra) && !cat.extra.length) delete cat.extra;
   }
 

@@ -365,7 +365,7 @@
                 border-radius: 8px; font-size: 14px; }
     .icon-btn:hover { color: #fff; background: rgba(255,255,255,.06); }
     .icon-btn.on { color: #3fb950; }
-    .icon-btn.home.on, .icon-btn.shuffle.on { color: var(--accent); }
+    .icon-btn.home.on, .icon-btn.shuffle.on, .icon-btn.search.on { color: var(--accent); }
     .cat-menu { position: absolute; z-index: 40; min-width: 200px; background: #1b1b20;
                 border: 1px solid #33333b; border-radius: 12px; padding: 6px;
                 box-shadow: 0 18px 40px rgba(0,0,0,.55); }
@@ -822,6 +822,10 @@
       ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
       + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
 
+    const SEARCH_SVG =
+      '<svg width="17" height="17"' + STROKE
+      + '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+
     const HOME_SVG =
       '<svg width="17" height="17"' + STROKE
       + '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
@@ -890,7 +894,9 @@
       }
       // Lit when the thing it stands for is on, so a row reads at a glance.
       const home = item.querySelector('.home');
-      if (home) home.classList.toggle('on', !opts.searchOnly);
+      if (home) home.classList.toggle('on', !opts.noHome && !opts.searchOnly);
+      const srch = item.querySelector('.search');
+      if (srch) srch.classList.toggle('on', !opts.noSearch);
       const shuf = item.querySelector('.shuffle');
       if (shuf) shuf.classList.toggle('on', !!opts.shuffle);
       applyHideDisabled();
@@ -993,7 +999,9 @@
     // ---- bulk actions ------------------------------------------------------
     // One option applied to one row, so the bulk bar and the row menu cannot
     // drift apart in what they mean by "search only".
-    const EXCLUSIVE = { searchOnly: 'noSearch', noSearch: 'searchOnly', shuffle: 'reverse', reverse: 'shuffle' };
+    // searchOnly is the strongest placement, so turning it on clears the weaker
+    // noHome -- a tab cannot be both search-only and discover-only.
+    const EXCLUSIVE = { searchOnly: 'noHome', noSearch: 'searchOnly', shuffle: 'reverse', reverse: 'shuffle' };
 
     function setOption(item, key, on) {
       const opts = readOpts(item);
@@ -1050,11 +1058,17 @@
       { key: 'eye', title: 'Shown in the app', svg: EYE_SVG,
         run: item => { const on = !readOpts(item).hidden;
                        for (const t of targets(item)) setOption(t, 'hidden', on); } },
-      // "Browsable" is this addon's version of a home board: the tab can be
-      // opened, rather than only reached by searching for it.
-      { key: 'home', title: 'Browsable (not search-only)', svg: HOME_SVG,
-        run: item => { const on = !readOpts(item).searchOnly;
-                       for (const t of targets(item)) setOption(t, 'searchOnly', on); } },
+      // Where a tab appears is decided by whether a client can ask for it with
+      // no parameters. On: home board and Discover. Off: Discover only, which
+      // the server arranges with a required genre.
+      { key: 'home', title: 'On the home board (off = Discover only)', svg: HOME_SVG,
+        run: item => { const on = !!readOpts(item).noHome;   // currently off -> turn on
+                       for (const t of targets(item)) setOption(t, 'noHome', !on); } },
+      // Independent of the two above: a tab can be off the board and still be
+      // searchable, which is the combination the old single toggle could not say.
+      { key: 'search', title: 'Searchable', svg: SEARCH_SVG,
+        run: item => { const on = !!readOpts(item).noSearch;
+                       for (const t of targets(item)) setOption(t, 'noSearch', !on); } },
       { key: 'shuffle', title: 'Shuffle this tab', svg: SHUFFLE_SVG,
         run: item => { const on = !readOpts(item).shuffle;
                        for (const t of targets(item)) setOption(t, 'shuffle', on); } },
