@@ -1,5 +1,6 @@
 const BaseProvider = require('./BaseProvider');
 const { normalizeGenre } = require('../channelGenres');
+const { regionFromCode, splitRegion } = require('../channelRegions');
 const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
@@ -85,9 +86,14 @@ class TimStreamsProvider extends BaseProvider {
             url: st.url
           }));
         if (!sources.length) continue;
+        const split = splitRegion(c.name);
         out.push(new MatchEntity({
           id: `ts_ch_${c.url}`,
           title: String(c.name).trim(),
+          // The site's flag when it sets one, else a region word at the end of
+          // the name ("Sky Sport 1 NZ", "DAZN 1 Germany").
+          region: regionFromCode(c.flag) || split.region,
+          baseTitle: split.base,
           category: 'networks',
           date: '0',
           popular: '0',

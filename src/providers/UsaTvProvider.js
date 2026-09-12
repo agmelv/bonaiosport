@@ -161,6 +161,8 @@ class UsaTvProvider extends BaseProvider {
         out.push(new MatchEntity({
           id: `ustv_${m.id}`,
           title,
+          region: 'US',
+          baseTitle: title,
           category: 'networks',
           // No kickoff: that is what marks it a channel rather than a fixture.
           date: '0',

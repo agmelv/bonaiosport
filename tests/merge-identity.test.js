@@ -72,5 +72,12 @@ t(false, same(ch('SportsNet New York'), ch('SportsNet Pittsburgh')), 'SportsNet 
 // channel rule and the similarity rule below it compare `words` instead.
 t(false, same(ch('Spectrum SportsNet'), ch('Spectrum SportsNet LA')), 'a two-letter regional suffix still counts')
 
+console.log('--- regions: one channel name, several countries')
+// ESPN is a US network and separate feeds elsewhere, with different commentary.
+const rch = (t, region) => ({ id: 'r' + t + region, title: t, category: 'networks', date: 0, sources: [], region })
+t(false, same(rch('ESPN', 'US'), rch('ESPN', 'NZ')), 'ESPN US is not ESPN NZ')
+t(true,  same(rch('ESPN', 'US'), rch('ESPN', 'US')), 'the same channel in one region still merges')
+t(true,  same(rch('ESPN', ''),   rch('ESPN', 'US')), 'a listing that names no region still merges')
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

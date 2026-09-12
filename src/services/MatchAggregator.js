@@ -197,6 +197,40 @@ const eventMarks = require('./EventMarkService');
 const { getChannelLogo } = require('./ChannelLogoService');
 const leagueBadges = require('./LeagueBadgeService');
 const { moreSpecific } = require('../channelGenres');
+const { baseKey } = require('../channelRegions');
+
+/**
+ * Give a region to the 24/7 channels whose source did not say, before merging.
+ *
+ * Channels in different regions never merge, but a listing with no region
+ * merges with anything -- so a plain "ESPN" would join whichever regional ESPN
+ * the merge happened to meet first, and could carry a US feed into ESPN NZ.
+ * Every source's channels are seen here together: a name that exists in one
+ * region takes it, and a name that exists in several takes US when one of
+ * them is, since the feeds that leave the region off are the US ones.
+ */
+function _assignChannelRegions(batches) {
+  const isChannel = (m) => m && (!m.date || m.category === 'networks');
+  const keyOf = (m) => baseKey(m.baseTitle || m.title);
+  const known = new Map();
+  for (const list of batches) {
+    for (const m of list || []) {
+      if (!isChannel(m) || !m.region) continue;
+      const k = keyOf(m);
+      if (!known.has(k)) known.set(k, new Set());
+      known.get(k).add(m.region);
+    }
+  }
+  for (const list of batches) {
+    for (const m of list || []) {
+      if (!isChannel(m) || m.region) continue;
+      const regions = known.get(keyOf(m));
+      if (!regions) continue;
+      if (regions.size === 1) m.region = [...regions][0];
+      else if (regions.has('US')) m.region = 'US';
+    }
+  }
+}
 
 /**
  * A fixture's identity, independent of how any provider spelled it.
@@ -365,6 +399,7 @@ class MatchAggregator {
     return {
       id,
       category: e && e.category ? String(e.category) : '',
+      region: e && e.region ? String(e.region) : '',
       date: Number(e && e.date) || 0,
       teams: _tryExtractTeams(title),
       tokens: new Set(_tokenize(_compoundify(_stripNoise(title)))),
@@ -404,6 +439,10 @@ class MatchAggregator {
    *     "US Open Court 13" + "Court 7" merged)
    */
   _sameEventPre(p1, p2) {
+    // Channels in two different regions are two channels, whatever else they
+    // share -- ESPN US and ESPN NZ are different feeds with different
+    // commentary. First, because nothing below should be allowed to fuse them.
+    if (p1.region && p2.region && p1.region !== p2.region) return false;
     // 0. Same upstream event number — checked before every guard, because it is
     //    identity rather than similarity. This is what the category guard below
     //    was blocking: StreamSports99 files NCAA games as `college` while
@@ -572,6 +611,14 @@ class MatchAggregator {
         if (!existing.league && match.league) existing.league = match.league;
         // Two sources can file one channel differently; keep the more specific group.
         existing.genre = moreSpecific(existing.genre, match.genre) || '';
+        // A group takes the region of the first member that knows one, and its
+        // stored identity is updated with it, so a later listing from another
+        // region is compared against the region rather than against a blank.
+        if (!existing.region && match.region) {
+          existing.region = match.region;
+          finalPres[idx] = { ...finalPres[idx], region: match.region };
+        }
+        if (!existing.baseTitle && match.baseTitle) existing.baseTitle = match.baseTitle;
         if (!existing.team1 && match.team1) existing.team1 = match.team1;
         else if (existing.team1 && !existing.team1.logo && match.team1 && match.team1.logo) existing.team1.logo = match.team1.logo;
         if (!existing.team2 && match.team2) existing.team2 = match.team2;
@@ -608,6 +655,7 @@ class MatchAggregator {
           }
           if (groupIsMangled || fuller) {
             existing.title = match.title;
+            if (match.baseTitle) existing.baseTitle = match.baseTitle;
             finalPres[idx] = { ...finalPres[idx], teams: null, tokens: pre.tokens, norm: pre.norm, digits: pre.digits };
           }
         } else if (!existing._titleIsFixture && pre.teams) {
@@ -631,13 +679,16 @@ class MatchAggregator {
     // only reliable success signal; it keeps a total upstream outage from wiping the cache.
     let anyProviderSucceeded = false;
 
+    // Every provider's results are gathered before any are merged, so the
+    // region pass below can see all of them at once.
+    const batches = [];
     if (process.env.LOW_MEMORY_MODE === 'true') {
       // Memory-safe sequential fetching (Alwaysdata)
       for (const p of this.providers) {
         try {
           const providerMatches = await p.getMatches();
           if (Array.isArray(providerMatches) && providerMatches.length > 0) anyProviderSucceeded = true;
-          processProviderMatches(providerMatches);
+          batches.push(providerMatches);
         } catch (err) {
           console.error(`[MatchAggregator] Provider fetch failed:`, err.message);
         }
@@ -648,12 +699,14 @@ class MatchAggregator {
       results.forEach((promiseResult, index) => {
         if (promiseResult.status === 'fulfilled') {
           if (Array.isArray(promiseResult.value) && promiseResult.value.length > 0) anyProviderSucceeded = true;
-          processProviderMatches(promiseResult.value);
+          batches.push(promiseResult.value);
         } else {
           console.error(`[MatchAggregator] Provider ${index} failed:`, promiseResult.reason);
         }
       });
     }
+    _assignChannelRegions(batches);
+    for (const b of batches) processProviderMatches(b);
 
     const now = Date.now();
     // Smart Trending Engine: Boost popular matches globally, but only if they are actually live or starting soon
@@ -714,6 +767,29 @@ class MatchAggregator {
       const expiryWindowMs = isTimStreams ? (48 * 3600 * 1000) : (24 * 3600 * 1000);
       return now <= kickoff + expiryWindowMs;
     });
+
+    // The same channel name in more than one region is labelled with it --
+    // "ESPN US", "ESPN NZ" -- and a name found in one region keeps the name it
+    // had. Counted after merging, across every source. Providers build fresh
+    // entities each sync, so a label is never added to one already labelled.
+    const isChannelMatch = (m) => !m.date || m.category === 'networks';
+    const regionsByName = new Map();
+    for (const m of activeMatches) {
+      if (!isChannelMatch(m) || !m.region) continue;
+      const k = baseKey(m.baseTitle || m.title);
+      if (!regionsByName.has(k)) regionsByName.set(k, new Set());
+      regionsByName.get(k).add(m.region);
+    }
+    let labelled = 0;
+    for (const m of activeMatches) {
+      if (!isChannelMatch(m) || !m.region) continue;
+      const regions = regionsByName.get(baseKey(m.baseTitle || m.title));
+      if (regions && regions.size > 1) {
+        m.title = `${m.baseTitle || m.title} ${m.region}`;
+        labelled++;
+      }
+    }
+    if (labelled) console.log(`[MatchAggregator] ${labelled} channels labelled with their region`);
 
     console.log(`[MatchAggregator] Sync complete. Merged ${activeMatches.length} active events.`);
     if (anyProviderSucceeded) {

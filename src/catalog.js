@@ -221,7 +221,8 @@ function iptvLogoFor(title) {
     if (!p || typeof p.logoForName !== 'function') return null;
     const words = String(title || '').trim().split(/\s+/);
     const last = (words[words.length - 1] || '').toUpperCase();
-    const COUNTRY = { USA: 'US', US: 'US', UK: 'UK', IE: 'IE', NZ: 'NZ', AU: 'AU', CA: 'CA', PL: 'PL' };
+    const COUNTRY = { USA: 'US', US: 'US', UK: 'UK', IE: 'IE', NZ: 'NZ', AU: 'AU', CA: 'CA', PL: 'PL',
+      DE: 'DE', IT: 'IT', ES: 'ES', PT: 'PT', FR: 'FR', MX: 'MX', BR: 'BR', AR: 'AR', NL: 'NL', BE: 'BE' };
     if (words.length > 1 && COUNTRY[last]) {
       return p.logoForName(words.slice(0, -1).join(' '), COUNTRY[last]);
     }

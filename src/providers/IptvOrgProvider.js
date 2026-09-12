@@ -1,5 +1,6 @@
 const dns = require('dns').promises;
 const { normalizeGenre, moreSpecific } = require('../channelGenres');
+const { regionFromCode } = require('../channelRegions');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -144,6 +145,8 @@ class IptvOrgProvider extends BaseProvider {
         matches.push(new MatchEntity({
           id: `iptv_${c.id}`,
           title: String(c.name).trim(),
+          region: regionFromCode(c.country),
+          baseTitle: String(c.name).trim(),
           category: 'networks',
           date: '0',
           popular: '0',

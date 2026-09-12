@@ -2,6 +2,8 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 
+const { splitRegion } = require('../channelRegions');
+
 // Words that are initials in a channel name, for turning a feed slug back into
 // the name people know the channel by.
 const CHANNEL_ACRONYMS = new Set(['espn', 'nfl', 'nba', 'mlb', 'nhl', 'tv', 'abc', 'cbs', 'nbc', 'fox', 'sec', 'acc', 'ufc', 'f1', 'bt', 'tnt', 'hbo', 'usa']);
@@ -147,6 +149,8 @@ class StreamedPkProvider extends BaseProvider {
                 // takes the first match by id.
                 id: `spk_ch_${src.streamId}`,
                 title: channelName,
+                region: splitRegion(channelName).region,
+                baseTitle: splitRegion(channelName).base,
                 category: 'networks',
                 status: '',
                 date: '',
@@ -160,6 +164,8 @@ class StreamedPkProvider extends BaseProvider {
           matches.push(new MatchEntity({
             id: `spk_${item.id}`,
             title: item.title,
+            region: is247Channel ? splitRegion(item.title).region : '',
+            baseTitle: is247Channel ? splitRegion(item.title).base : '',
             category: is247Channel && (item.id.includes('channel') || item.id.includes('network') || item.id.includes('tv') || Number(item.date) <= 0) ? (item.category === 'cricket' ? 'cricket' : (item.category === 'tennis' ? 'tennis' : (item.category === 'rugby' ? 'rugby' : this.normalizeCategory(item.category)))) : this.normalizeCategory(item.category),
             status: status,
             date: is247Channel ? '' : String(item.date || Date.now()),

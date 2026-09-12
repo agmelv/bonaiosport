@@ -2,6 +2,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { parseTimezone } = require('../timezone');
+const { regionFromCode } = require('../channelRegions');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -90,10 +91,11 @@ class CdnLiveProvider extends BaseProvider {
    * so listing them would add rows that never play; the list is re-read on each
    * catalog refresh, so a channel that comes back reappears on its own.
    *
-   * One entry per name, and a US channel wins over a same-named foreign one --
-   * this is mostly a US audience, and two rows called ESPN is a bug to them.
-   * Names are left as the list writes them so they merge with the same channel
-   * from TimStreams, iptv-org and USA TV rather than sitting beside it.
+   * One entry per name per country. The list reuses names across countries --
+   * ESPN three times, ESPN 2 four -- and those are different channels, so each
+   * carries its region: channels in different regions never merge, and a name
+   * that repeats is labelled with it. Names are otherwise left as the list
+   * writes them so each merges with the same channel from another source.
    *
    * Plain ESPN is missing from the list though its player plays, so it is
    * added by hand while the list still lacks it.
@@ -108,22 +110,20 @@ class CdnLiveProvider extends BaseProvider {
       const list = data && Array.isArray(data.channels) ? data.channels : [];
       const nameOf = (c) => String((c && c.name) || '').trim().toLowerCase();
 
-      // Only the countries worth carrying. The list reuses names across
-      // countries -- "ESPN" three times, "ESPN 2" four, "beIN SPORTS 1" three --
-      // and a foreign feed that merged by name into the US channel would put a
-      // Portuguese commentary track behind the ESPN row. US, UK and Canadian
-      // brands are what the other channel sources carry under the same names.
-      const countries = new Set((process.env.CDNLIVE_COUNTRIES || 'us,gb,ca')
+      // Every country by default. Regions keep a foreign ESPN from merging into
+      // the US one, so there is no longer a reason to drop them; set
+      // CDNLIVE_COUNTRIES (e.g. "us,gb,ca") to carry fewer.
+      const countries = new Set((process.env.CDNLIVE_COUNTRIES || '')
         .split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
       const online = list.filter(c =>
         c && c.name && typeof c.url === 'string' && /^https?:\/\//i.test(c.url)
-        && c.status === 'online' && countries.has(String(c.code || '').toLowerCase()));
+        && c.status === 'online' && (!countries.size || countries.has(String(c.code || '').toLowerCase())));
 
       // Plain US ESPN is absent though its player plays. Checked against US
       // entries specifically: foreign ESPNs are listed, so "is ESPN listed"
       // would say yes and the real one would never be added.
       const usListed = new Set(list.filter(c => c && c.code === 'us').map(nameOf));
-      if (countries.has('us') && !usListed.has('espn')) {
+      if ((!countries.size || countries.has('us')) && !usListed.has('espn')) {
         online.push({
           name: 'ESPN',
           code: 'us',
@@ -133,12 +133,10 @@ class CdnLiveProvider extends BaseProvider {
         });
       }
 
-      const usNames = new Set(online.filter(c => c.code === 'us').map(nameOf));
       const seen = new Set();
       const picked = [];
       for (const c of online) {
-        const key = nameOf(c);
-        if (c.code !== 'us' && usNames.has(key)) continue;
+        const key = `${nameOf(c)}|${String(c.code || '').toLowerCase()}`;
         if (seen.has(key)) continue;
         seen.add(key);
         picked.push(c);
@@ -150,6 +148,8 @@ class CdnLiveProvider extends BaseProvider {
         return new MatchEntity({
           id: `cdn_ch_${c.code || 'xx'}_${slug}`,
           title,
+          region: regionFromCode(c.code),
+          baseTitle: title,
           category: 'networks',
           date: '0',
           popular: '0',

@@ -30,7 +30,10 @@ const COUNTRY = {
   germany: 'de', deutschland: 'de', italia: 'it', italy: 'it',
   spain: 'es', espana: 'es', portugal: 'pt', francais: 'fr', france: 'fr',
   pl: 'pl', poland: 'pl', australia: 'au', au: 'au', canada: 'ca', ca: 'ca',
-  mexico: 'mx', brasil: 'br', brazil: 'br'
+  mexico: 'mx', brasil: 'br', brazil: 'br',
+  // The short codes region labels use ("ESPN NZ", "DAZN 1 DE").
+  de: 'de', it: 'it', es: 'es', pt: 'pt', fr: 'fr', mx: 'mx', br: 'br',
+  ar: 'ar', argentina: 'ar', nl: 'nl', be: 'be'
 };
 
 // Names the feeds use that tv-logos files under a different slug. Kept to cases
