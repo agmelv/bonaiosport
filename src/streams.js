@@ -8,6 +8,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // waiting beats handing back an empty list.
 const SOURCE_DEADLINE_MS = Number(process.env.STREAM_DEADLINE_MS) || 3500;
 const SOURCE_HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS) || 9000;
+// How much longer to wait for sources that are still resolving once some have
+// already answered. Completeness on the first open is worth a few seconds;
+// asking the viewer to refresh until the list stops changing is not.
+const SOURCE_STRAGGLER_MS = Number(process.env.STREAM_STRAGGLER_MS) || 2500;
 
 // Source selection (shared by handleStream and prewarmMatch)
 function selectSources(matchSources, config) {
@@ -369,6 +373,23 @@ async function handleStream(type, id, config) {
   }
 
   await Promise.race([allDone, sleep(SOURCE_DEADLINE_MS)]);
+
+  // Stragglers: sources still working when the deadline passed.
+  //
+  // Returning at the deadline is what made the list change between refreshes.
+  // The first open showed whatever had landed by 3.5 s, the rest arrived in the
+  // cache a moment later, and the same match that had just shown 8 streams
+  // showed 12 on a reload -- so the way to see the full list was to ask twice.
+  //
+  // The wait is bounded, and it only happens while something is genuinely still
+  // in flight AND something has already landed. A match whose sources are
+  // simply empty does not qualify and still returns at the deadline, which is
+  // the case the deadline was measured against in the first place. Worst case
+  // moves from 3.5 s to 6 s, and only for a cold open of a match whose sources
+  // are slow rather than absent.
+  if (collected.length > 0 && finished < resolvePromises.length) {
+    await Promise.race([allDone, sleep(SOURCE_STRAGGLER_MS)]);
+  }
 
   // Only when nothing at all has landed. Waiting for a fuller list was tried and
   // measured worse: on matches whose sources are simply empty, holding on for

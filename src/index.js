@@ -551,6 +551,9 @@ app.get('/api/cache/stats', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({
     images: imageService.cacheStats(),
+    // Whether warming is actually surviving to the click: a rising evictions
+    // count against a flat hits count is the cap being too small for the board.
+    streams: container.resolve('streamResolveCache').stats(),
     warmer: cardWarmer.status(),
     matches: container.resolve('cacheService').getMatches().length,
     admin: isAdmin(req),

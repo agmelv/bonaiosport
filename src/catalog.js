@@ -32,26 +32,41 @@ const SEARCH_TWIN_SUFFIX_RE = new RegExp(SEARCH_TWIN_SUFFIX.replace(/[.*+?^${}()
  * count, so a catalog polled in a loop does not warm in a loop.
  */
 let lastPrewarmAt = 0;
+let prewarmRunning = false;
 const PREWARM_EVERY_MS = 30 * 1000;
-const PREWARM_MATCHES = 8;
+// Eight covered the top of one tab, and a viewer who scrolled past it opened a
+// cold match -- which is a first click that pays for the scrape and comes back
+// with whatever beat the deadline. Twenty-four covers a live board.
+const PREWARM_MATCHES = 24;
+// Three at a time rather than one: twenty-four sequentially outlasts the
+// interval below, and rounds that overlap are the burst this exists to avoid.
+const PREWARM_CONCURRENCY = 3;
 
 function prewarmTopMatches(matches, conf) {
   const now = Date.now();
-  if (now - lastPrewarmAt < PREWARM_EVERY_MS) return;
+  // The interval alone stopped being enough once a round could outlive it.
+  if (prewarmRunning || now - lastPrewarmAt < PREWARM_EVERY_MS) return;
   lastPrewarmAt = now;
 
   const live = matches.filter(m => m && m.date && isMatchLive(m)).slice(0, PREWARM_MATCHES);
   if (!live.length) return;
 
+  prewarmRunning = true;
   (async () => {
-    for (const m of live) {
-      try {
-        await prewarmMatch(m, conf || {});
-      } catch {
-        // One match failing to warm costs that match's first click, nothing else.
+    const queue = live.slice();
+    const worker = async () => {
+      for (;;) {
+        const m = queue.shift();
+        if (!m) return;
+        try {
+          await prewarmMatch(m, conf || {});
+        } catch {
+          // One match failing to warm costs that match's first click, nothing else.
+        }
       }
-    }
-  })().catch(() => {});
+    };
+    await Promise.all(Array.from({ length: PREWARM_CONCURRENCY }, worker));
+  })().catch(() => {}).finally(() => { prewarmRunning = false; });
 }
 
 /**

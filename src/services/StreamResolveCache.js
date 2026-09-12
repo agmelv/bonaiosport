@@ -16,7 +16,11 @@ const DEFAULT_TTL_MS = 60 * 1000;
 const MIN_TTL_MS = 60 * 1000;
 const MAX_TTL_MS = 10 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 1000;
-const MAX_ENTRIES = 200;
+// One warmed live board is already more than 200 keys -- 24 matches times up
+// to 12 sources each -- so the cap was evicting entries the prewarm had just
+// paid for, before anybody clicked them. Entries are small (a handful of
+// stream objects), and pruneEnded drops a match as soon as it is over.
+const MAX_ENTRIES = 1200;
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
 
 class StreamResolveCache {
