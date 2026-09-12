@@ -494,7 +494,10 @@ function mapMatchToMetaPreview(match, config = {}) {
     // the house card instead, which is 16:9 by construction, and keep the logo
     // itself for the corner rather than repeating the whole poster there.
     poster = imageService.eventUrl(BASE_URL, {
-      text: prettifyName(match.title), mark: channelMark, kicker: '24/7', color
+      text: prettifyName(match.title), mark: channelMark, kicker: '24/7', color,
+      // A channel logo is drawn to stand on its own; the white tile a sport
+      // badge needs reads as a sticker over the card.
+      plate: false
     }) || buildImg(channelMark, posterText, color) || fallbackPoster;
     logo = channelMark;
   } else if (channelLogo) {

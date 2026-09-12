@@ -392,7 +392,11 @@ async function sendCard(req, res, svg, cacheControl) {
  * dark gradient without it.
  */
 function svgEvent(text, entry, color, opts = {}) {
-  const { w = 800, h = 450, kicker = '' } = opts;
+  // `plate` is the white tile the mark is seated on. A sport's badge needs it
+  // -- those marks are line art that disappears on a dark card -- but a TV
+  // channel's logo is already designed to sit on its own and the tile reads as
+  // a sticker pasted over the artwork. Channels ask for it off.
+  const { w = 800, h = 450, kicker = '', plate: showPlate = true } = opts;
   const base = accentColor(color).slice(1);
   const seated = luminance(base) > 0.55 ? shade(base, -0.45)
     : luminance(base) > 0.32 ? shade(base, -0.28)
@@ -405,7 +409,11 @@ function svgEvent(text, entry, color, opts = {}) {
   const plate = 196;
   const plateX = (w - plate) / 2;
   const plateY = 46;
+  // Without the tile there is no frame to sit inside, so the mark takes the
+  // room the tile would have used. The drop shadow moves onto the mark itself,
+  // which is what keeps a dark logo from dissolving into a dark card.
   const markSize = 144;
+  const mark = showPlate ? markSize : 176;
 
   const lines = wrapLines(text, 26, 3);
   const fs = lines.length >= 3 ? 34 : lines.length === 2 ? 40 : 44;
@@ -443,8 +451,8 @@ function svgEvent(text, entry, color, opts = {}) {
   <rect width="${w}" height="${h}" fill="url(#pbg)"/>
   <rect width="${w}" height="${h}" fill="url(#pglow)"/>
   ${kickerEl}
-  ${uri ? `<rect x="${plateX.toFixed(1)}" y="${plateY}" width="${plate}" height="${plate}" rx="30" fill="#ffffff" fill-opacity="0.95" filter="url(#pdrop)"/>
-  <image x="${(plateX + (plate - markSize) / 2).toFixed(1)}" y="${(plateY + (plate - markSize) / 2).toFixed(1)}" width="${markSize}" height="${markSize}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"/>` : ''}
+  ${uri ? `${showPlate ? `<rect x="${plateX.toFixed(1)}" y="${plateY}" width="${plate}" height="${plate}" rx="30" fill="#ffffff" fill-opacity="0.95" filter="url(#pdrop)"/>` : ''}
+  <image x="${(plateX + (plate - mark) / 2).toFixed(1)}" y="${(plateY + (plate - mark) / 2).toFixed(1)}" width="${mark}" height="${mark}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"${showPlate ? '' : ' filter="url(#pdrop)"'}/>` : ''}
   ${textEls}
 </svg>`;
 }
@@ -596,7 +604,7 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
  * Build the /img/event URL. Carries a second mark so a series logo that fails
  * to load still leaves the card its sport icon.
  */
-function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333' }) {
+function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333', plate = true }) {
   if (!mark) return null;
   const q = [
     `text=${encodeURIComponent(text || '')}`,
@@ -605,6 +613,7 @@ function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '3
   ];
   if (mark2) q.push(`mark2=${encodeURIComponent(mark2)}`);
   if (kicker) q.push(`kicker=${encodeURIComponent(kicker)}`);
+  if (!plate) q.push('plate=0');
   q.push(`v=${RENDER_VERSION}`);
   return `${baseUrl}/img/event?${q.join('&')}`;
 }

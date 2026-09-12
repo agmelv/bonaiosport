@@ -646,7 +646,10 @@ app.get('/img/event', async (req, res) => {
   }
   return imageService.sendCard(
     req, res,
-    imageService.svgEvent(text, M.entry, color, { kicker: req.query.kicker || '' }),
+    imageService.svgEvent(text, M.entry, color, {
+      kicker: req.query.kicker || '',
+      plate: req.query.plate !== '0'
+    }),
     'public, max-age=86400, stale-while-revalidate=604800'
   );
 });
