@@ -97,6 +97,36 @@
     }
     .addon-name-hint { text-align: center; margin: 6px 0 0; }
 
+    /* A URL is for copying, not for reading aloud. Field plus a button, the way
+       every other tool that hands you one does it. */
+    .copy-row { display: flex; gap: 8px; align-items: stretch; }
+    /* Out-specifies the generic input[type="text"] further down, which is an
+       equal-specificity selector that would otherwise win on source order and
+       put a URL back into the body font. */
+    .copy-row input[type="text"] {
+      flex: 1; min-width: 0; width: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px; padding: 12px 14px; border-radius: 12px;
+      background: rgba(0, 0, 0, 0.25); color: #e8e8ea;
+      border: 1px solid var(--card-border); outline: none;
+    }
+    .copy-row input[type="text"]:focus { border-color: #3a3a44; }
+    .copy-btn {
+      flex: 0 0 auto; width: 46px; display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.06); color: #c9ced4;
+      border: 1px solid var(--card-border); border-radius: 12px; cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .copy-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+    .copy-btn.done { background: #10b981; border-color: #10b981; color: #fff; }
+
+    .callout {
+      margin-top: 14px; padding: 12px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5;
+      background: rgba(22, 104, 255, .08); border: 1px solid rgba(22, 104, 255, .22); color: #c9ced4;
+    }
+    .callout.warn { background: rgba(245, 158, 11, .09); border-color: rgba(245, 158, 11, .3); }
+    .callout strong { color: #fff; }
+
     .footer-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -558,15 +588,36 @@
       </div>
     </div>
 
-    <button id="saveBtn" class="btn" hidden>SAVE CHANGES</button>
-    <p class="hint" id="saveNote" hidden></p>
+    <div class="section save-card" id="saveCard" hidden>
+      <h3>Your Configuration</h3>
+      <p class="hint">Settings normally live inside the addon's link, so changing one means installing
+        it again. Save them here instead and this address stays the same.</p>
+
+      <div class="input-group">
+        <label for="savedUrl">Install URL</label>
+        <div class="copy-row">
+          <input type="text" id="savedUrl" readonly spellcheck="false">
+          <button type="button" id="copySavedUrl" class="copy-btn" title="Copy install URL" aria-label="Copy install URL">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="callout" id="saveCallout" hidden></div>
+
+      <button id="saveBtn" class="btn" style="margin-top: 16px;">SAVE CHANGES</button>
+    </div>
 
     <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
     <button id="copyBtn" class="btn secondary">COPY LINK (FOR NUVIO APP)</button>
 
     <div style="margin-top: 25px; padding: 16px; background: rgba(22, 104, 255, 0.08); border: 1px solid rgba(22, 104, 255, 0.2); border-radius: 16px; text-align: center;">
       <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-        ☕ <strong>Support Nuvio Live Sports</strong><br>Help keep our servers, scrapers, and 24/7 sports streams online!
+        ☕ <strong>Support AIOSports</strong><br>Help keep our servers, scrapers, and 24/7 sports streams online!
       </p>
       <div class="footer-actions">
         <a class="footer-link kofi" href="https://ko-fi.com/mlp20" target="_blank" rel="noopener noreferrer">
@@ -1348,28 +1399,59 @@
     // their own -- which is the whole point, since every other route out of
     // this page mints a new URL and means installing the addon again.
     const saveBtn = document.getElementById('saveBtn');
-    const saveNote = document.getElementById('saveNote');
+    const saveCard = document.getElementById('saveCard');
+    const saveCallout = document.getElementById('saveCallout');
+    const savedUrlEl = document.getElementById('savedUrl');
+    const copySavedUrl = document.getElementById('copySavedUrl');
 
     async function refreshSaveUi() {
       let gate = { authenticated: false }, state = {};
       try { gate = await (await fetch('/api/site/auth')).json(); } catch (e) {}
       try { state = await (await fetch('/api/config/saved')).json(); } catch (e) {}
-      // Offered only to someone who has signed in. On an open instance there is
-      // no sign-in to do, so it is offered there too.
+
+      // Offered to someone signed in. On an open instance there is no sign-in
+      // to do, so it is offered there too.
       const canSave = gate.authenticated !== false;
-      saveBtn.hidden = !canSave;
-      saveNote.hidden = !canSave;
+      saveCard.hidden = !canSave;
       if (!canSave) return;
-      if (state.exists) {
-        saveNote.innerHTML = 'Saved settings are served at <code>' + (state.url || '/saved/manifest.json') +
-          '</code> — install that once and Save is all you need afterwards.';
-      } else {
-        saveNote.textContent = 'Save these settings to a fixed address, so changing them later does not mean installing the addon again.';
-      }
+
+      savedUrlEl.value = state.url || (window.location.origin + '/saved/manifest.json');
+
       if (state.durable === false) {
-        saveNote.innerHTML += '<br><strong>Note:</strong> nothing is mounted for storage, so a saved config is lost when the container is rebuilt.';
+        saveCallout.hidden = false;
+        saveCallout.className = 'callout warn';
+        saveCallout.innerHTML = '<strong>Not stored permanently.</strong> Nothing is mounted at the data '
+          + 'directory, so these settings are lost the next time the container is rebuilt. '
+          + 'Add a volume (see the README) to keep them.';
+      } else if (state.exists) {
+        saveCallout.hidden = false;
+        saveCallout.className = 'callout';
+        saveCallout.innerHTML = '<strong>Saved.</strong> Install the URL above once — after that, '
+          + 'changes on this page only need Save.';
+      } else {
+        saveCallout.hidden = true;
       }
     }
+
+    copySavedUrl.addEventListener('click', () => {
+      const done = () => {
+        copySavedUrl.classList.add('done');
+        setTimeout(() => copySavedUrl.classList.remove('done'), 1600);
+      };
+      // The clipboard API needs a secure origin and can still refuse, and plenty
+      // of these run on plain http -- so selecting the text is the fallback, and
+      // a refusal falls into it rather than leaving the button looking ignored.
+      const fallback = () => {
+        savedUrlEl.focus();
+        savedUrlEl.select();
+        try { if (document.execCommand('copy')) done(); } catch (e) {}
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(savedUrlEl.value).then(done, fallback);
+      } else {
+        fallback();
+      }
+    });
 
     saveBtn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -1390,13 +1472,14 @@
         } else {
           saveBtn.innerText = 'COULD NOT SAVE';
           saveBtn.style.background = '#b91c1c';
-          if (body.error) { saveNote.hidden = false; saveNote.textContent = body.error; }
+          if (body.error) { saveCallout.hidden = false; saveCallout.className = 'callout warn'; saveCallout.textContent = body.error; }
         }
       } catch (err) {
         saveBtn.innerText = 'COULD NOT SAVE';
         saveBtn.style.background = '#b91c1c';
-        saveNote.hidden = false;
-        saveNote.textContent = 'Cannot reach the server: ' + err.message;
+        saveCallout.hidden = false;
+        saveCallout.className = 'callout warn';
+        saveCallout.textContent = 'Cannot reach the server: ' + err.message;
       }
       setTimeout(() => {
         saveBtn.innerText = original;
