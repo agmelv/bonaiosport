@@ -455,8 +455,16 @@ async function handleStream(type, id, config) {
       const vMatch = originalTitle.match(/👥\s*\d+\s*Viewers/);
       if (vMatch) viewersText = `\n${vMatch[0]}`;
 
+      // "WatchFooty Stream 3": the provider numbers its own mirrors, and that
+      // number is the only thing telling six otherwise identical rows apart.
+      // Both rules below treat a title carrying the word "Stream" as
+      // boilerplate, which threw the number away and left the viewer choosing
+      // between six rows that read the same and behave differently.
+      const numbered = originalTitle.match(/\bstream\s*#?\s*(\d+)\s*$/i);
       const match = originalTitle.match(/\(([^)]+)\)/);
-      if (match && match[1]) {
+      if (numbered) {
+        channelName = 'Stream ' + numbered[1];
+      } else if (match && match[1]) {
         const inner = match[1];
         if (!inner.match(/^[0-9]{3,4}p$/i) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
           channelName = inner;
@@ -511,6 +519,29 @@ async function handleStream(type, id, config) {
       s.title = `📺 ${channelName || '24/7 Live Network'}\n⚙️ Quality: ${quality}`;
     }
   });
+
+  // No two rows may read identically. Six lines saying "WatchFooty / Quality:
+  // HD" are six coin flips: they play different mirrors, one of them works, and
+  // nothing on screen says which one has already been tried. Providers that
+  // number their own mirrors are handled above; this is the backstop for the
+  // ones that do not, and for any that stop.
+  const byLabel = new Map();
+  for (const s of streams) {
+    const key = s.title || '';
+    if (!byLabel.has(key)) byLabel.set(key, []);
+    byLabel.get(key).push(s);
+  }
+  for (const group of byLabel.values()) {
+    if (group.length < 2) continue;
+    group.forEach((s, i) => {
+      // Appended to the first line, beside the provider, so the quality line
+      // underneath keeps reading the way it does on every other row.
+      const nl = String(s.title).indexOf('\n');
+      s.title = nl === -1
+        ? `${s.title} · ${i + 1}`
+        : `${s.title.slice(0, nl)} · ${i + 1}${s.title.slice(nl)}`;
+    });
+  }
 
   // Sort streams by kind first, then by score descending.
   //
