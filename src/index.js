@@ -1245,7 +1245,7 @@ function decodeConfigSegment(configStr) {
   }
 }
 app.get('/:config?/manifest.json', (req, res, next) => {
-  const { manifest } = require('./manifest');
+  const { manifest, SEARCH_TWIN_SUFFIX } = require('./manifest');
   let parsedConfig = {};
   if (req.params.config) {
     parsedConfig = decodeConfigSegment(req.params.config);
@@ -1309,12 +1309,16 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     // for it bare; a REQUIRED extra makes that impossible, and the catalog falls
     // back to the places where the client can offer a choice.
     //
-    //   nothing required        home board + discover
+    //   nothing required        home board + discover + search
     //   genre required          discover only          (opts.noHome)
     //   search required         search only            (opts.searchOnly)
     //
     // So "off the board but still browsable" is a required genre with one
     // option, which is the trick AIOMetadata uses for the same setting.
+    //
+    // The cost is search: a required genre means every request must carry one,
+    // and a search request carries none, so this copy cannot be reached from
+    // the search box. A second copy is published below to cover that.
     let next = extra;
 
     if (opts.noSearch) {
@@ -1385,6 +1389,34 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   // Remove teams catalog if the user hasn't configured any teams
   if (typeof parsedConfig.teams !== 'string' || parsedConfig.teams.trim() === '') {
     newManifest.catalogs = newManifest.catalogs.filter(c => c.id !== 'nuvio_sports_teams');
+  }
+
+  // A tab kept off the home board is published twice, because no single catalog
+  // can be in Discover, off the home board and searchable at once: the required
+  // genre that takes it off the board is exactly what hides it from search. The
+  // twin carries a required search and nothing else, so it is invisible
+  // everywhere except the search box, where it is the copy that answers. The
+  // two are never both offered in the same place, so nothing is listed twice.
+  //
+  // Built last, so a twin inherits the name the viewer typed and is never made
+  // for a tab that the filtering above has already removed.
+  const twins = [];
+  for (const cat of newManifest.catalogs) {
+    const opts = catalogOptions[cat.id] || {};
+    if (!opts.noHome || opts.searchOnly || opts.noSearch) continue;
+    twins.push({
+      after: cat.id,
+      cat: {
+        type: cat.type,
+        id: cat.id + SEARCH_TWIN_SUFFIX,
+        name: cat.name,
+        extra: [{ name: 'search', isRequired: true }]
+      }
+    });
+  }
+  for (const t of twins) {
+    const i = newManifest.catalogs.findIndex(c => c.id === t.after);
+    newManifest.catalogs.splice(i + 1, 0, t.cat);
   }
 
   res.setHeader('Access-Control-Allow-Origin', '*');

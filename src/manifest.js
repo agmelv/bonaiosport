@@ -70,4 +70,9 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-module.exports = { builder, manifest };
+// A tab kept off the home board is published twice, and the second copy wears
+// this suffix. Both ids mean the same category; see the manifest route in
+// index.js for why one catalog cannot cover all three surfaces at once.
+const SEARCH_TWIN_SUFFIX = '__search';
+
+module.exports = { builder, manifest, SEARCH_TWIN_SUFFIX };

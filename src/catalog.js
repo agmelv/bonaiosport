@@ -7,11 +7,16 @@ const teamLogoService = require('./services/TeamLogoService');
 const homeAway = require('./services/HomeAwayService');
 const eventMarks = require('./services/EventMarkService');
 const leagueBadges = require('./services/LeagueBadgeService');
+const { SEARCH_TWIN_SUFFIX } = require('./manifest');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
 // the host first and needs swapping to put the visitor on the left.
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
+
+// Matches the suffix the manifest puts on a search twin, escaped from the
+// constant so the two can never drift apart.
+const SEARCH_TWIN_SUFFIX_RE = new RegExp(SEARCH_TWIN_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$');
 
 /**
  * Warm the fixtures a viewer is most likely to open, while they are still
@@ -597,7 +602,9 @@ async function handleCatalog(type, id, extra, config) {
   
   const conf = config || (extra && extra.config) || {};
 
-  const categoryMatch = id.replace('nuvio_sports_', '');
+  // The search twin of a tab that is off the home board is a separate id in the
+  // manifest but the same category here, so the suffix comes off first.
+  const categoryMatch = id.replace('nuvio_sports_', '').replace(SEARCH_TWIN_SUFFIX_RE, '');
   
   // Use CacheService instead of hitting APIs on demand
   const cacheService = container.resolve('cacheService');
