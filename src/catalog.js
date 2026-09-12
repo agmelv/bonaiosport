@@ -44,6 +44,8 @@ const PREWARM_MATCHES = 40;
 // Three at a time rather than one: twenty-four sequentially outlasts the
 // interval below, and rounds that overlap are the burst this exists to avoid.
 const PREWARM_CONCURRENCY = 3;
+// Popular channels warmed alongside the fixtures; see prewarmTopMatches.
+const PREWARM_CHANNELS = 12;
 
 function prewarmTopMatches(matches, conf) {
   const now = Date.now();
@@ -52,11 +54,18 @@ function prewarmTopMatches(matches, conf) {
   lastPrewarmAt = now;
 
   const live = matches.filter(m => m && m.date && isMatchLive(m)).slice(0, PREWARM_MATCHES);
-  if (!live.length) return;
+  // Popular channels too. A channel has no kickoff, so the live filter above
+  // never picks one, and the busiest channels are the slowest to open cold:
+  // ESPN carries sixteen Streamed.pk feeds that each need a WASM decrypt, and a
+  // cold first open ran past the hard deadline with three of its nineteen
+  // streams. Only channels a source marks popular, so this stays a handful.
+  const channels = matches.filter(m => m && isChannel(m) && m.popular === '1').slice(0, PREWARM_CHANNELS);
+  const targets = [...live, ...channels];
+  if (!targets.length) return;
 
   prewarmRunning = true;
   (async () => {
-    const queue = live.slice();
+    const queue = targets.slice();
     const worker = async () => {
       for (;;) {
         const m = queue.shift();
