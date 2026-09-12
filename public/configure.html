@@ -630,11 +630,44 @@
       for (const item of all) setSelected(item, on);
     });
 
+    // A tab whose sport is switched off will not be in the addon, so it is not
+    // in this list either. The rule matches the server's exactly: the id is the
+    // sport, Other Football rides with American Football, and the tabs that
+    // belong to no single sport always stay.
+    const ALWAYS_SHOWN = new Set(['live', 'upcoming', 'teams', 'channels']);
+    const SPORT_FOR_CATALOG = { other_football: 'american_football' };
+
+    function sportOf(catalogId) {
+      const key = String(catalogId).replace(/^nuvio_sports_/, '');
+      if (ALWAYS_SHOWN.has(key)) return null;
+      return SPORT_FOR_CATALOG[key] || key;
+    }
+
+    function applySportFilter() {
+      const on = new Set(Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value));
+      let visible = 0;
+      for (const item of catalogItems()) {
+        const sport = sportOf(item.dataset.id);
+        const offBySport = sport && !on.has(sport);
+        item.dataset.sportOff = offBySport ? '1' : '';
+        if (offBySport) {
+          item.style.display = 'none';
+          // Its selection would otherwise act on a row nobody can see.
+          if (item.classList.contains('selected')) setSelected(item, false);
+        } else {
+          visible++;
+        }
+      }
+      const count = document.getElementById('catCount');
+      if (count) count.textContent = String(visible);
+    }
+
     // ---- "hide disabled" filter -------------------------------------------
     function applyHideDisabled() {
       const on = document.getElementById('hideDisabled').getAttribute('aria-pressed') === 'true';
       for (const item of catalogItems()) {
-        item.style.display = (on && readOpts(item).hidden) ? 'none' : '';
+        const hiddenHere = on && readOpts(item).hidden;
+        item.style.display = (hiddenHere || item.dataset.sportOff === '1') ? 'none' : '';
       }
     }
     document.getElementById('hideDisabled').addEventListener('click', e => {
@@ -783,6 +816,7 @@
       }
       makeReorderable(catalogList, '.cat-item', () => updateLink());
       refreshSelection();
+      applySportFilter();
       applyHideDisabled();
     }
 
@@ -901,6 +935,7 @@
     if (existingConfig.sports) {
       if (existingConfig.sports === 'none') {
         checkboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
+        applySportFilter(); applyHideDisabled();
       } else if (existingConfig.sports !== 'all') {
         const sports = existingConfig.sports.split(',');
         checkboxes.forEach(cb => {
@@ -1039,6 +1074,10 @@
         const label = e.target.closest('.checkbox-label');
         if (e.target.checked) label.classList.add('active');
         else label.classList.remove('active');
+        // A sport going off takes its tab out of the list below, so the two
+        // halves of this page never disagree about what the addon will have.
+        applySportFilter();
+        applyHideDisabled();
         updateLink();
       });
     });
