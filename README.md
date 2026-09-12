@@ -2,7 +2,7 @@
   <img src="public/logo.png" width="120" height="120" alt="Nuvio Live Sports Logo">
 </p>
 
-# 🔴 Nuvio Live Sports Plugin
+# 🔴 Nuvio Live Sports Addon
 
 [![Ko-fi](https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mlp20)
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
@@ -126,15 +126,36 @@ as it was.
 | Variable | Guards | Leave empty and… |
 |---|---|---|
 | `AUTH_KEY` | the catalog at `/` and `/configure` | anyone with the link can browse |
-| `ADMIN_TOKEN` | `/dashboard` and anything that changes state | the dashboard is limited to callers on the local network |
+| `ADMIN_TOKEN` | `/dashboard` and anything that changes state | the dashboard is limited to callers on a private address |
 
-Set them on the container:
+Put them in a `.env` file beside `docker-compose.yml`:
 
-```yaml
-environment:
-  - AUTH_KEY=${AUTH_KEY}
-  - ADMIN_TOKEN=${ADMIN_TOKEN}
+```bash
+cp .env.example .env
+# then edit .env and set:
+#   AUTH_KEY=something-long
+#   ADMIN_TOKEN=something-else-long
 ```
+
+Both the app and Docker Compose read that file, so the same `.env` works whether
+you run `docker compose up -d` or `npm start`.
+
+**Check it took.** The startup log prints which gates are on:
+
+```
+Sign-in   : AUTH_KEY set
+Dashboard : ADMIN_TOKEN set
+Proxies   : trust proxy = loopback/private only (default)
+```
+
+If either says `NOT SET` and the port is reachable from the internet, it is open.
+That line exists because an unset key fails *open*, and your own browser is shown
+a login page either way — so the only way to notice used to be from another
+machine.
+
+> **Do not leave `ADMIN_TOKEN` empty on a public box.** With no token the admin
+> check falls back to "is this caller on a private address", which is a decision
+> made from a header the caller sends. See [Behind a reverse proxy](#behind-a-reverse-proxy).
 
 Visiting the site then lands on `/login`, and signing in takes you to the
 catalog. The gear icon in the header opens the dashboard, which asks for
@@ -162,9 +183,15 @@ it — an IP allowlist or a VPN — not for this application.
 If you put a proxy (Caddy, nginx, Traefik) in front, the addon must be told, or
 every visitor arrives wearing the proxy's address. It trusts `X-Forwarded-For`
 only from proxies on loopback or a private range, which is the usual arrangement
-and needs no configuration. A proxy on a public address would need
-`trust proxy` widened in `src/index.js`, and you should be sure the port is not
-reachable directly before doing that.
+and needs no configuration.
+
+A proxy on a public address needs `TRUST_PROXY` set — a hop count (`TRUST_PROXY=1`)
+or a comma-separated list of proxy addresses/CIDRs. Set the narrowest value that
+works, and be sure the addon's own port is not reachable directly first.
+
+Do not set it to `true`. That trusts the header from whoever sends it, and since
+`ADMIN_TOKEN` falls back to a private-address check when unset, anyone could then
+claim to be on your network by adding one header.
 
 ---
 

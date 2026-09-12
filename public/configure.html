@@ -258,12 +258,6 @@
     .cat-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px;
                   font-size: 12px; color: #8b8f95; }
     .cat-legend span { display: inline-flex; align-items: center; gap: 6px; }
-    /* Its own name, not .dot. Reusing .dot meant these static legend keys
-       picked up the brand dot's `pulse 2s infinite` and its accent glow -- two
-       little swatches throbbing next to the words "Shown" and "Hidden" -- while
-       this rule's 9px in turn shrank the brand dot in the header from 12px. */
-    .key-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-    .key-dot.on { background: #3fb950; } .key-dot.off { background: #4a4a52; }
     .chip { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
             background: #24242a; color: #c9ced4; border: 1px solid #34343c; }
     .chip:hover { background: #2f2f37; color: #fff; }
@@ -496,11 +490,9 @@
 
     <div class="section">
       <h3>Catalog Management</h3>
-      <p class="hint">Drag to reorder, type to rename. Tap the eye to show or hide a tab, and ⋯ for the rest.</p>
+      <p class="hint">Drag to reorder, type to rename. Tap the eye to show or hide a tab, and the menu beside it for the rest.</p>
 
       <div class="cat-legend">
-        <span><i class="key-dot on"></i> Shown</span>
-        <span><i class="key-dot off"></i> Hidden</span>
         <button type="button" id="hideDisabled" class="chip" aria-pressed="false">Hide disabled</button>
         <button type="button" id="catalogReset" class="chip">Reset all</button>
       </div>
@@ -636,6 +628,26 @@
     // Built from the addon's own manifest rather than a list kept here, so a tab
     // added or renamed in the code shows up without this page being touched.
     const catalogList = document.getElementById('catalogList');
+    // Drawn, not typed. These were emoji -- 👁 and 🚫 -- and an emoji is a font
+    // the browser has to have: on a machine without one the row rendered a
+    // tofu box with the codepoint in it where the control should be. A path
+    // always draws, inherits currentColor, and lines up with the grip beside it.
+    const EYE_SVG =
+      '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+
+    const EYE_OFF_SVG =
+      '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>'
+      + '<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>'
+      + '<path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+    const MORE_SVG =
+      '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+      + '<circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
+
     const GRIP_SVG = '<span class="grip" title="Drag to reorder" aria-label="Drag to reorder">'
       + '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">'
       + '<rect x="2" y="3.25" width="12" height="1.6" rx=".8"/>'
@@ -678,7 +690,7 @@
       item.classList.toggle('is-hidden', !!opts.hidden);
       const eye = item.querySelector('.eye');
       if (eye) {
-        eye.textContent = opts.hidden ? '🚫' : '👁';
+        eye.innerHTML = opts.hidden ? EYE_OFF_SVG : EYE_SVG;
         eye.classList.toggle('on', !opts.hidden);
         eye.setAttribute('aria-label', (opts.hidden ? 'Show ' : 'Hide ') + item.dataset.name);
       }
@@ -945,7 +957,7 @@
         const dots = document.createElement('button');
         dots.type = 'button';
         dots.className = 'icon-btn dots';
-        dots.textContent = '⋯';
+        dots.innerHTML = MORE_SVG;
         dots.setAttribute('aria-label', 'More options for ' + cat.name);
         dots.addEventListener('click', e => { e.stopPropagation(); showMenu(item, dots); });
         row.appendChild(dots);

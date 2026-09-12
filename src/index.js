@@ -1,5 +1,5 @@
 /**
- * index.js — Nuvio Live Sports Plugin Entry Point
+ * index.js — Nuvio Live Sports Addon Entry Point
  *
  * Builds a single Express server that serves:
  *   - /manifest.json          → addon manifest (via SDK getRouter)
@@ -11,6 +11,16 @@
  * CORS headers are explicitly set so Nuvio can reach the manifest
  * from any origin without a networkError_manifestLoadError.
  */
+
+// Before every other require: config.js reads process.env as it loads, so a
+// .env read any later would arrive after PORT and BASE_URL were already fixed.
+//
+// dotenv has been a dependency all along but nothing ever called it, so an
+// AUTH_KEY written into .env -- the one thing anyone locking this down would do
+// -- was read by nobody, and the site stayed open with no sign anything was
+// wrong. Docker escaped it only because Compose does its own .env substitution.
+// `override: false` keeps real environment variables winning over the file.
+require('dotenv').config({ override: false });
 
 const express = require('express');
 const cors    = require('cors');
@@ -99,9 +109,21 @@ const app = express();
 // Trust is limited to proxies on loopback or a private range. A request that
 // arrives straight from a public address cannot forge X-Forwarded-For to claim
 // it came from inside.
-app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
+// TRUST_PROXY widens this when the proxy is not on a private address -- a hop
+// count ("1") or a list of addresses/CIDRs. Never "true" on a public box: that
+// takes the leftmost X-Forwarded-For from anyone, which is the caller's to
+// invent. A line setting exactly that used to sit immediately below this one
+// and silently won, because Express keeps the last value it is given.
+const TRUST_PROXY = String(process.env.TRUST_PROXY || '').trim();
+app.set(
+  'trust proxy',
+  !TRUST_PROXY
+    ? ['loopback', 'linklocal', 'uniquelocal']
+    : /^\d+$/.test(TRUST_PROXY)
+      ? Number(TRUST_PROXY)
+      : TRUST_PROXY.split(',').map(s => s.trim()).filter(Boolean)
+);
 
-app.set('trust proxy', true);
 app.use(cors());
 
 /**
@@ -1503,7 +1525,7 @@ const BIND_HOST = process.env.HOST || process.env.IP || '0.0.0.0';
 app.listen(PORT, BIND_HOST, () => {
   console.log('');
   console.log('╔══════════════════════════════════════════════════════╗');
-  console.log('║          🔴 Nuvio Live Sports Plugin                 ║');
+  console.log('║          🔴 Nuvio Live Sports Addon                  ║');
   console.log('╠══════════════════════════════════════════════════════╣');
   console.log(`║  Port       : ${String(PORT).padEnd(39)}║`);
   console.log(`║  Public URL : ${BASE_URL.padEnd(39)}║`);
@@ -1511,6 +1533,20 @@ app.listen(PORT, BIND_HOST, () => {
   console.log('║  📋 Paste into Nuvio → Settings → Addons:           ║');
   console.log(`║  ${(BASE_URL + '/manifest.json').padEnd(52)}║`);
   console.log('╚══════════════════════════════════════════════════════╝');
+  console.log('');
+
+  // Say out loud which gates are actually on. Both of these fail open when
+  // unset, which is the right default for someone trying the addon on their own
+  // machine and the wrong one for a box on the internet -- and the difference
+  // was invisible, because an owner's own browser sees a login page either way.
+  const siteKey = process.env.AUTH_KEY;
+  const adminKey = process.env.ADMIN_TOKEN;
+  console.log(`  Sign-in   : ${siteKey ? 'AUTH_KEY set' : 'NOT SET — anyone who can reach this can browse it'}`);
+  console.log(`  Dashboard : ${adminKey ? 'ADMIN_TOKEN set' : 'NOT SET — admin open to callers on a private address'}`);
+  console.log(`  Proxies   : trust proxy = ${TRUST_PROXY || 'loopback/private only (default)'}`);
+  if (!siteKey || !adminKey) {
+    console.log('  → Set these in .env (or the environment) if this port is reachable from the internet.');
+  }
   console.log('');
 
   // Make the cards before anyone asks. Delayed so the providers have answered

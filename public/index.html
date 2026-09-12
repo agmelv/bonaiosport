@@ -23,10 +23,26 @@
     .brand { display: flex; align-items: center; gap: 12px; font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 900; }
     .brand span { background: linear-gradient(to right, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .brand img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 4px 12px rgba(22, 104, 255, 0.3); }
+    /* Up here rather than beside the tabs, where it took 200px off a row that
+       already scrolls -- the last tab sat underneath it and looked cut off. The
+       tab strip now gets the full width and this gets the space the header has
+       going spare. */
+    .header-search {
+      flex: 1 1 180px; min-width: 140px; max-width: 420px;
+      padding: 10px 18px; border-radius: 30px; font-family: 'Inter', sans-serif;
+      font-size: 14px; background: rgba(255,255,255,0.05);
+      border: 1px solid var(--card-border); color: #fff; outline: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .header-search::placeholder { color: var(--text-muted); }
+    .header-search:focus { border-color: var(--accent); background: rgba(255,255,255,0.08); }
     main { padding: 40px; max-width: 1600px; margin: 0 auto; }
     @media (max-width: 768px) {
       header { padding: 15px 20px; flex-direction: column; align-items: flex-start; }
       main { padding: 20px; }
+      /* Stacked header: the search gets its own full-width line rather than a
+         420px cap that would leave it stranded against the left edge. */
+      .header-search { width: 100%; max-width: none; flex: none; order: 3; }
       .header-actions { width: 100%; }
       .header-actions a { flex: 1; justify-content: center; text-align: center; }
     }
@@ -74,6 +90,7 @@
       <img src="/logo.png" alt="Nuvio Live Sports">
       <span>Nuvio Live Sports</span>
     </div>
+    <input type="text" id="searchInput" class="header-search" placeholder="Search matches…" aria-label="Search matches">
     <div class="header-actions">
       <a href="https://ko-fi.com/mlp20" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 94, 91, 0.15); border: 1px solid rgba(255, 94, 91, 0.3); color: #FF5E5B; padding: 8px 16px; border-radius: 30px; text-decoration: none; font-weight: 700; font-size: 13px; transition: all 0.2s;">
         <svg height="14" viewBox="0 0 24 24" width="14" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
@@ -89,16 +106,13 @@
       <a href="/dashboard" title="Dashboard — caches, warming and health" aria-label="Dashboard" style="display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; border-radius: 50%; text-decoration: none; transition: all 0.2s;">
         <svg height="17" width="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </a>
-      <a href="/configure" style="background: var(--accent); color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none; font-weight: 700; font-family: 'Outfit', sans-serif; transition: all 0.2s; box-shadow: 0 4px 15px var(--accent-glow);">Configure Plugin</a>
+      <a href="/configure" style="background: var(--accent); color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none; font-weight: 700; font-family: 'Outfit', sans-serif; transition: all 0.2s; box-shadow: 0 4px 15px var(--accent-glow);">Configure Addon</a>
     </div>
   </header>
 
   <main>
-    <div style="display: flex; gap: 15px; margin-bottom: 30px; align-items: center; flex-wrap: wrap;">
-      <div class="tabs" id="tabs" style="flex: 1; margin-bottom: 0;">
-        <div style="color:var(--text-muted);">Loading catalogs...</div>
-      </div>
-      <input type="text" id="searchInput" placeholder="Search matches..." style="padding: 10px 20px; border-radius: 30px; background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: white; outline: none; min-width: 200px; font-family: 'Inter', sans-serif;">
+    <div class="tabs" id="tabs">
+      <div style="color:var(--text-muted);">Loading catalogs...</div>
     </div>
     <div class="grid" id="grid"></div>
   </main>
@@ -175,7 +189,7 @@
         renderGrid(currentMatches);
       } catch (err) {
         console.error(err);
-        grid.innerHTML = '<div style="color:var(--accent);">Failed to load catalog. Ensure the Nuvio plugin is running.</div>';
+        grid.innerHTML = '<div style="color:var(--accent);">Failed to load catalog. Ensure the Nuvio addon is running.</div>';
       }
     }
 

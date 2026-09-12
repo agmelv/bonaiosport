@@ -3,3 +3,7 @@ node_modules/
 *.log
 .DS_Store
 scratch/
+
+# Build output. Was committed once and went stale, shipping a bundle that
+# predated the whole login system to anyone running it without Docker.
+dist/
