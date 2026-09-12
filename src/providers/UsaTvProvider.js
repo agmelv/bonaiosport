@@ -1,3 +1,4 @@
+const dns = require('dns').promises;
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -30,6 +31,12 @@ class UsaTvProvider extends BaseProvider {
     this.base = process.env.USATV_BASE
       || 'https://raw.githubusercontent.com/yowmamasita/usa-tv-next/main';
 
+    // Which channels have at least one stream on a host that still exists.
+    // Null until the first sweep finishes; everything is listed until then.
+    this._playable = null;
+    this._sweptAt = 0;
+    this._sweeping = false;
+
     this.fetchCatalog = this.circuitBreaker.wrap(`${this.name}_catalog`, async () => {
       const res = await this.proxyFetch(`${this.base}/catalog/tv/all.json`, {
         signal: AbortSignal.timeout(15000)
@@ -39,8 +46,89 @@ class UsaTvProvider extends BaseProvider {
     });
   }
 
+  /**
+   * Find the channels that can actually play.
+   *
+   * Half of this catalog cannot. 73 of its 169 channels list streams only on
+   * tvpass.org, which no longer resolves anywhere -- NXDOMAIN from Cloudflare,
+   * Google and Quad9 alike, with no nameservers left -- and another 11 list no
+   * streams at all. Listing them means a viewer opens a channel and is shown
+   * nothing, which reads as this addon being broken rather than as a link that
+   * rotted upstream.
+   *
+   * The stream files are small and static, so the sweep is cheap and its answer
+   * keeps for hours. Hosts are checked by name rather than by fetching: one
+   * lookup covers every channel that shares a host, and a host coming back
+   * brings its channels back with it without anybody editing a list.
+   *
+   * Never awaited by getMatches. The first refresh after a restart lists
+   * everything, the sweep lands behind it, and the next refresh is filtered --
+   * better than making every restart wait on 169 requests.
+   */
+  async _sweep() {
+    if (this._sweeping) return;
+    this._sweeping = true;
+    try {
+      const data = await this.fetchCatalog.fire();
+      const metas = (data && data.metas) || [];
+      const ids = metas.map(m => m && m.id).filter(Boolean);
+
+      const hostsFor = new Map();
+      const queue = ids.slice();
+      const worker = async () => {
+        for (;;) {
+          const id = queue.shift();
+          if (!id) return;
+          try {
+            const res = await this.proxyFetch(
+              `${this.base}/stream/tv/${encodeURIComponent(id)}.json`,
+              { signal: AbortSignal.timeout(10000) }
+            );
+            if (!res.ok) { hostsFor.set(id, []); continue; }
+            const body = await res.json();
+            const hosts = [];
+            for (const st of (body && body.streams) || []) {
+              if (!st || typeof st.url !== 'string') continue;
+              try { hosts.push(new URL(st.url).hostname); } catch (e) { /* not a url */ }
+            }
+            hostsFor.set(id, hosts);
+          } catch (e) {
+            // Unknown rather than dead: left out of the map so it stays listed.
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: 8 }, worker));
+
+      const distinct = new Set();
+      for (const hosts of hostsFor.values()) for (const h of hosts) distinct.add(h);
+      const alive = new Set();
+      await Promise.all([...distinct].map(async h => {
+        try { await dns.lookup(h); alive.add(h); } catch (e) { /* gone */ }
+      }));
+
+      const playable = new Set();
+      for (const [id, hosts] of hostsFor) {
+        if (hosts.some(h => alive.has(h))) playable.add(id);
+      }
+      // Never let a bad sweep empty the tab.
+      if (playable.size) {
+        this._playable = playable;
+        this._sweptAt = Date.now();
+        console.log(`[${this.name}] ${playable.size} of ${hostsFor.size} channels reachable `
+          + `(${distinct.size - alive.size} of ${distinct.size} stream hosts are gone)`);
+      }
+    } catch (err) {
+      console.warn(`[${this.name}] reachability sweep failed:`, err.message);
+    } finally {
+      this._sweeping = false;
+    }
+  }
+
   async getMatches() {
     try {
+      const SWEEP_EVERY_MS = 6 * 60 * 60 * 1000;
+      if (Date.now() - this._sweptAt > SWEEP_EVERY_MS) this._sweep().catch(() => {});
+
       const data = await this.fetchCatalog.fire();
       const metas = (data && data.metas) || [];
       if (!Array.isArray(metas) || !metas.length) return [];
@@ -50,6 +138,9 @@ class UsaTvProvider extends BaseProvider {
         // The id is what the stream endpoint is keyed by, so an entry without
         // one is an entry whose streams could never be fetched.
         if (!m || typeof m.id !== 'string' || !m.id) continue;
+        // Once the sweep has an answer, a channel with nowhere left to stream
+        // from is not worth a row.
+        if (this._playable && !this._playable.has(m.id)) continue;
 
         // Trailing space on "CW " upstream, and a name is what the channel is
         // matched and displayed by.
