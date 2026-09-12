@@ -970,6 +970,36 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     newManifest.catalogs = newManifest.catalogs.filter(c => keepCatalogs.includes(c.id));
   }
   
+  // The viewer's own tab order and names, set on the configure page.
+  //
+  // Applied to whatever survived the filtering above rather than to the full
+  // list, so a tab hidden by the sports selection stays hidden even if the
+  // saved order still mentions it.
+  if (typeof parsedConfig.catalogOrder === 'string' && parsedConfig.catalogOrder) {
+    const wanted = parsedConfig.catalogOrder.split(',').map(x => x.trim()).filter(Boolean);
+    const rank = id => {
+      const i = wanted.indexOf(id);
+      // A tab the saved order has never seen -- one added since -- keeps its
+      // place at the end rather than jumping to the front.
+      return i === -1 ? wanted.length : i;
+    };
+    newManifest.catalogs = newManifest.catalogs
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => rank(a.c.id) - rank(b.c.id) || a.i - b.i)
+      .map(x => x.c);
+  }
+
+  if (parsedConfig.catalogNames && typeof parsedConfig.catalogNames === 'object') {
+    for (const cat of newManifest.catalogs) {
+      const renamed = parsedConfig.catalogNames[cat.id];
+      // A name is free text from a URL anyone can edit, so it is bounded and
+      // stripped of the control characters a client might render oddly.
+      if (typeof renamed === 'string' && renamed.trim()) {
+        cat.name = renamed.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
+      }
+    }
+  }
+
   // Remove teams catalog if the user hasn't configured any teams
   if (typeof parsedConfig.teams !== 'string' || parsedConfig.teams.trim() === '') {
     newManifest.catalogs = newManifest.catalogs.filter(c => c.id !== 'nuvio_sports_teams');

@@ -137,6 +137,28 @@
     }
     .reorder button:hover { background: #3a3a42; color: #fff; }
     .reorder button:disabled { opacity: 0.3; cursor: default; }
+    /* Drag handle. Grab area is generous because the usual device here is a
+       phone, where a 17px target is a coin toss. */
+    .grip {
+      flex: 0 0 auto; width: 34px; height: 38px; display: flex; align-items: center;
+      justify-content: center; cursor: grab; color: #7d828a; touch-action: none;
+      user-select: none; -webkit-user-select: none; border-radius: 8px;
+    }
+    .grip:hover { color: #c9ced4; background: rgba(255,255,255,.05); }
+    .grip:active { cursor: grabbing; }
+    .grip svg { pointer-events: none; }
+    .row-dragging {
+      opacity: .92; background: #26262c; border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.45); position: relative; z-index: 5;
+    }
+    .drop-marker { outline: 2px dashed rgba(229,9,20,.55); outline-offset: 2px; border-radius: 10px; }
+    .cat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .cat-row .cat-name {
+      flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 9px 12px;
+      background: #1f1f24; color: #e8e8ea; border: 1px solid #3a3a40; border-radius: 10px;
+    }
+    .cat-row .cat-name:focus { outline: none; border-color: #5a5a64; }
+    .cat-row .cat-default { font-size: 11px; color: #7d828a; min-width: 74px; text-align: right; }
     .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .toggle {
       flex: 1; min-width: 150px; background: #1e1e22; color: #c9ced4; border: 1px solid #3a3a40;
@@ -303,15 +325,22 @@
       <h3>Streaming Sources</h3>
       <p class="hint">Tick the sources to use, and order them with the arrows — the ones nearer the top are tried first.</p>
       <div id="sourcesGrid">
-        <div class="source-row" data-value="streamfree"><label class="checkbox-label active"><input type="checkbox" value="streamfree" checked> 🌐 StreamFree</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="timstreams"><label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="streamedpk"><label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> 📺 Streamed.pk</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="sportyhunter"><label class="checkbox-label active"><input type="checkbox" value="sportyhunter" checked> 📺 SportyHunter</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="watchfooty"><label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="cdnlive"><label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="streamsports99"><label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
-        <div class="source-row" data-value="streamic"><label class="checkbox-label active"><input type="checkbox" value="streamic" checked> 🌐 Streamic</label><span class="reorder"><button type="button" class="up" title="Move up">▲</button><button type="button" class="down" title="Move down">▼</button></span></div>
+        <div class="source-row" data-value="streamfree"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="streamfree" checked> 🌐 StreamFree</label></div>
+        <div class="source-row" data-value="timstreams"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label></div>
+        <div class="source-row" data-value="streamedpk"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> 📺 Streamed.pk</label></div>
+        <div class="source-row" data-value="sportyhunter"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="sportyhunter" checked> 📺 SportyHunter</label></div>
+        <div class="source-row" data-value="watchfooty"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label></div>
+        <div class="source-row" data-value="cdnlive"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label></div>
+        <div class="source-row" data-value="streamsports99"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label></div>
+        <div class="source-row" data-value="streamic"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="streamic" checked> 🌐 Streamic</label></div>
       </div>
+    </div>
+
+    <div class="section">
+      <h3>Catalog Tabs</h3>
+      <p class="hint">Drag to reorder the tabs, and rename any of them. Leave a name empty to keep the original.</p>
+      <div id="catalogList"><p class="hint" id="catalogLoading">Loading tabs…</p></div>
+      <button type="button" id="catalogReset" class="toggle" style="margin-top:8px">Reset names and order</button>
     </div>
 
     <div class="section">
@@ -355,26 +384,136 @@
     const sourceRows = () => Array.from(sourcesGrid.querySelectorAll('.source-row'));
     const sourceCheckboxes = sourcesGrid.querySelectorAll('input[type="checkbox"]');
 
-    // Arrows move a row among its siblings; the resulting DOM order IS the
-    // preference, so nothing else has to track it.
-    function refreshArrows() {
-      const rows = sourceRows();
-      rows.forEach((row, i) => {
-        row.querySelector('.up').disabled = i === 0;
-        row.querySelector('.down').disabled = i === rows.length - 1;
+    /**
+     * Drag a row to move it, by its handle.
+     *
+     * Built on pointer events rather than HTML5 drag-and-drop, which does not
+     * fire on touch at all -- and a phone is the likeliest place someone
+     * reorders these. One implementation serves both lists.
+     */
+    function makeReorderable(container, rowSelector, onChange) {
+      let dragging = null;
+      let startY = 0;
+
+      container.addEventListener('pointerdown', e => {
+        const grip = e.target.closest('.grip');
+        if (!grip || !container.contains(grip)) return;
+        const row = grip.closest(rowSelector);
+        if (!row) return;
+        e.preventDefault();
+        dragging = row;
+        startY = e.clientY;
+        row.classList.add('row-dragging');
+        grip.setPointerCapture(e.pointerId);
       });
+
+      container.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        e.preventDefault();
+        // Which row is the pointer over now? Swap when it passes a neighbour's
+        // midpoint, so a row settles rather than flickering at the boundary.
+        const rows = Array.from(container.querySelectorAll(rowSelector));
+        for (const other of rows) {
+          if (other === dragging) continue;
+          const box = other.getBoundingClientRect();
+          const middle = box.top + box.height / 2;
+          if (e.clientY > box.top && e.clientY < box.bottom) {
+            const movingDown = e.clientY > startY;
+            if (movingDown && e.clientY > middle) container.insertBefore(dragging, other.nextSibling);
+            else if (!movingDown && e.clientY < middle) container.insertBefore(dragging, other);
+            startY = e.clientY;
+            break;
+          }
+        }
+      });
+
+      const end = e => {
+        if (!dragging) return;
+        dragging.classList.remove('row-dragging');
+        dragging = null;
+        const grip = e.target.closest && e.target.closest('.grip');
+        if (grip && grip.hasPointerCapture && grip.hasPointerCapture(e.pointerId)) {
+          grip.releasePointerCapture(e.pointerId);
+        }
+        if (onChange) onChange();
+      };
+      container.addEventListener('pointerup', end);
+      container.addEventListener('pointercancel', end);
     }
-    sourcesGrid.addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      e.preventDefault();
-      const row = btn.closest('.source-row');
-      if (btn.classList.contains('up') && row.previousElementSibling) {
-        sourcesGrid.insertBefore(row, row.previousElementSibling);
-      } else if (btn.classList.contains('down') && row.nextElementSibling) {
-        sourcesGrid.insertBefore(row.nextElementSibling, row);
+
+    // The resulting DOM order IS the preference, so nothing else tracks it.
+    function refreshArrows() { /* handles need no enabling or disabling */ }
+    makeReorderable(sourcesGrid, '.source-row', () => updateLink());
+
+    // ---- Catalog tabs: order and names -------------------------------------
+    // Built from the addon's own manifest rather than a list kept here, so a tab
+    // added or renamed in the code shows up without this page being touched.
+    const catalogList = document.getElementById('catalogList');
+    const GRIP_SVG = '<span class="grip" title="Drag to reorder" aria-label="Drag to reorder">'
+      + '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">'
+      + '<rect x="2" y="3.25" width="12" height="1.6" rx=".8"/>'
+      + '<rect x="2" y="7.2" width="12" height="1.6" rx=".8"/>'
+      + '<rect x="2" y="11.15" width="12" height="1.6" rx=".8"/>'
+      + '</svg></span>';
+
+    function catalogRows() { return Array.from(catalogList.querySelectorAll('.cat-row')); }
+
+    function catalogOrderValue() {
+      return catalogRows().map(r => r.dataset.id).join(',');
+    }
+
+    function catalogNamesValue() {
+      const names = {};
+      for (const row of catalogRows()) {
+        const input = row.querySelector('.cat-name');
+        const value = (input.value || '').trim();
+        // An empty box means "leave it alone", so it is not a rename.
+        if (value && value !== input.dataset.original) names[row.dataset.id] = value;
       }
-      refreshArrows();
+      return names;
+    }
+
+    function renderCatalogs(catalogs, saved) {
+      const order = saved && saved.catalogOrder ? String(saved.catalogOrder).split(',') : [];
+      const names = (saved && saved.catalogNames) || {};
+      const rank = id => {
+        const i = order.indexOf(id);
+        return i === -1 ? order.length + catalogs.findIndex(c => c.id === id) : i;
+      };
+      const sorted = catalogs.slice().sort((a, b) => rank(a.id) - rank(b.id));
+
+      catalogList.innerHTML = '';
+      for (const cat of sorted) {
+        const row = document.createElement('div');
+        row.className = 'cat-row';
+        row.dataset.id = cat.id;
+        // Where this tab sits in the addon's own manifest, so Reset can restore it.
+        row.dataset.defaultIndex = String(catalogs.findIndex(c => c.id === cat.id));
+        row.innerHTML = GRIP_SVG;
+
+        const input = document.createElement('input');
+        input.className = 'cat-name';
+        input.type = 'text';
+        input.value = names[cat.id] || cat.name;
+        input.placeholder = cat.name;
+        input.dataset.original = cat.name;
+        input.setAttribute('aria-label', 'Name for ' + cat.name);
+        input.addEventListener('input', () => updateLink());
+        row.appendChild(input);
+        catalogList.appendChild(row);
+      }
+      makeReorderable(catalogList, '.cat-row', () => updateLink());
+    }
+
+    document.getElementById('catalogReset').addEventListener('click', e => {
+      e.preventDefault();
+      for (const row of catalogRows()) {
+        const input = row.querySelector('.cat-name');
+        input.value = input.dataset.original;
+      }
+      // Back to the manifest's own order.
+      const byDefault = catalogRows().sort((a, b) => Number(a.dataset.defaultIndex) - Number(b.dataset.defaultIndex));
+      for (const row of byDefault) catalogList.appendChild(row);
       updateLink();
     });
 
@@ -392,6 +531,7 @@
     const timezoneSelect = document.getElementById('timezone');
 
     // Attempt to load existing config from URL
+    let defaultCatalogOrder = '';
     let existingConfig = {};
     try {
       const pathParts = window.location.pathname.split('/');
@@ -503,6 +643,24 @@
     }
     refreshArrows();
 
+    // The tab list comes from the addon itself. Asked for without a config
+    // segment, so it is the full set rather than one already filtered by a
+    // saved sports selection.
+    fetch('/manifest.json')
+      .then(r => r.json())
+      .then(m => {
+        const catalogs = (m && m.catalogs) || [];
+        if (!catalogs.length) throw new Error('no catalogs in the manifest');
+        defaultCatalogOrder = catalogs.map(c => c.id).join(',');
+        renderCatalogs(catalogs, existingConfig);
+        updateLink();
+      })
+      .catch(err => {
+        // Losing this section costs tab ordering, nothing else on the page.
+        const loading = document.getElementById('catalogLoading');
+        if (loading) loading.textContent = 'Could not load the tab list (' + err.message + ').';
+      });
+
     if (existingConfig.streamOrder === 'web') {
       streamOrderRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t.dataset.value === 'web'));
     }
@@ -557,6 +715,13 @@
         config.sourceOrder = orderedValues.join(',');
       }
       if (streamOrderValue() === 'web') config.streamOrder = 'web';
+
+      // Only carried when they differ from the addon's own, so an untouched
+      // config stays as short as it was.
+      const catOrder = catalogOrderValue();
+      if (catOrder && catOrder !== defaultCatalogOrder) config.catalogOrder = catOrder;
+      const catNames = catalogNamesValue();
+      if (Object.keys(catNames).length) config.catalogNames = catNames;
 
       if (Object.keys(config).length > 0) {
         const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
