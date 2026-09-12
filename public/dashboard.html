@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nuvio Live Sports — Dashboard</title>
+<title>AIOSports — Dashboard</title>
   <link rel="icon" type="image/png" href="/logo.png">
   <link rel="apple-touch-icon" href="/logo.png">
 <style>
@@ -70,7 +70,7 @@
   <form class="card" id="signinForm" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
     <div style="flex:1 1 240px">
       <h2 style="margin-bottom:6px">Dashboard password</h2>
-      <div class="dim" style="font-size:13.5px">Sign in to warm or clear the caches. Viewing needs no password.</div>
+      <div class="dim" style="font-size:13.5px">Sign in with ADMIN_TOKEN. Everything on this page needs it, including the stats.</div>
     </div>
     <input id="pw" type="password" placeholder="Password" autocomplete="current-password"
       style="font:inherit;font-size:14px;padding:9px 13px;border-radius:9px;background:#1f1f24;color:var(--text);border:1px solid var(--line);min-width:200px">
@@ -185,8 +185,8 @@ async function refresh() {
     const note = $('lockNote');
     note.hidden = gate.tokenRequired;
     if (!gate.tokenRequired) {
-      note.innerHTML = 'This dashboard is limited to the local network. To reach it from '
-        + 'elsewhere, set <code>ADMIN_TOKEN</code> on the container and a password box will appear here.';
+      note.innerHTML = 'This dashboard is closed. Set <code>ADMIN_TOKEN</code> on the container '
+        + 'and a password box will appear here.';
     }
     if (token) {
       forget();

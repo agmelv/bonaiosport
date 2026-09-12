@@ -45,7 +45,12 @@ function selectSources(matchSources, config) {
     return 0;
   });
 
-  if (config && typeof config.sources === 'string' && config.sources !== 'none') {
+  // Every source turned off means no streams, not every stream. The page writes
+  // 'none' for an empty selection, and skipping the filter on it turned the one
+  // setting that should disable everything into the one that enabled everything.
+  if (config && config.sources === 'none') return [];
+
+  if (config && typeof config.sources === 'string') {
     const enabled = config.sources.split(',');
     const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'streamfree', 'timstreams', 'sportyhunter', 'streamsports', 'iptv-org', 'embedindia', 'embedst', 'streamedpk'];
     return sortedSources.filter(src => {

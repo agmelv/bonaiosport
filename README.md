@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo.png" width="120" height="120" alt="Nuvio Live Sports Logo">
+  <img src="public/logo.png" width="120" height="120" alt="AIOSports Logo">
 </p>
 
 # 🔴 AIOSports
@@ -29,7 +29,7 @@
 > - **Content Scope:** This addon exclusively indexes public live sports fixtures. The official repository does not distribute or endorse adult content, shock media, or paid pirated IPTV bundles.
 > - **Official Support:** The only official repository is [github.com/rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin). Voluntary community support is solely via [Ko-fi](https://ko-fi.com/rajodedara).
 
-> ☕ **Enjoying Nuvio Live Sports?** Consider [supporting this fork on Ko-fi](https://ko-fi.com/mlp20), or [the upstream project](https://ko-fi.com/rajodedara) it is built on to help cover maintenance, dedicated scrapers, and infrastructure!
+> ☕ **Enjoying AIOSports?** Consider [supporting this fork on Ko-fi](https://ko-fi.com/mlp20), or [the upstream project](https://ko-fi.com/rajodedara) it is built on to help cover maintenance, dedicated scrapers, and infrastructure!
 
 A production-grade live sports streaming add-on for [Nuvio](https://nuvio.tv) and [Stremio](https://www.stremio.com/). It serves as a powerful multi-source aggregator that provides native live sports streams (Football, Basketball, Motorsport, Cricket, and more) inside your client, utilizing an advanced internal stream resolver to bypass CORS restrictions.
 
@@ -120,8 +120,9 @@ pm2 startup
 
 ## 🔐 Sign-in and the Dashboard
 
-Two separate keys, both optional. Set neither and everything stays open, exactly
-as it was.
+`AUTH_KEY` is optional: leave it unset and the pages stay open. `ADMIN_TOKEN` is
+not optional for the dashboard -- leave it unset and the dashboard is closed to
+everyone, including you.
 
 | Variable | Guards | Leave empty and… |
 |---|---|---|
@@ -190,9 +191,8 @@ A proxy on a public address needs `TRUST_PROXY` set — a hop count (`TRUST_PROX
 or a comma-separated list of proxy addresses/CIDRs. Set the narrowest value that
 works, and be sure the addon's own port is not reachable directly first.
 
-Do not set it to `true`. That trusts the header from whoever sends it, and since
-`ADMIN_TOKEN` falls back to a private-address check when unset, anyone could then
-claim to be on your network by adding one header.
+Do not set it to `true`. That makes `req.ip` whatever the caller writes in a
+header, which defeats the per-address throttle on failed sign-ins.
 
 ---
 

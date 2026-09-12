@@ -273,11 +273,17 @@ app.get('/api/config/saved', (req, res) => {
     exists: !!saved,
     durable: savedConfigIsDurable(),
     url: base + (id === LEGACY_ID ? '/saved' : '/p/' + id) + '/manifest.json',
-    // Enough to offer a list; the configs themselves are not handed out here.
-    profiles: listProfiles().map(pid => ({
-      id: pid,
-      url: base + (pid === LEGACY_ID ? '/saved' : '/p/' + pid) + '/manifest.json'
-    }))
+    // Only to someone signed in. The uuid IS the secret -- it is the entire
+    // reason a profile is private -- so handing the list to anyone who asks
+    // would give away every profile on the server. The earlier note here
+    // reasoned that the configs were not included; that missed the point,
+    // because the id alone is enough to read one.
+    profiles: isAuthed(req)
+      ? listProfiles().map(pid => ({
+          id: pid,
+          url: base + (pid === LEGACY_ID ? '/saved' : '/p/' + pid) + '/manifest.json'
+        }))
+      : []
   });
 });
 
@@ -338,9 +344,9 @@ app.get('/dashboard', requirePage, (req, res) => {
  * from the internet -- that is how a phone gets at it -- so an unguarded button
  * that empties a cache or restarts a sync is a button anyone can press, all day.
  *
- * With ADMIN_TOKEN set, the token is the key. Without one, only callers on the
- * loopback or a private network may act, which covers a LAN and a reverse proxy
- * on the same host while leaving the open internet with a read-only view.
+ * With ADMIN_TOKEN set, the token is the key. Without one nothing that changes
+ * state is reachable at all -- see isAdmin for why an address cannot carry that
+ * decision when the caller writes the header it is read from.
  */
 // Failed sign-ins per address. A dashboard anyone can reach is a dashboard
 // anyone can guess at, and a short password falls quickly at a few thousand
@@ -450,8 +456,8 @@ function requireAdmin(req, res) {
     error: process.env.ADMIN_TOKEN
       ? 'This action needs the admin token. Open the dashboard as /dashboard?token=… '
         + 'with the ADMIN_TOKEN set on the container.'
-      : 'This action is limited to the local network. Set ADMIN_TOKEN on the '
-        + 'container and pass it as ?token= to use it from anywhere.'
+      : 'Nothing may change state until ADMIN_TOKEN is set on the container. '
+        + 'Set it, then open the dashboard as /dashboard?token=\u2026'
   });
   return false;
 }

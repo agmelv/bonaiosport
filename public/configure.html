@@ -915,8 +915,14 @@
       document.getElementById('catBulkCount').textContent = String(n);
       document.getElementById('catBulk').hidden = n === 0;
       const master = document.getElementById('catSelectAll');
-      master.setAttribute('aria-checked', n === 0 ? 'false' : (n === all.length ? 'true' : 'mixed'));
-      document.getElementById('catCount').textContent = String(all.length);
+      const visibleCount = all.filter(i => i.dataset.sportOff !== '1').length;
+      master.setAttribute('aria-checked', n === 0 ? 'false' : (n === visibleCount ? 'true' : 'mixed'));
+      // The tabs actually on screen, which is what applySportFilter also counts.
+      // Writing the unfiltered total here made the number jump the moment
+      // anything was selected, because the two functions disagreed about what
+      // it meant.
+      const onScreen = all.filter(i => i.dataset.sportOff !== '1');
+      document.getElementById('catCount').textContent = String(onScreen.length);
     }
 
     function setSelected(item, on) {
@@ -1131,9 +1137,12 @@
         const input = row.querySelector('.cat-name');
         input.value = input.dataset.original;
       }
-      // Back to the manifest's own order.
-      for (const sw of catalogList.querySelectorAll('.sw')) sw.setAttribute('aria-checked', 'false');
-      for (const n of catalogList.querySelectorAll('.cat-hours')) n.value = '0';
+      // Every per-tab option too. Resetting the names and the order while
+      // leaving tabs hidden, search-only or shuffled is not a reset -- it is the
+      // half of one that is easiest to see. writeOpts repaints the row's icons.
+      for (const row of catalogItems()) writeOpts(row, {});
+      // Back to the manifest's own order. (.sw and .cat-hours were cleared here
+      // too, long after the controls of those names had gone.)
       const byDefault = catalogItems().sort((a, b) => Number(a.dataset.defaultIndex) - Number(b.dataset.defaultIndex));
       for (const row of byDefault) catalogList.appendChild(row);
       updateLink();
@@ -1520,7 +1529,17 @@
     // Which profile this page is editing. Empty until the first save, which is
     // when the server mints one -- the page never invents an id, so two tabs
     // cannot both decide they are the same new profile.
-    let profileId = new URLSearchParams(location.search).get('profile') || '';
+    // Which profile this page is editing, taken from the URL it was opened at.
+    //
+    // Reading only ?profile= was wrong: switching profiles navigates to
+    // /p/<uuid>/configure, where the id is in the PATH. The query was then
+    // empty, the page fell back to the legacy profile, and the next Save wrote
+    // this profile's settings over that one.
+    let profileId =
+      (location.pathname.match(/\/p\/([0-9a-fA-F-]{36})(?:\/|$)/) || [])[1]
+      || (/^\/saved(\/|$)/.test(location.pathname) ? 'default' : '')
+      || new URLSearchParams(location.search).get('profile')
+      || '';
     const profileSelect = document.getElementById('profileSelect');
     const newProfileBtn = document.getElementById('newProfileBtn');
     const deleteProfileBtn = document.getElementById('deleteProfileBtn');
@@ -1566,7 +1585,9 @@
       saveCard.hidden = !canSave;
       if (!canSave) return;
 
-      if (state.exists && state.id) profileId = state.id;
+      // Adopt an id only when this page did not already know one; otherwise a
+      // reply about the legacy profile could rename the one being edited.
+      if (!profileId && state.exists && state.id) profileId = state.id;
       savedUrlEl.value = (state.exists && state.url) ? state.url : '';
 
       const list = state.profiles || [];

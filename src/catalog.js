@@ -100,6 +100,12 @@ function formatKickoff(dateObj, timeZone, hour12 = true) {
  * what the reader sees, and it should match the tab the card sits in.
  */
 // Competitions worth naming on the card in place of the broad category.
+// The categories that have a tab of their own. The Other tab is defined by
+// exclusion from this list, and the sports filter needs the same definition --
+// keeping two copies is how they came to disagree.
+const TOP_LEVEL_CATEGORIES = ['football', 'cricket', 'basketball', 'motorsport', 'hockey',
+  'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts', 'networks', 'college'];
+
 const COMPETITION_LABEL = { nfl: 'NFL', cfl: 'CFL', afl: 'AFL' };
 
 const CATEGORY_LABEL = {
@@ -605,8 +611,7 @@ async function handleCatalog(type, id, extra, config) {
     // is what separates it from a fixture.
     filteredMatches = matches.filter(m => isChannel(m));
   } else if (categoryMatch === 'other') {
-    const topLevelCats = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts', 'networks', 'college'];
-    filteredMatches = matches.filter(m => !topLevelCats.includes(m.category) && !isChannel(m));
+    filteredMatches = matches.filter(m => !TOP_LEVEL_CATEGORIES.includes(m.category) && !isChannel(m));
   } else if (categoryMatch !== 'catalog') {
     // Fixtures only. The always-on channels that used to be mixed in here now
     // live in the Channels tab, so a sport tab is a schedule rather than a
@@ -616,8 +621,16 @@ async function handleCatalog(type, id, extra, config) {
 
   if (typeof conf.sports === 'string' && conf.sports !== 'all') {
     const allowedSports = conf.sports.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+    // "other" is not a category any fixture carries -- it is the tab for
+    // everything that is not one of the named sports. Comparing it literally
+    // meant that unticking a single sport emptied the Other tab, because a
+    // fixture in there has a category like "esports" that appears in no list.
+    const otherAllowed = allowedSports.includes('other');
     // Don't filter out networks (24/7 TV) since they aren't tied to a specific sport
-    filteredMatches = filteredMatches.filter(m => m.category === 'networks' || allowedSports.includes(m.category));
+    filteredMatches = filteredMatches.filter(m =>
+      m.category === 'networks'
+      || allowedSports.includes(m.category)
+      || (otherAllowed && !TOP_LEVEL_CATEGORIES.includes(m.category)));
   }
 
   filteredMatches = [...filteredMatches].sort((a, b) => {
