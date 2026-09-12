@@ -283,8 +283,18 @@ function isAdmin(req) {
     const b = Buffer.from(token, 'utf8');
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
-  const ip = String(req.ip || '').replace(/^::ffff:/, '');
-  return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(ip) || ip === '::1' || ip === '';
+  // No token, no admin. There used to be a fallback here that granted admin to
+  // any caller on a private address, and under Docker -- which is how almost
+  // everyone runs this -- it granted admin to everyone: the container's peer is
+  // always the bridge gateway, 172.17.0.1, which is itself a private address.
+  // Measured on the shipped image with ADMIN_TOKEN unset, /api/cache/stats
+  // returned 200 to a plain request from outside the host, no header needed.
+  //
+  // An address cannot carry that decision. Behind a proxy it is a header the
+  // caller writes, and in a container it is the same private gateway for the
+  // whole internet. So the dashboard stays shut until a token exists, and the
+  // boot banner says so rather than leaving it to be discovered.
+  return false;
 }
 
 function requireAdmin(req, res) {
@@ -1542,7 +1552,7 @@ app.listen(PORT, BIND_HOST, () => {
   const siteKey = process.env.AUTH_KEY;
   const adminKey = process.env.ADMIN_TOKEN;
   console.log(`  Sign-in   : ${siteKey ? 'AUTH_KEY set' : 'NOT SET — anyone who can reach this can browse it'}`);
-  console.log(`  Dashboard : ${adminKey ? 'ADMIN_TOKEN set' : 'NOT SET — admin open to callers on a private address'}`);
+  console.log(`  Dashboard : ${adminKey ? 'ADMIN_TOKEN set' : 'NOT SET — dashboard is closed until you set one'}`);
   console.log(`  Proxies   : trust proxy = ${TRUST_PROXY || 'loopback/private only (default)'}`);
   if (!siteKey || !adminKey) {
     console.log('  → Set these in .env (or the environment) if this port is reachable from the internet.');

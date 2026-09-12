@@ -126,7 +126,7 @@ as it was.
 | Variable | Guards | Leave empty and… |
 |---|---|---|
 | `AUTH_KEY` | the catalog at `/` and `/configure` | anyone with the link can browse |
-| `ADMIN_TOKEN` | `/dashboard` and anything that changes state | the dashboard is limited to callers on a private address |
+| `ADMIN_TOKEN` | `/dashboard` and anything that changes state | the dashboard stays closed — there is no address-based fallback |
 
 Put them in a `.env` file beside `docker-compose.yml`:
 
@@ -153,9 +153,10 @@ That line exists because an unset key fails *open*, and your own browser is show
 a login page either way — so the only way to notice used to be from another
 machine.
 
-> **Do not leave `ADMIN_TOKEN` empty on a public box.** With no token the admin
-> check falls back to "is this caller on a private address", which is a decision
-> made from a header the caller sends. See [Behind a reverse proxy](#behind-a-reverse-proxy).
+> **`ADMIN_TOKEN` is required to reach the dashboard.** With no token it is simply
+> shut. There is deliberately no "but you look like you're on my network"
+> exception: under Docker every request arrives from the bridge gateway, which is
+> itself a private address, so that exception let the whole internet in.
 
 Visiting the site then lands on `/login`, and signing in takes you to the
 catalog. The gear icon in the header opens the dashboard, which asks for
