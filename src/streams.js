@@ -488,11 +488,19 @@ async function handleStream(type, id, config) {
   // the configure page. Kind is read off the stream itself — a direct stream
   // has a url, a web one has an externalUrl — rather than off its display
   // name, which is cosmetic and has already changed once.
-  const webFirst = config && config.streamOrder === 'web';
+  // A third setting, 'none', turns the grouping off entirely: the viewer does
+  // not want either kind promoted, so the list falls back to pure quality
+  // order. Only the grouping goes -- score still decides, because unranked is
+  // not what "no preference between direct and web" asks for.
+  const order = config && config.streamOrder;
+  const webFirst = order === 'web';
+  const groupByKind = order !== 'none';
   streams.sort((a, b) => {
-    const aDirect = a.url ? 1 : 0;
-    const bDirect = b.url ? 1 : 0;
-    if (aDirect !== bDirect) return webFirst ? aDirect - bDirect : bDirect - aDirect;
+    if (groupByKind) {
+      const aDirect = a.url ? 1 : 0;
+      const bDirect = b.url ? 1 : 0;
+      if (aDirect !== bDirect) return webFirst ? aDirect - bDirect : bDirect - aDirect;
+    }
     return b.score - a.score;
   });
 

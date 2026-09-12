@@ -27,6 +27,12 @@
        browsers already default to border-box. */
     *, *::before, *::after { box-sizing: border-box; }
 
+    /* `hidden` is only a default of display:none, so any rule that sets display
+       silently outranks it. .cat-bulk says display:flex, which left the bulk bar
+       -- "0 selected" plus ten action chips, 191px of it -- parked on screen at
+       all times even though the script had correctly marked it hidden. */
+    [hidden] { display: none !important; }
+
     body {
       margin: 0;
       padding: 20px;
@@ -54,6 +60,18 @@
       max-width: 500px;
       position: relative;
     }
+
+    /* The secondary of the two stacked buttons. It used to be an inline
+       background override, which left it wearing the accent-blue drop shadow
+       .btn casts -- a grey button under a blue halo -- and an inline font-size
+       that made its label smaller than the one directly above it. */
+    .btn.secondary {
+      background: #24242a;
+      border: 1px solid #34343c;
+      box-shadow: none;
+      margin-top: 12px;
+    }
+    .btn.secondary:hover { background: #2f2f37; }
 
     .footer-actions {
       display: grid;
@@ -197,10 +215,15 @@
       box-shadow: 0 10px 24px rgba(0,0,0,.45); position: relative; z-index: 5;
     }
     .drop-marker { outline: 2px dashed rgba(22,104,255,.55); outline-offset: 2px; border-radius: 10px; }
-    .cat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .cat-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+    /* Tight horizontal padding on purpose. Five controls share this row and the
+       name is the only one that gives -- at 375px it was down to 71px of text,
+       enough to render "Upcoming" as "Upcomin". Every pixel taken off the
+       padding here goes straight back to the label. */
     .cat-row .cat-name {
-      flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 9px 12px;
+      flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 9px 8px;
       background: #1f1f24; color: #e8e8ea; border: 1px solid #3a3a40; border-radius: 10px;
+      text-overflow: ellipsis;
     }
     .cat-row .cat-name:focus { outline: none; border-color: #5a5a64; }
     .cat-row .cat-default { font-size: 11px; color: #7d828a; min-width: 74px; text-align: right; }
@@ -225,7 +248,7 @@
           border: 0; cursor: pointer; position: relative; transition: background .18s; padding: 0; }
     .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 19px; height: 19px;
                  border-radius: 50%; background: #fff; transition: transform .18s; }
-    .sw[aria-checked="true"] { background: #6c5ce7; }
+    .sw[aria-checked="true"] { background: var(--accent); }
     .sw[aria-checked="true"]::after { transform: translateX(19px); }
     .opt input[type="number"] {
       width: 84px; font: inherit; font-size: 14px; padding: 7px 10px; background: #1f1f24;
@@ -235,26 +258,30 @@
     .cat-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px;
                   font-size: 12px; color: #8b8f95; }
     .cat-legend span { display: inline-flex; align-items: center; gap: 6px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-    .dot.on { background: #3fb950; } .dot.off { background: #4a4a52; }
+    /* Its own name, not .dot. Reusing .dot meant these static legend keys
+       picked up the brand dot's `pulse 2s infinite` and its accent glow -- two
+       little swatches throbbing next to the words "Shown" and "Hidden" -- while
+       this rule's 9px in turn shrank the brand dot in the header from 12px. */
+    .key-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .key-dot.on { background: #3fb950; } .key-dot.off { background: #4a4a52; }
     .chip { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
             background: #24242a; color: #c9ced4; border: 1px solid #34343c; }
     .chip:hover { background: #2f2f37; color: #fff; }
-    .chip[aria-pressed="true"] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
+    .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
     .chip.primary { background: #fff; color: #16161a; border-color: #fff; font-weight: 650; }
     .cat-selectall { display: flex; align-items: center; gap: 10px; font-size: 13px;
                      color: #c9ced4; margin-bottom: 10px; }
     .cbx { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid #4a4a52;
            background: #1c1c21; cursor: pointer; padding: 0; position: relative; flex: 0 0 auto; }
-    .cbx[aria-checked="true"] { background: #3b82f6; border-color: #3b82f6; }
+    .cbx[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
     .cbx[aria-checked="true"]::after,
     .cbx[aria-checked="mixed"]::after {
       content: ''; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px;
       border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
     }
-    .cbx[aria-checked="mixed"] { background: #3b82f6; border-color: #3b82f6; }
+    .cbx[aria-checked="mixed"] { background: var(--accent); border-color: var(--accent); }
     .cbx[aria-checked="mixed"]::after { top: 9px; left: 4px; width: 11px; height: 0; transform: none; border-width: 0 0 2px 0; }
-    .cat-item.selected .cat-row { background: rgba(59,130,246,.12); border-color: #3b82f6; }
+    .cat-item.selected .cat-row { background: rgba(22,104,255,.12); border-color: var(--accent); }
     .cat-item.is-hidden .cat-name { opacity: .45; text-decoration: line-through; }
     .cat-row { border: 1px solid transparent; border-radius: 12px; padding: 4px 6px; }
     .icon-btn { flex: 0 0 auto; width: 32px; height: 34px; display: flex; align-items: center;
@@ -446,7 +473,7 @@
 
     <div class="section">
       <h3>Streaming Sources</h3>
-      <p class="hint">Tick the sources to use, and order them with the arrows — the ones nearer the top are tried first.</p>
+      <p class="hint">Tick the sources to use, and drag the handles to reorder them — the ones nearer the top are tried first.</p>
       <div id="sourcesGrid">
         <div class="source-row" data-value="streamfree"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="streamfree" checked> 🌐 StreamFree</label></div>
         <div class="source-row" data-value="timstreams"><span class="grip" title="Drag to reorder" aria-label="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3.25" width="12" height="1.6" rx=".8"/><rect x="2" y="7.2"  width="12" height="1.6" rx=".8"/><rect x="2" y="11.15" width="12" height="1.6" rx=".8"/></svg></span><label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label></div>
@@ -464,8 +491,8 @@
       <p class="hint">Drag to reorder, type to rename. Tap the eye to show or hide a tab, and ⋯ for the rest.</p>
 
       <div class="cat-legend">
-        <span><i class="dot on"></i> Shown</span>
-        <span><i class="dot off"></i> Hidden</span>
+        <span><i class="key-dot on"></i> Shown</span>
+        <span><i class="key-dot off"></i> Hidden</span>
         <button type="button" id="hideDisabled" class="chip" aria-pressed="false">Hide disabled</button>
         <button type="button" id="catalogReset" class="chip">Reset all</button>
       </div>
@@ -497,15 +524,15 @@
 
     <div class="section">
       <h3>Stream Order</h3>
-      <p class="hint">Direct streams play in the app. Web streams open a browser.</p>
+      <p class="hint">Direct streams play in the app. Web streams open a browser. Select which type of streams should be shown first, or tap the selected one again to clear it and leave them unordered:</p>
       <div class="toggle-row" id="streamOrder">
-        <button type="button" class="toggle active" data-value="direct">⚡ Direct streams first</button>
-        <button type="button" class="toggle" data-value="web">🌐 Web streams first</button>
+        <button type="button" class="toggle active" data-value="direct">⚡ Direct</button>
+        <button type="button" class="toggle" data-value="web">🌐 Web</button>
       </div>
     </div>
 
     <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
-    <button id="copyBtn" class="btn" style="background: #333; margin-top: 12px; font-size: 14px;">COPY LINK (FOR NUVIO APP)</button>
+    <button id="copyBtn" class="btn secondary">COPY LINK (FOR NUVIO APP)</button>
 
     <div style="margin-top: 25px; padding: 16px; background: rgba(22, 104, 255, 0.08); border: 1px solid rgba(22, 104, 255, 0.2); border-radius: 16px; text-align: center;">
       <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
@@ -701,10 +728,16 @@
 
     function applySportFilter() {
       const on = new Set(Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value));
+      // My Teams draws only from the teams typed into Priority Tracking, so with
+      // that box empty the tab can never hold anything. Hiding it here rather
+      // than leaving it in the list also takes it out of the drag order, so
+      // there is no row to reorder that would not appear either way.
+      const hasTeams = !!(input && input.value.trim());
       let visible = 0;
       for (const item of catalogItems()) {
+        const key = String(item.dataset.id).replace(/^nuvio_sports_/, '');
         const sport = sportOf(item.dataset.id);
-        const offBySport = sport && !on.has(sport);
+        const offBySport = (sport && !on.has(sport)) || (key === 'teams' && !hasTeams);
         item.dataset.sportOff = offBySport ? '1' : '';
         if (offBySport) {
           item.style.display = 'none';
@@ -937,12 +970,18 @@
       const btn = e.target.closest('.toggle');
       if (!btn) return;
       e.preventDefault();
-      streamOrderRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t === btn));
+      // Tapping the one that is already on turns it off, leaving neither
+      // picked. That is a real third choice, not an empty state: it means the
+      // viewer does not want either kind promoted, so streams come back ranked
+      // on quality alone.
+      const clearing = btn.classList.contains('active');
+      streamOrderRow.querySelectorAll('.toggle').forEach(t =>
+        t.classList.toggle('active', !clearing && t === btn));
       updateLink();
     });
     const streamOrderValue = () => {
       const active = streamOrderRow.querySelector('.toggle.active');
-      return active ? active.dataset.value : 'direct';
+      return active ? active.dataset.value : 'none';
     };
     const timezoneSelect = document.getElementById('timezone');
 
@@ -1060,10 +1099,16 @@
     }
     refreshArrows();
 
-    // The tab list comes from the addon itself. Asked for without a config
-    // segment, so it is the full set rather than one already filtered by a
-    // saved sports selection.
-    fetch('/manifest.json')
+    // The tab list comes from the addon itself, asked for with no sports key so
+    // nothing is filtered by a saved selection -- but with a placeholder team,
+    // which is the only way to be handed every tab. The server drops My Teams
+    // from any manifest whose config names no teams, so a bare /manifest.json
+    // is missing exactly the one tab that has to appear the moment someone
+    // types a team above. Whether the row is then shown is decided here, by
+    // applySportFilter, against what is actually in the box.
+    const probeConfig = btoa(unescape(encodeURIComponent(JSON.stringify({ teams: '_' }))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    fetch('/' + probeConfig + '/manifest.json')
       .then(r => r.json())
       .then(m => {
         const catalogs = (m && m.catalogs) || [];
@@ -1078,8 +1123,10 @@
         if (loading) loading.textContent = 'Could not load the tab list (' + err.message + ').';
       });
 
-    if (existingConfig.streamOrder === 'web') {
-      streamOrderRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t.dataset.value === 'web'));
+    if (existingConfig.streamOrder === 'web' || existingConfig.streamOrder === 'none') {
+      // 'none' matches no button, which is exactly how "neither" is stored.
+      streamOrderRow.querySelectorAll('.toggle').forEach(t =>
+        t.classList.toggle('active', t.dataset.value === existingConfig.streamOrder));
     }
 
     if (existingConfig.sources) {
@@ -1140,7 +1187,10 @@
       if (orderedValues.join(',') !== DEFAULT_SOURCE_ORDER.join(',')) {
         config.sourceOrder = orderedValues.join(',');
       }
-      if (streamOrderValue() === 'web') config.streamOrder = 'web';
+      // 'direct' is the addon's own default and so is left out of the URL; the
+      // other two have to be carried because they differ from it.
+      const order = streamOrderValue();
+      if (order === 'web' || order === 'none') config.streamOrder = order;
 
       // Only carried when they differ from the addon's own, so an untouched
       // config stays as short as it was.
@@ -1175,7 +1225,15 @@
       });
     });
 
-    input.addEventListener('input', updateLink);
+    // Typing the first team makes the My Teams tab appear in the list below,
+    // and clearing the box takes it away again -- the same rule the sports
+    // checkboxes follow, so the two halves of this page never disagree about
+    // what the addon will actually carry.
+    input.addEventListener('input', () => {
+      applySportFilter();
+      applyHideDisabled();
+      updateLink();
+    });
     timezoneSelect.addEventListener('change', updateLink);
     [...checkboxes, ...sourceCheckboxes].forEach(cb => {
       cb.addEventListener('change', (e) => {
