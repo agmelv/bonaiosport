@@ -14,8 +14,8 @@
       --card-border: rgba(255, 255, 255, 0.05);
       --text: #f8fafc;
       --text-muted: #94a3b8;
-      --accent: #ef4444;
-      --accent-glow: rgba(239, 68, 68, 0.3);
+      --accent: #1668ff;
+      --accent-glow: rgba(22, 104, 255, 0.32);
       --glass: rgba(255, 255, 255, 0.02);
     }
 
@@ -30,8 +30,8 @@
       align-items: center;
       min-height: 100vh;
       background-image:
-        radial-gradient(circle at 15% 50%, rgba(239, 68, 68, 0.08), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(239, 68, 68, 0.05), transparent 25%);
+        radial-gradient(circle at 15% 50%, rgba(22, 104, 255, 0.08), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(22, 104, 255, 0.05), transparent 25%);
     }
 
     .container {
@@ -151,7 +151,7 @@
       opacity: .92; background: #26262c; border-radius: 10px;
       box-shadow: 0 10px 24px rgba(0,0,0,.45); position: relative; z-index: 5;
     }
-    .drop-marker { outline: 2px dashed rgba(229,9,20,.55); outline-offset: 2px; border-radius: 10px; }
+    .drop-marker { outline: 2px dashed rgba(22,104,255,.55); outline-offset: 2px; border-radius: 10px; }
     .cat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
     .cat-row .cat-name {
       flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 9px 12px;
@@ -166,7 +166,7 @@
       font-size: 12px; border-radius: 8px;
     }
     .cat-expand:hover { color: #fff; background: rgba(255,255,255,.05); }
-    .cat-expand[aria-expanded="true"] { color: var(--accent, #e50914); transform: rotate(180deg); }
+    .cat-expand[aria-expanded="true"] { color: var(--accent, #1668ff); transform: rotate(180deg); }
     .cat-opts {
       margin: 2px 0 10px 34px; padding: 10px 12px; border-radius: 10px;
       background: rgba(255,255,255,.03); border: 1px solid #2c2c33;
@@ -186,13 +186,69 @@
       width: 84px; font: inherit; font-size: 14px; padding: 7px 10px; background: #1f1f24;
       color: #e8e8ea; border: 1px solid #3a3a40; border-radius: 8px;
     }
+    /* --- catalog management ------------------------------------------------ */
+    .cat-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px;
+                  font-size: 12px; color: #8b8f95; }
+    .cat-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .dot.on { background: #3fb950; } .dot.off { background: #4a4a52; }
+    .chip { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+            background: #24242a; color: #c9ced4; border: 1px solid #34343c; }
+    .chip:hover { background: #2f2f37; color: #fff; }
+    .chip[aria-pressed="true"] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
+    .chip.primary { background: #fff; color: #16161a; border-color: #fff; font-weight: 650; }
+    .cat-selectall { display: flex; align-items: center; gap: 10px; font-size: 13px;
+                     color: #c9ced4; margin-bottom: 10px; }
+    .cbx { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid #4a4a52;
+           background: #1c1c21; cursor: pointer; padding: 0; position: relative; flex: 0 0 auto; }
+    .cbx[aria-checked="true"] { background: #3b82f6; border-color: #3b82f6; }
+    .cbx[aria-checked="true"]::after,
+    .cbx[aria-checked="mixed"]::after {
+      content: ''; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px;
+      border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+    }
+    .cbx[aria-checked="mixed"] { background: #3b82f6; border-color: #3b82f6; }
+    .cbx[aria-checked="mixed"]::after { top: 9px; left: 4px; width: 11px; height: 0; transform: none; border-width: 0 0 2px 0; }
+    .cat-item.selected .cat-row { background: rgba(59,130,246,.12); border-color: #3b82f6; }
+    .cat-item.is-hidden .cat-name { opacity: .45; text-decoration: line-through; }
+    .cat-row { border: 1px solid transparent; border-radius: 12px; padding: 4px 6px; }
+    .icon-btn { flex: 0 0 auto; width: 32px; height: 34px; display: flex; align-items: center;
+                justify-content: center; background: none; border: 0; color: #8b8f95; cursor: pointer;
+                border-radius: 8px; font-size: 14px; }
+    .icon-btn:hover { color: #fff; background: rgba(255,255,255,.06); }
+    .icon-btn.on { color: #3fb950; }
+    .cat-menu { position: absolute; z-index: 40; min-width: 200px; background: #1b1b20;
+                border: 1px solid #33333b; border-radius: 12px; padding: 6px;
+                box-shadow: 0 18px 40px rgba(0,0,0,.55); }
+    .cat-menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+                       background: none; border: 0; color: #e8e8ea; font: inherit; font-size: 13.5px;
+                       padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+    .cat-menu button:hover { background: rgba(255,255,255,.07); }
+    .cat-menu .sep { height: 1px; background: #2c2c33; margin: 5px 4px; }
+    .cat-menu .state { margin-left: auto; font-size: 11px; color: #8b8f95; }
+    .cat-bulk { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center;
+                gap: 10px; margin-top: 12px; padding: 12px; border-radius: 14px;
+                background: #17171c; border: 1px solid #2f2f37; font-size: 13px; color: #c9ced4; }
+    .cat-bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex;
+             align-items: center; justify-content: center; padding: 20px; z-index: 100; }
+    .modal-card { width: 100%; max-width: 420px; background: #16161a; border: 1px solid #2f2f37;
+                  border-radius: 18px; padding: 20px; }
+    .modal-head { display: flex; align-items: center; margin-bottom: 16px; }
+    .modal-head h3 { margin: 0; flex: 1; font-size: 17px; }
+    .modal-x { background: none; border: 0; color: #8b8f95; font-size: 16px; cursor: pointer; }
+    .modal-label { display: block; font-size: 12px; color: #8b8f95; margin: 12px 0 6px; }
+    .modal-input { width: 100%; font: inherit; font-size: 15px; padding: 11px 13px; border-radius: 10px;
+                   background: #1f1f24; color: #e8e8ea; border: 1px solid #3a3a40; }
+    .modal-input:disabled { opacity: .55; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
     .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .toggle {
       flex: 1; min-width: 150px; background: #1e1e22; color: #c9ced4; border: 1px solid #3a3a40;
       border-radius: 8px; padding: 11px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
     }
     .toggle:hover { background: #26262c; }
-    .toggle.active { background: #e50914; border-color: #e50914; color: #fff; }
+    .toggle.active { background: #1668ff; border-color: #1668ff; color: #fff; }
     .checkbox-label {
       display: flex;
       align-items: center;
@@ -211,8 +267,8 @@
     }
 
     .checkbox-label.active {
-      border-color: rgba(239, 68, 68, 0.3);
-      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(22, 104, 255, 0.3);
+      background: rgba(22, 104, 255, 0.1);
     }
 
     input[type="checkbox"] {
@@ -270,7 +326,7 @@
     input[type="text"]:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+      box-shadow: 0 0 0 3px rgba(22, 104, 255, 0.15);
     }
 
     .btn {
@@ -286,7 +342,7 @@
       font-weight: 800;
       cursor: pointer;
       text-decoration: none;
-      box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+      box-shadow: 0 4px 14px rgba(22, 104, 255, 0.4);
       transition: all 0.3s;
       font-family: 'Outfit', sans-serif;
       letter-spacing: 1px;
@@ -294,7 +350,7 @@
 
     .btn:hover {
       transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
+      box-shadow: 0 6px 20px rgba(22, 104, 255, 0.6);
     }
 
     .btn:active {
@@ -306,7 +362,7 @@
 <body>
   <div class="container">
     <div class="header">
-      <img src="/logo.png" alt="Nuvio Live Sports" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
+      <img src="/logo.png" alt="Nuvio Live Sports" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
       <h1><span class="dot"></span> Nuvio Sports</h1>
       <p class="subtitle">Customize your ultimate live sports dashboard.</p>
     </div>
@@ -364,10 +420,52 @@
     </div>
 
     <div class="section">
-      <h3>Catalog Tabs</h3>
-      <p class="hint">Drag to reorder the tabs, and rename any of them. Leave a name empty to keep the original.</p>
+      <h3>Catalog Management</h3>
+      <p class="hint">Drag to reorder. Tap the eye to show or hide a tab, the pencil to rename it, and ⋯ for the rest.</p>
+
+      <div class="cat-legend">
+        <span><i class="dot on"></i> Shown</span>
+        <span><i class="dot off"></i> Hidden</span>
+        <button type="button" id="hideDisabled" class="chip" aria-pressed="false">Hide disabled</button>
+        <button type="button" id="catalogReset" class="chip">Reset all</button>
+      </div>
+
+      <div class="cat-selectall">
+        <button type="button" class="cbx" id="catSelectAll" role="checkbox" aria-checked="false" aria-label="Select all tabs"></button>
+        <span>Select all (<b id="catCount">0</b> tabs)</span>
+      </div>
+
       <div id="catalogList"><p class="hint" id="catalogLoading">Loading tabs…</p></div>
-      <button type="button" id="catalogReset" class="toggle" style="margin-top:8px">Reset names and order</button>
+
+      <div id="catBulk" class="cat-bulk" hidden>
+        <span><b id="catBulkCount">0</b> selected</span>
+        <div class="cat-bulk-actions">
+          <button type="button" class="chip" data-bulk="show">Show</button>
+          <button type="button" class="chip" data-bulk="hide">Hide</button>
+          <button type="button" class="chip" data-bulk="top">To top</button>
+          <button type="button" class="chip" data-bulk="bottom">To bottom</button>
+          <button type="button" class="chip" data-bulk="shuffle">Shuffle</button>
+          <button type="button" class="chip" data-bulk="clear">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="renameModal" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
+        <div class="modal-head">
+          <h3 id="renameTitle">Edit tab</h3>
+          <button type="button" class="modal-x" id="renameClose" aria-label="Close">✕</button>
+        </div>
+        <label class="modal-label" for="renameName">Name</label>
+        <input id="renameName" type="text" class="modal-input" autocomplete="off">
+        <label class="modal-label" for="renameType">Type</label>
+        <input id="renameType" type="text" class="modal-input" value="tv" disabled
+               title="Every tab in this addon is a live TV catalog">
+        <div class="modal-actions">
+          <button type="button" class="chip" id="renameCancel">Cancel</button>
+          <button type="button" class="chip primary" id="renameSave">Save</button>
+        </div>
+      </div>
     </div>
 
     <div class="section">
@@ -382,7 +480,7 @@
     <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
     <button id="copyBtn" class="btn" style="background: #333; margin-top: 12px; font-size: 14px;">COPY LINK (FOR NUVIO APP)</button>
 
-    <div style="margin-top: 25px; padding: 16px; background: rgba(255, 95, 95, 0.08); border: 1px solid rgba(255, 95, 95, 0.2); border-radius: 16px; text-align: center;">
+    <div style="margin-top: 25px; padding: 16px; background: rgba(22, 104, 255, 0.08); border: 1px solid rgba(22, 104, 255, 0.2); border-radius: 16px; text-align: center;">
       <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
         ☕ <strong>Support Nuvio Live Sports</strong><br>Help keep our servers, scrapers, and 24/7 sports streams online!
       </p>
@@ -496,119 +594,215 @@
       { key: 'reverse',   label: 'Reverse order',   hint: 'Show the list back to front' }
     ];
 
-    function optionsPanel(id, saved) {
-      const wrap = document.createElement('div');
-      wrap.className = 'cat-opts';
-      wrap.hidden = true;
-      wrap.dataset.for = id;
-
-      for (const opt of CATALOG_OPTIONS) {
-        const row = document.createElement('div');
-        row.className = 'opt';
-        row.innerHTML = '<div class="opt-text"><b></b><span></span></div>';
-        row.querySelector('b').textContent = opt.label;
-        row.querySelector('span').textContent = opt.hint;
-
-        const sw = document.createElement('button');
-        sw.type = 'button';
-        sw.className = 'sw';
-        sw.dataset.key = opt.key;
-        sw.setAttribute('role', 'switch');
-        sw.setAttribute('aria-label', opt.label);
-        sw.setAttribute('aria-checked', saved && saved[opt.key] ? 'true' : 'false');
-        sw.addEventListener('click', () => {
-          const on = sw.getAttribute('aria-checked') === 'true';
-          sw.setAttribute('aria-checked', on ? 'false' : 'true');
-          // Search only and Disable search contradict each other, so turning one
-          // on turns the other off rather than leaving both set.
-          if (!on && (opt.key === 'searchOnly' || opt.key === 'noSearch')) {
-            const other = opt.key === 'searchOnly' ? 'noSearch' : 'searchOnly';
-            const el = wrap.querySelector('.sw[data-key="' + other + '"]');
-            if (el) el.setAttribute('aria-checked', 'false');
-          }
-          if (!on && (opt.key === 'shuffle' || opt.key === 'reverse')) {
-            const other = opt.key === 'shuffle' ? 'reverse' : 'shuffle';
-            const el = wrap.querySelector('.sw[data-key="' + other + '"]');
-            if (el) el.setAttribute('aria-checked', 'false');
-          }
-          updateLink();
-        });
-        row.appendChild(sw);
-        wrap.appendChild(row);
-      }
-
-      // Only meaningful alongside Shuffle, which is why it sits under it.
-      const hours = document.createElement('div');
-      hours.className = 'opt';
-      hours.innerHTML = '<div class="opt-text"><b>Keep the shuffle for</b>'
-        + '<span>Hours before reshuffling. 0 reshuffles every time.</span></div>';
-      const num = document.createElement('input');
-      num.type = 'number';
-      num.min = '0';
-      num.max = '168';
-      num.className = 'cat-hours';
-      num.value = String((saved && saved.shufflePersistHours) || 0);
-      num.setAttribute('aria-label', 'Hours to keep the shuffle');
-      num.addEventListener('input', () => updateLink());
-      hours.appendChild(num);
-      wrap.appendChild(hours);
-      return wrap;
-    }
-
-    function catalogOptionsValue() {
-      const out = {};
-      for (const item of catalogItems()) {
-        const id = item.dataset.id;
-        const panel = item.querySelector('.cat-opts');
-        if (!panel) continue;
-        const opts = {};
-        for (const sw of panel.querySelectorAll('.sw')) {
-          if (sw.getAttribute('aria-checked') === 'true') opts[sw.dataset.key] = true;
-        }
-        const hours = Number(panel.querySelector('.cat-hours').value) || 0;
-        if (opts.shuffle && hours > 0) opts.shufflePersistHours = hours;
-        if (Object.keys(opts).length) out[id] = opts;
-      }
-      return out;
-    }
-
     function catalogOrderValue() {
       return catalogItems().map(r => r.dataset.id).join(',');
     }
 
     function catalogNamesValue() {
       const names = {};
-      for (const row of catalogRows()) {
-        const input = row.querySelector('.cat-name');
+      for (const item of catalogItems()) {
+        const input = item.querySelector('.cat-name');
         const value = (input.value || '').trim();
-        // An empty box means "leave it alone", so it is not a rename.
-        if (value && value !== input.dataset.original) names[row.dataset.id] = value;
+        // An empty box, or the name it came with, is not a rename.
+        if (value && value !== input.dataset.original) names[item.dataset.id] = value;
       }
       return names;
     }
 
+    // Per-tab settings, held on the row itself so nothing has to be kept in sync.
+    function readOpts(item) { return JSON.parse(item.dataset.opts || '{}'); }
+    function writeOpts(item, opts) {
+      item.dataset.opts = JSON.stringify(opts);
+      item.classList.toggle('is-hidden', !!opts.hidden);
+      const eye = item.querySelector('.eye');
+      if (eye) {
+        eye.textContent = opts.hidden ? '🚫' : '👁';
+        eye.classList.toggle('on', !opts.hidden);
+        eye.setAttribute('aria-label', (opts.hidden ? 'Show ' : 'Hide ') + item.dataset.name);
+      }
+      applyHideDisabled();
+      updateLink();
+    }
+
+    function catalogOptionsValue() {
+      const out = {};
+      for (const item of catalogItems()) {
+        const opts = readOpts(item);
+        if (Object.keys(opts).length) out[item.dataset.id] = opts;
+      }
+      return out;
+    }
+
+    // ---- selection ---------------------------------------------------------
+    function selected() { return catalogItems().filter(i => i.classList.contains('selected')); }
+
+    function refreshSelection() {
+      const all = catalogItems();
+      const n = selected().length;
+      document.getElementById('catBulkCount').textContent = String(n);
+      document.getElementById('catBulk').hidden = n === 0;
+      const master = document.getElementById('catSelectAll');
+      master.setAttribute('aria-checked', n === 0 ? 'false' : (n === all.length ? 'true' : 'mixed'));
+      document.getElementById('catCount').textContent = String(all.length);
+    }
+
+    function setSelected(item, on) {
+      item.classList.toggle('selected', on);
+      const box = item.querySelector('.cbx');
+      if (box) box.setAttribute('aria-checked', on ? 'true' : 'false');
+      refreshSelection();
+    }
+
+    document.getElementById('catSelectAll').addEventListener('click', () => {
+      const all = catalogItems();
+      const on = selected().length !== all.length;
+      for (const item of all) setSelected(item, on);
+    });
+
+    // ---- "hide disabled" filter -------------------------------------------
+    function applyHideDisabled() {
+      const on = document.getElementById('hideDisabled').getAttribute('aria-pressed') === 'true';
+      for (const item of catalogItems()) {
+        item.style.display = (on && readOpts(item).hidden) ? 'none' : '';
+      }
+    }
+    document.getElementById('hideDisabled').addEventListener('click', e => {
+      const on = e.currentTarget.getAttribute('aria-pressed') === 'true';
+      e.currentTarget.setAttribute('aria-pressed', on ? 'false' : 'true');
+      applyHideDisabled();
+    });
+
+    // ---- bulk actions ------------------------------------------------------
+    document.getElementById('catBulk').addEventListener('click', e => {
+      const btn = e.target.closest('[data-bulk]');
+      if (!btn) return;
+      const action = btn.dataset.bulk;
+      const items = selected();
+      if (action === 'clear') { for (const i of catalogItems()) setSelected(i, false); return; }
+      for (const item of items) {
+        const opts = readOpts(item);
+        if (action === 'show') delete opts.hidden;
+        if (action === 'hide') opts.hidden = true;
+        if (action === 'shuffle') { if (opts.shuffle) delete opts.shuffle; else { opts.shuffle = true; delete opts.reverse; } }
+        writeOpts(item, opts);
+      }
+      // Moving several keeps their relative order rather than reversing it.
+      if (action === 'top') for (const item of items.slice().reverse()) catalogList.prepend(item);
+      if (action === 'bottom') for (const item of items) catalogList.appendChild(item);
+      updateLink();
+    });
+
+    // ---- the ⋯ menu --------------------------------------------------------
+    let openMenu = null;
+    function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
+    document.addEventListener('click', e => {
+      if (openMenu && !openMenu.contains(e.target) && !e.target.closest('.dots')) closeMenu();
+    });
+
+    function showMenu(item, anchor) {
+      closeMenu();
+      const opts = readOpts(item);
+      const menu = document.createElement('div');
+      menu.className = 'cat-menu';
+      const entry = (label, state, fn) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.innerHTML = '<span>' + label + '</span>';
+        if (state) { const s2 = document.createElement('span'); s2.className = 'state'; s2.textContent = state; b.appendChild(s2); }
+        b.addEventListener('click', () => { fn(); closeMenu(); });
+        menu.appendChild(b);
+      };
+      const sep = () => { const d = document.createElement('div'); d.className = 'sep'; menu.appendChild(d); };
+      const flip = key => () => {
+        const o = readOpts(item);
+        if (o[key]) delete o[key];
+        else {
+          o[key] = true;
+          // Options that contradict each other cannot both be set.
+          if (key === 'searchOnly') delete o.noSearch;
+          if (key === 'noSearch') delete o.searchOnly;
+          if (key === 'shuffle') delete o.reverse;
+          if (key === 'reverse') delete o.shuffle;
+        }
+        writeOpts(item, o);
+      };
+
+      entry(opts.hidden ? 'Show tab' : 'Hide tab', null, flip('hidden'));
+      entry('Search only', opts.searchOnly ? 'on' : '', flip('searchOnly'));
+      entry('Disable search', opts.noSearch ? 'on' : '', flip('noSearch'));
+      sep();
+      entry('Randomise order', opts.shuffle ? 'on' : '', flip('shuffle'));
+      entry('Reverse order', opts.reverse ? 'on' : '', flip('reverse'));
+      sep();
+      entry('Move to top', null, () => { catalogList.prepend(item); updateLink(); });
+      entry('Move to bottom', null, () => { catalogList.appendChild(item); updateLink(); });
+      sep();
+      entry('Rename', null, () => openRename(item));
+
+      document.body.appendChild(menu);
+      const box = anchor.getBoundingClientRect();
+      const w = menu.offsetWidth || 200;
+      menu.style.left = Math.max(8, Math.min(box.right - w, window.innerWidth - w - 8)) + 'px';
+      menu.style.top = (window.scrollY + box.bottom + 6) + 'px';
+      openMenu = menu;
+    }
+
+    // ---- rename dialog -----------------------------------------------------
+    let renaming = null;
+    const renameModal = document.getElementById('renameModal');
+    function openRename(item) {
+      renaming = item;
+      const input = item.querySelector('.cat-name');
+      document.getElementById('renameName').value = input.value;
+      document.getElementById('renameTitle').textContent = 'Edit ' + item.dataset.name;
+      renameModal.hidden = false;
+      document.getElementById('renameName').focus();
+    }
+    function closeRename() { renameModal.hidden = true; renaming = null; }
+    document.getElementById('renameClose').addEventListener('click', closeRename);
+    document.getElementById('renameCancel').addEventListener('click', closeRename);
+    renameModal.addEventListener('click', e => { if (e.target === renameModal) closeRename(); });
+    document.getElementById('renameSave').addEventListener('click', () => {
+      if (!renaming) return;
+      const value = document.getElementById('renameName').value.trim();
+      const input = renaming.querySelector('.cat-name');
+      input.value = value || input.dataset.original;
+      closeRename();
+      updateLink();
+    });
+
     function renderCatalogs(catalogs, saved) {
       const order = saved && saved.catalogOrder ? String(saved.catalogOrder).split(',') : [];
       const names = (saved && saved.catalogNames) || {};
+      const savedOpts = (saved && saved.catalogOptions) || {};
       const rank = id => {
         const i = order.indexOf(id);
+        // A tab the saved order never saw keeps its place rather than jumping.
         return i === -1 ? order.length + catalogs.findIndex(c => c.id === id) : i;
       };
       const sorted = catalogs.slice().sort((a, b) => rank(a.id) - rank(b.id));
 
-      const savedOpts = (saved && saved.catalogOptions) || {};
       catalogList.innerHTML = '';
       for (const cat of sorted) {
-        // The row and its settings move together, so dragging carries both.
         const item = document.createElement('div');
         item.className = 'cat-item';
         item.dataset.id = cat.id;
+        item.dataset.name = cat.name;
         item.dataset.defaultIndex = String(catalogs.findIndex(c => c.id === cat.id));
 
         const row = document.createElement('div');
         row.className = 'cat-row';
-        row.dataset.id = cat.id;
-        row.innerHTML = GRIP_SVG;
+
+        const box = document.createElement('button');
+        box.type = 'button';
+        box.className = 'cbx';
+        box.setAttribute('role', 'checkbox');
+        box.setAttribute('aria-checked', 'false');
+        box.setAttribute('aria-label', 'Select ' + cat.name);
+        box.addEventListener('click', () => setSelected(item, !item.classList.contains('selected')));
+        row.appendChild(box);
+
+        row.insertAdjacentHTML('beforeend', GRIP_SVG);
 
         const input = document.createElement('input');
         input.className = 'cat-name';
@@ -620,25 +814,39 @@
         input.addEventListener('input', () => updateLink());
         row.appendChild(input);
 
-        const panel = optionsPanel(cat.id, savedOpts[cat.id]);
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'cat-expand';
-        toggle.setAttribute('aria-expanded', 'false');
-        toggle.setAttribute('aria-label', 'Settings for ' + cat.name);
-        toggle.textContent = '▾';
-        toggle.addEventListener('click', () => {
-          const open = toggle.getAttribute('aria-expanded') === 'true';
-          toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
-          panel.hidden = open;
+        const pencil = document.createElement('button');
+        pencil.type = 'button';
+        pencil.className = 'icon-btn';
+        pencil.textContent = '✏️';
+        pencil.setAttribute('aria-label', 'Rename ' + cat.name);
+        pencil.addEventListener('click', () => openRename(item));
+        row.appendChild(pencil);
+
+        const eye = document.createElement('button');
+        eye.type = 'button';
+        eye.className = 'icon-btn eye';
+        eye.addEventListener('click', () => {
+          const o = readOpts(item);
+          if (o.hidden) delete o.hidden; else o.hidden = true;
+          writeOpts(item, o);
         });
-        row.appendChild(toggle);
+        row.appendChild(eye);
+
+        const dots = document.createElement('button');
+        dots.type = 'button';
+        dots.className = 'icon-btn dots';
+        dots.textContent = '⋯';
+        dots.setAttribute('aria-label', 'More options for ' + cat.name);
+        dots.addEventListener('click', e => { e.stopPropagation(); showMenu(item, dots); });
+        row.appendChild(dots);
 
         item.appendChild(row);
-        item.appendChild(panel);
         catalogList.appendChild(item);
+        writeOpts(item, savedOpts[cat.id] || {});   // paints the eye and the dimming
       }
       makeReorderable(catalogList, '.cat-item', () => updateLink());
+      refreshSelection();
+      applyHideDisabled();
     }
 
     document.getElementById('catalogReset').addEventListener('click', e => {
