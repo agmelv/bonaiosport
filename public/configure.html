@@ -1001,7 +1001,8 @@
     // drift apart in what they mean by "search only".
     // searchOnly is the strongest placement, so turning it on clears the weaker
     // noHome -- a tab cannot be both search-only and discover-only.
-    const EXCLUSIVE = { searchOnly: 'noHome', noSearch: 'searchOnly', shuffle: 'reverse', reverse: 'shuffle' };
+    const EXCLUSIVE = { searchOnly: 'noHome', noHome: 'searchOnly',
+                        noSearch: 'searchOnly', shuffle: 'reverse', reverse: 'shuffle' };
 
     function setOption(item, key, on) {
       const opts = readOpts(item);
@@ -1061,9 +1062,18 @@
       // Where a tab appears is decided by whether a client can ask for it with
       // no parameters. On: home board and Discover. Off: Discover only, which
       // the server arranges with a required genre.
-      { key: 'home', title: 'On the home board (off = Discover only)', svg: HOME_SVG,
-        run: item => { const on = !!readOpts(item).noHome;   // currently off -> turn on
-                       for (const t of targets(item)) setOption(t, 'noHome', !on); } },
+      { key: 'home', title: 'On the home board (off = browse/search only)', svg: HOME_SVG,
+        // Two flags decide this, so the button has to settle both. Reading only
+        // noHome left a tab that was already search-only stuck off the board
+        // forever: the button added and removed noHome while searchOnly, set
+        // under the older meaning of this same icon, went on hiding it.
+        run: item => {
+          const onBoard = !readOpts(item).noHome && !readOpts(item).searchOnly;
+          for (const t of targets(item)) {
+            setOption(t, 'searchOnly', false);
+            setOption(t, 'noHome', onBoard);
+          }
+        } },
       // Independent of the two above: a tab can be off the board and still be
       // searchable, which is the combination the old single toggle could not say.
       { key: 'search', title: 'Searchable', svg: SEARCH_SVG,
