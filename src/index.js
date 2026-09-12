@@ -137,6 +137,14 @@ app.use((req, res, next) => {
   if (!/^\/saved(\/|$|\?)/.test(req.url)) return next();
   const saved = loadSavedConfig();
   if (!saved) {
+    // A person who followed /saved/configure wants the page, not a paragraph of
+    // JSON about why they cannot have it. Send them where they were going --
+    // the configure page, which then says what is and is not saved.
+    const wantsPage = /^\/saved(\/configure\/?)?(\?|$)/.test(req.url)
+      || String(req.get('accept') || '').includes('text/html');
+    if (wantsPage) return res.redirect(302, '/configure');
+
+    // A player asking for the manifest gets an answer it can act on.
     return res.status(404).json({
       error: 'Nothing saved yet. Open /configure, set it up, and press Save.'
     });
@@ -1737,6 +1745,15 @@ app.listen(PORT, BIND_HOST, () => {
   console.log(`  Sign-in   : ${siteKey ? 'AUTH_KEY set' : 'NOT SET — anyone who can reach this can browse it'}`);
   console.log(`  Dashboard : ${adminKey ? 'ADMIN_TOKEN set' : 'NOT SET — dashboard is closed until you set one'}`);
   console.log(`  Proxies   : trust proxy = ${TRUST_PROXY || 'loopback/private only (default)'}`);
+  // Said out loud at every boot, because the failure it warns about only shows
+  // up on the *next* deploy -- by which time the settings are already gone.
+  const durable = savedConfigIsDurable();
+  console.log(`  Saved cfg : ${DATA_DIR} — ${durable
+    ? 'on a volume, survives rebuilds'
+    : 'NOT on a volume, a rebuild will erase it'}`);
+  if (!durable) {
+    console.log('  → Mount a volume there to keep saved settings (see the README).');
+  }
   if (!siteKey || !adminKey) {
     console.log('  → Set these in .env (or the environment) if this port is reachable from the internet.');
   }
