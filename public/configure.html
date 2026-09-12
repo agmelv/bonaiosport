@@ -148,6 +148,21 @@
     .copy-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
     .copy-btn.done { background: #10b981; border-color: #10b981; color: #fff; }
 
+    /* The only new rule this feature needs; every other control it adds reuses
+       the page's existing vocabulary. */
+    #impDrop {
+      margin-top: 4px; padding: 22px 16px; text-align: center; cursor: pointer;
+      border: 1px dashed #3a3a44; border-radius: 12px; color: #8b8f95;
+      font-size: 13px; line-height: 1.5; background: rgba(0, 0, 0, .15);
+    }
+    #impDrop:hover, #impDrop:focus-visible, #impDrop.over {
+      border-color: var(--accent); color: #fff;
+      background: rgba(22, 104, 255, .08); outline: none;
+    }
+    #expFields { max-height: 220px; overflow-y: auto; }
+    #expFields div, #impPreview div, #impWarn div { margin: 2px 0; }
+    #impWarn { margin-top: 10px; }
+
     .callout {
       margin-top: 14px; padding: 12px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5;
       background: rgba(22, 104, 255, .08); border: 1px solid rgba(22, 104, 255, .22); color: #c9ced4;
@@ -343,6 +358,8 @@
     .chip { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
             background: #24242a; color: #c9ced4; border: 1px solid #34343c; }
     .chip:hover { background: #2f2f37; color: #fff; }
+    .chip:disabled { opacity: .45; cursor: not-allowed; }
+    .chip:disabled:hover { background: #24242a; color: #c9ced4; }
     .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
     .chip.primary { background: #fff; color: #16161a; border-color: #fff; font-weight: 650; }
     .cat-selectall { display: flex; align-items: center; gap: 10px; font-size: 13px;
@@ -709,6 +726,86 @@
     <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
     <button id="copyBtn" class="btn secondary">COPY LINK (FOR NUVIO APP)</button>
 
+    <div class="section" id="backupCard">
+      <h3>Backup &amp; Share</h3>
+      <p class="hint">Save these settings to a file you can keep, move to another server, or hand to
+        someone else. Importing one replaces everything on this page.</p>
+
+      <div class="cat-legend">
+        <button type="button" id="exportBtn" class="chip">Export config</button>
+        <button type="button" id="importBtn" class="chip">Import config</button>
+      </div>
+
+      <div class="callout" id="backupCallout" hidden></div>
+
+      <dialog id="exportDialog" class="modal">
+        <form method="dialog" class="modal-body">
+          <div class="modal-head">
+            <h3>Export config</h3>
+            <button type="submit" value="cancel" class="modal-x" aria-label="Close">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <p class="hint">Everything the file will contain is listed here. Nothing else goes in it —
+            not your install URL, not your profile, not this server's address.</p>
+          <div class="callout" id="expFields"></div>
+
+          <label class="checkbox-label active" id="expPersonalLabel" style="margin-top: 14px;">
+            <input type="checkbox" id="expPersonal" checked>
+            Include my teams and timezone
+          </label>
+          <p class="hint" id="expPersonalHint"></p>
+
+          <div class="cat-legend" style="margin-bottom: 0;">
+            <button type="button" id="expCopy" class="chip">Copy to clipboard</button>
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" value="cancel" class="btn secondary">Cancel</button>
+            <button type="submit" value="save" class="btn">Download</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="importDialog" class="modal">
+        <form method="dialog" class="modal-body">
+          <div class="modal-head">
+            <h3>Import config</h3>
+            <button type="submit" value="cancel" class="modal-x" aria-label="Close">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <div class="cat-legend">
+            <button type="button" class="chip" id="impTabFile" aria-pressed="true">Upload a file</button>
+            <button type="button" class="chip" id="impTabPaste" aria-pressed="false">Paste JSON</button>
+          </div>
+
+          <div id="impFilePanel">
+            <div id="impDrop" tabindex="0" role="button">Drop a config file here, or click to choose one</div>
+            <input type="file" id="impFile" accept=".json,application/json" hidden>
+          </div>
+
+          <div id="impPastePanel" hidden>
+            <textarea id="impPaste" rows="6" spellcheck="false"
+                      placeholder="Paste the contents of an aiosports-config-….json file"></textarea>
+          </div>
+
+          <div class="callout warn" id="impError" hidden aria-live="polite"></div>
+          <div class="callout" id="impPreview" hidden></div>
+          <div class="callout warn" id="impWarn" hidden></div>
+
+          <div class="modal-actions">
+            <button type="submit" value="cancel" class="btn secondary">Cancel</button>
+            <button type="submit" value="save" class="btn" id="impConfirm" disabled>Replace settings</button>
+          </div>
+        </form>
+      </dialog>
+    </div>
+
     <div style="margin-top: 25px; padding: 16px; background: rgba(22, 104, 255, 0.08); border: 1px solid rgba(22, 104, 255, 0.2); border-radius: 16px; text-align: center;">
       <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
         ☕ <strong>Support AIOSports</strong><br>Help keep our servers, scrapers, and 24/7 sports streams online!
@@ -718,7 +815,7 @@
           <svg height="18" viewBox="0 0 24 24" width="18" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
           Support on Ko-fi
         </a>
-        <a class="footer-link" href="https://github.com/mlp2069/live-sport-plugin" target="_blank" rel="noopener noreferrer">
+        <a class="footer-link" href="https://github.com/mlp2069/aiosports" target="_blank" rel="noopener noreferrer">
           <svg height="18" viewBox="0 0 16 16" width="18" fill="currentColor"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
           GitHub
         </a>
@@ -1219,9 +1316,13 @@
 
     // Version and build, the way any self-hosted thing should say which copy of
     // itself is running -- the first question asked when something looks wrong.
+    let buildInfo = null;
     (async () => {
       try {
         const v = await (await fetch('/api/version')).json();
+        // Kept so an export can record which build wrote it. Nothing gates on
+        // it, so losing this race costs the file a caption and nothing more.
+        buildInfo = v;
         const ver = document.getElementById('addonVersion');
         const bid = document.getElementById('buildId');
         if (v.version) ver.textContent = 'v' + v.version + (v.build ? ' \u00b7 ' + v.build : '');
@@ -1296,6 +1397,11 @@
     // Attempt to load existing config from URL
     let defaultCatalogOrder = '';
     let existingConfig = {};
+    // Three of the thirteen settings -- tab order, names and per-tab options --
+    // exist only once the tab list has been fetched. Exporting before then
+    // would write a file that looks complete and silently is not.
+    let catalogsReady = false;
+    let catalogsFailed = false;
     try {
       const pathParts = window.location.pathname.split('/');
       if (pathParts.length >= 3 && pathParts[pathParts.length - 1] === 'configure') {
@@ -1424,11 +1530,15 @@
         defaultCatalogOrder = catalogs.map(c => c.id).join(',');
         renderCatalogs(catalogs, existingConfig);
         updateLink();
+        catalogsReady = true;
+        refreshBackupCard();
       })
       .catch(err => {
         // Losing this section costs tab ordering, nothing else on the page.
         const loading = document.getElementById('catalogLoading');
         if (loading) loading.textContent = 'Could not load the tab list (' + err.message + ').';
+        catalogsFailed = true;
+        refreshBackupCard();
       });
 
     identity.name = typeof existingConfig.addonName === 'string' ? existingConfig.addonName : '';
@@ -1718,7 +1828,667 @@
       }, 2200);
     });
 
-    refreshSaveUi();
+
+    // ---- Backup & Share ----------------------------------------------------
+    //
+    // Export writes these settings to a file; import reads one back.
+    //
+    // Import deliberately does not apply any field itself. It validates the
+    // file, encodes it exactly the way an install link is encoded, and reopens
+    // the page at that address -- because the page already knows how to rebuild
+    // itself from a config segment, that being what a shared link is. One
+    // hydration path to keep correct rather than two that drift apart.
+    //
+    // It also contains the damage. The file is wholly untrusted: these get
+    // passed around on Reddit. Going through a URL means its bytes never become
+    // app state -- they become an address, which this page has always treated as
+    // hostile, and updateLink() rebuilds the config from the DOM afterwards.
+    const EXPORT_KIND = 'aiosports.config';
+    const SCHEMA_VERSION = 1;
+
+    // The one list both halves share. A config key missing from it is left out
+    // of exports and dropped by imports -- the safe direction, and the reason
+    // this is a single allow-list rather than two deny-lists that fall behind
+    // the settings they are meant to cover.
+    const KNOWN_KEYS = [
+      'teams', 'timezone', 'sports', 'sources', 'sourceOrder', 'streamOrder', 'timeFormat',
+      'addonName', 'addonLogo', 'addonDescription', 'catalogOrder', 'catalogNames', 'catalogOptions'
+    ];
+    // Not secret -- this addon holds no keys or tokens -- but personal: together
+    // they say roughly where someone lives and what they follow. In by default,
+    // because a backup missing them is not a backup; behind a switch, because a
+    // file meant for a stranger should not carry them.
+    const PERSONAL_KEYS = ['teams', 'timezone'];
+    const CATALOG_KEYS = ['catalogOrder', 'catalogNames', 'catalogOptions'];
+    // The per-tab flags the page actually writes, and the only ones an import
+    // will carry. EXCLUSIVE above still owns which of them can hold at once.
+    const OPTION_FLAGS = ['hidden', 'searchOnly', 'noHome', 'noSearch', 'shuffle', 'reverse'];
+
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const backupCallout = document.getElementById('backupCallout');
+    const expDlg = document.getElementById('exportDialog');
+    const impDlg = document.getElementById('importDialog');
+
+    // A plain object and nothing else. Arrays and null both answer 'object'.
+    const isPlainObject = v => !!v && typeof v === 'object' && !Array.isArray(v);
+    const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+    // Every value the file supplies is written with textContent, never markup,
+    // so an addon name of "<img onerror=...>" is shown as those characters.
+    const line = (parent, text, cls) => {
+      const d = document.createElement('div');
+      if (cls) d.className = cls;
+      d.textContent = text;
+      parent.appendChild(d);
+      return d;
+    };
+
+    // ---- export ------------------------------------------------------------
+
+    function exportPayload(includePersonal) {
+      // updateLink() writes only known keys into a fresh object, so this cannot
+      // fire today. It is here so that adding a setting without adding it to
+      // KNOWN_KEYS fails loudly instead of shipping a quietly lossy backup.
+      const unknown = Object.keys(currentConfig).filter(k => KNOWN_KEYS.indexOf(k) === -1);
+      if (unknown.length) throw new Error('config carries keys this export does not know: ' + unknown.join(', '));
+
+      const config = {};
+      for (const k of KNOWN_KEYS) {
+        if (!own(currentConfig, k)) continue;
+        if (!includePersonal && PERSONAL_KEYS.indexOf(k) !== -1) continue;
+        config[k] = currentConfig[k];
+      }
+      return {
+        kind: EXPORT_KIND,
+        schemaVersion: SCHEMA_VERSION,
+        // Recorded so a file can be placed, never compared on import: a config
+        // does not stop being readable because the addon moved on.
+        addonVersion: (buildInfo && buildInfo.version) || 'unknown',
+        exportedAt: new Date().toISOString(),
+        config: config
+      };
+    }
+
+    // Local time, to the second. Two exports on one day are exactly when you
+    // most need to tell them apart, and a date alone leaves the browser to do
+    // it with "(1)".
+    const exportStamp = () => {
+      const d = new Date(), p = n => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+        + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    };
+
+    function downloadExport(includePersonal) {
+      const blob = new Blob([JSON.stringify(exportPayload(includePersonal), null, 2)],
+                            { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'aiosports-config-' + exportStamp() + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // What the tab list not having loaded costs, said once rather than guessed
+    // at after the fact: three of the thirteen settings live in it.
+    function refreshBackupCard() {
+      exportBtn.disabled = !catalogsReady;
+      // The import notice outranks this card's own status: the probe finishing
+      // is not a reason to take away the line saying nothing has been saved.
+      if (backupCalloutLocked) return;
+      if (catalogsReady) { backupCallout.hidden = true; return; }
+      backupCallout.hidden = false;
+      backupCallout.className = 'callout warn';
+      backupCallout.textContent = catalogsFailed
+        ? 'The tab list could not be loaded, so tab order, names and per-tab settings cannot be '
+          + 'exported or imported. Everything else still can — reload to try the list again.'
+        : 'Waiting for the tab list. Export opens once it has loaded.';
+    }
+
+    const expPersonal = document.getElementById('expPersonal');
+    const expPersonalLabel = document.getElementById('expPersonalLabel');
+    const expPersonalHint = document.getElementById('expPersonalHint');
+    const expFields = document.getElementById('expFields');
+    const expCopy = document.getElementById('expCopy');
+
+    // One line per setting, with its actual value. The switch below is only
+    // safe as a default-on because this list makes the export visible first.
+    const FIELD_LABELS = {
+      teams: 'Favourite teams', timezone: 'Timezone', sports: 'Sports', sources: 'Sources',
+      sourceOrder: 'Source order', streamOrder: 'Stream order', timeFormat: 'Clock',
+      addonName: 'Addon name', addonLogo: 'Addon logo', addonDescription: 'Addon description',
+      catalogOrder: 'Tab order', catalogNames: 'Renamed tabs', catalogOptions: 'Per-tab settings'
+    };
+
+    function paintExportDialog() {
+      const payload = exportPayload(expPersonal.checked);
+      const cfg = payload.config;
+      expFields.textContent = '';
+      const keys = KNOWN_KEYS.filter(k => own(cfg, k));
+      if (!keys.length) {
+        line(expFields, 'Nothing is set, so this file would only record that everything is at its default.');
+      } else {
+        for (const k of keys) {
+          const v = cfg[k];
+          let shown;
+          if (k === 'catalogNames') shown = Object.keys(v).length + ' tab(s) renamed';
+          else if (k === 'catalogOptions') shown = Object.keys(v).length + ' tab(s) with settings';
+          else if (k === 'catalogOrder') shown = String(v).split(',').length + ' tabs, in a custom order';
+          else if (k === 'sourceOrder') shown = 'custom';
+          else shown = String(v);
+          if (shown.length > 60) shown = shown.slice(0, 59) + '…';
+          line(expFields, FIELD_LABELS[k] + ' — ' + shown);
+        }
+      }
+      const on = expPersonal.checked;
+      expPersonalLabel.classList.toggle('active', on);
+      expPersonalHint.textContent = on
+        ? 'A complete backup. Anyone you send it to can see which teams you follow and roughly where you are.'
+        : 'Safe to hand to anyone. Teams and timezone are left out, and whoever imports it keeps their own. '
+          + 'Not a full backup of your own settings.';
+    }
+
+    exportBtn.addEventListener('click', () => {
+      if (!catalogsReady) return;
+      expPersonal.checked = true;
+      paintExportDialog();
+      expDlg.showModal();
+    });
+    expPersonal.addEventListener('change', paintExportDialog);
+
+    expCopy.addEventListener('click', () => {
+      const text = JSON.stringify(exportPayload(expPersonal.checked), null, 2);
+      const done = () => {
+        expCopy.textContent = 'Copied';
+        setTimeout(() => { expCopy.textContent = 'Copy to clipboard'; }, 1600);
+      };
+      // Same two paths as the install-URL button: the clipboard API needs a
+      // secure origin, and plenty of these run on plain http.
+      const fallback = () => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand('copy')) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else {
+        fallback();
+      }
+    });
+
+    expDlg.addEventListener('close', () => {
+      if (expDlg.returnValue !== 'save') return;
+      downloadExport(expPersonal.checked);
+    });
+
+    // ---- import ------------------------------------------------------------
+
+    // Carries a message written for the person reading it. A raw SyntaxError
+    // ("Unexpected token < in JSON at position 0") tells them nothing they can
+    // act on, so no exception message ever reaches the callout unflagged.
+    function reject(message) {
+      const e = new Error(message);
+      e.friendly = true;
+      throw e;
+    }
+
+    // Loopback and private space. An imported logo pointing at 192.168.1.4 is
+    // every importer's browser being asked to fetch from their own network.
+    function isPrivateHost(host) {
+      const h = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+      if (h === 'localhost' || h === '::1' || /\.local$|\.localhost$|\.internal$/.test(h)) return true;
+      const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (!m) return false;
+      const a = Number(m[1]), b = Number(m[2]);
+      return a === 0 || a === 127 || a === 10
+        || (a === 192 && b === 168)
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 169 && b === 254);
+    }
+
+    // A comma list, kept only where every entry is one this build knows.
+    const cleanList = (v, known) => {
+      const out = [];
+      for (const raw of String(v).split(',')) {
+        const s = raw.trim();
+        if (s && known.indexOf(s) !== -1 && out.indexOf(s) === -1) out.push(s);
+      }
+      return out;
+    };
+
+    // Rebuild the config from scratch, one known key at a time, reading with
+    // hasOwnProperty and writing into a fresh object. Never Object.assign,
+    // never spread, never a deep merge: those are what turn an inert "__proto__"
+    // in a JSON file into a real prototype write. Because every value below is
+    // rebuilt from primitives and no sub-object is ever copied by reference,
+    // nesting depth is bounded by this function rather than by the file.
+    function sanitiseConfig(src) {
+      const clean = {};
+      let dropped = 0;
+
+      const KNOWN_SOURCES = sourceRows().map(r => r.dataset.value);
+      const KNOWN_SPORTS = Array.from(checkboxes).map(cb => cb.value);
+      const KNOWN_CATALOGS = catalogItems().map(i => i.dataset.id);
+
+      for (const k of Object.keys(src)) {
+        if (KNOWN_KEYS.indexOf(k) === -1) dropped++;
+      }
+
+      const str = k => (own(src, k) && typeof src[k] === 'string') ? src[k] : null;
+
+      const teams = str('teams');
+      if (teams !== null) {
+        const v = cleanText(teams, 500);
+        if (v) clean.teams = v;
+      }
+
+      const tz = str('timezone');
+      if (tz !== null) {
+        try {
+          new Intl.DateTimeFormat('en-US', { timeZone: tz });
+          clean.timezone = tz;
+        } catch (e) { dropped++; }
+      }
+
+      // 'all' is this key's default and is carried by omission; 'none' is a
+      // real choice and stays.
+      const sports = str('sports');
+      if (sports !== null && sports !== 'all') {
+        if (sports === 'none') clean.sports = 'none';
+        else {
+          const list = cleanList(sports, KNOWN_SPORTS);
+          if (list.length) clean.sports = list.join(',');
+        }
+      }
+
+      // The same shape, but 'all' here is not a synonym for the default: the
+      // server special-cases only 'none' for sources, so a literal 'all' would
+      // match no source and yield no streams at all. Normalised at the door.
+      const sources = str('sources');
+      if (sources !== null && sources !== 'all') {
+        if (sources === 'none') clean.sources = 'none';
+        else {
+          const list = cleanList(sources, KNOWN_SOURCES);
+          if (list.length) clean.sources = list.join(',');
+        }
+      }
+
+      const sourceOrder = str('sourceOrder');
+      if (sourceOrder !== null) {
+        const list = cleanList(sourceOrder, KNOWN_SOURCES);
+        if (list.length) clean.sourceOrder = list.join(',');
+      }
+
+      const streamOrder = str('streamOrder');
+      if (streamOrder === 'web' || streamOrder === 'none') clean.streamOrder = streamOrder;
+
+      if (str('timeFormat') === '24') clean.timeFormat = '24';
+
+      const name = str('addonName');
+      if (name !== null) {
+        const v = cleanText(name, 40);
+        if (v && v !== DEFAULT_ADDON_NAME) clean.addonName = v;
+      }
+
+      const desc = str('addonDescription');
+      if (desc !== null) {
+        const v = cleanText(desc, 300);
+        if (v) clean.addonDescription = v;
+      }
+
+      const logo = str('addonLogo');
+      if (logo !== null) {
+        const v = cleanText(logo, 300);
+        if (/^https?:\/\/\S+$/i.test(v)) {
+          try {
+            const u = new URL(v);
+            if (isPrivateHost(u.hostname)) dropped++;
+            else clean.addonLogo = v;
+          } catch (e) { dropped++; }
+        } else if (v) dropped++;
+      }
+
+      // The tab list is fetched, so it can be missing. Three settings live in
+      // it; without it they are dropped and the preview says so rather than
+      // letting them vanish quietly.
+      if (catalogsReady) {
+        const catOrder = str('catalogOrder');
+        if (catOrder !== null) {
+          const list = cleanList(catOrder, KNOWN_CATALOGS);
+          if (list.length) clean.catalogOrder = list.join(',');
+        }
+
+        if (own(src, 'catalogNames') && isPlainObject(src.catalogNames)) {
+          const names = {};
+          for (const id of Object.keys(src.catalogNames)) {
+            if (KNOWN_CATALOGS.indexOf(id) === -1) { dropped++; continue; }
+            const raw = src.catalogNames[id];
+            if (typeof raw !== 'string') { dropped++; continue; }
+            const v = cleanText(raw, 40);
+            if (v) names[id] = v;
+          }
+          if (Object.keys(names).length) clean.catalogNames = names;
+        }
+
+        if (own(src, 'catalogOptions') && isPlainObject(src.catalogOptions)) {
+          const opts = {};
+          for (const id of Object.keys(src.catalogOptions)) {
+            if (KNOWN_CATALOGS.indexOf(id) === -1) { dropped++; continue; }
+            const raw = src.catalogOptions[id];
+            if (!isPlainObject(raw)) { dropped++; continue; }
+            // A fresh object holding only flags that are strictly true. The
+            // page writes true and deletes for off, so anything truthy-but-not-
+            // true ("no", 1) came from somewhere else and does not belong.
+            const flags = {};
+            for (const f of OPTION_FLAGS) {
+              if (own(raw, f) && raw[f] === true) flags[f] = true;
+            }
+            // Valid JSON can carry 1e999, which parses to Infinity, survives a
+            // Number() and freezes the shuffle seed -- a shuffle that is the
+            // same order forever.
+            if (own(raw, 'shufflePersistHours')) {
+              const n = raw.shufflePersistHours;
+              if (Number.isFinite(n) && n >= 0 && n <= 168) flags.shufflePersistHours = n;
+              else dropped++;
+            }
+            // The page's own rule about which placements can hold at once,
+            // applied to a file that was under no obligation to respect it.
+            for (const key of Object.keys(flags)) {
+              const other = EXCLUSIVE[key];
+              if (other && flags[key] === true) delete flags[other];
+            }
+            if (Object.keys(flags).length) opts[id] = flags;
+          }
+          if (Object.keys(opts).length) clean.catalogOptions = opts;
+        }
+      }
+
+      return { clean: clean, dropped: dropped };
+    }
+
+    const MAX_IMPORT_BYTES = 65536;   // what /api/config/save will accept
+    const MAX_CONFIG_JSON = 8192;     // what fits in a URL path segment
+
+    const impError = document.getElementById('impError');
+    const impPreview = document.getElementById('impPreview');
+    const impWarn = document.getElementById('impWarn');
+    const impConfirm = document.getElementById('impConfirm');
+    const impFile = document.getElementById('impFile');
+    const impDrop = document.getElementById('impDrop');
+    const impPaste = document.getElementById('impPaste');
+    const impTabFile = document.getElementById('impTabFile');
+    const impTabPaste = document.getElementById('impTabPaste');
+    const impFilePanel = document.getElementById('impFilePanel');
+    const impPastePanel = document.getElementById('impPastePanel');
+
+    let pendingImport = null;
+    let backupCalloutLocked = false;
+
+    function clearImport() {
+      pendingImport = null;
+      impConfirm.disabled = true;
+      impError.hidden = true;
+      impError.textContent = '';
+      impPreview.hidden = true;
+      impPreview.textContent = '';
+      impWarn.hidden = true;
+      impWarn.textContent = '';
+    }
+
+    function showImportError(message) {
+      clearImport();
+      impError.hidden = false;
+      impError.textContent = message;
+    }
+
+    // Everything shown here is computed from the sanitised config, never read
+    // back out of the file. A file that claims "12 catalogs enabled" in its own
+    // metadata is claiming it about itself; this counts what will actually be
+    // applied.
+    function renderImportPreview(parsed, clean, dropped) {
+      impPreview.textContent = '';
+      impWarn.textContent = '';
+
+      let when = '';
+      if (typeof parsed.exportedAt === 'string') {
+        const d = new Date(parsed.exportedAt);
+        if (!isNaN(d.getTime())) when = 'Exported ' + d.toLocaleDateString(undefined,
+          { year: 'numeric', month: 'long', day: 'numeric' });
+      }
+      const from = typeof parsed.addonVersion === 'string' && parsed.addonVersion !== 'unknown'
+        ? 'from AIOSports v' + cleanText(parsed.addonVersion, 20) : '';
+      if (when || from) line(impPreview, [when, from].filter(Boolean).join(' · '));
+
+      line(impPreview, clean.teams ? 'Teams — ' + clean.teams : 'Teams — cleared');
+
+      const totalSports = checkboxes.length;
+      if (clean.sports === 'none') line(impPreview, 'Sports — none');
+      else if (clean.sports) line(impPreview, 'Sports — ' + clean.sports.split(',').length + ' of ' + totalSports);
+      else line(impPreview, 'Sports — all ' + totalSports);
+
+      const totalSources = sourceRows().length;
+      let sourcesLine;
+      if (clean.sources === 'none') sourcesLine = 'Sources — none';
+      else if (clean.sources) sourcesLine = 'Sources — ' + clean.sources.split(',').length + ' of ' + totalSources;
+      else sourcesLine = 'Sources — all ' + totalSources;
+      if (clean.sourceOrder) sourcesLine += ', in a custom order';
+      line(impPreview, sourcesLine);
+
+      line(impPreview, 'Stream order — ' + (clean.streamOrder === 'web' ? 'web streams first'
+        : clean.streamOrder === 'none' ? 'no preference' : 'direct streams first'));
+      line(impPreview, 'Clock — ' + (clean.timeFormat === '24' ? '24-hour' : '12-hour'));
+      line(impPreview, 'Timezone — ' + (clean.timezone || 'this browser’s'));
+
+      const bits = [];
+      if (clean.catalogOrder) bits.push(clean.catalogOrder.split(',').length + ' in a custom order');
+      if (clean.catalogNames) bits.push(Object.keys(clean.catalogNames).length + ' renamed');
+      const counts = { hidden: 0, noHome: 0, searchOnly: 0, noSearch: 0, shuffle: 0, reverse: 0 };
+      for (const id of Object.keys(clean.catalogOptions || {})) {
+        for (const f of Object.keys(counts)) if (clean.catalogOptions[id][f]) counts[f]++;
+      }
+      if (counts.hidden) bits.push(counts.hidden + ' hidden');
+      if (counts.noHome) bits.push(counts.noHome + ' off the home board');
+      if (counts.searchOnly) bits.push(counts.searchOnly + ' search-only');
+      if (counts.noSearch) bits.push(counts.noSearch + ' with search off');
+      if (counts.shuffle) bits.push(counts.shuffle + ' shuffled');
+      if (counts.reverse) bits.push(counts.reverse + ' reversed');
+      line(impPreview, 'Tabs — ' + (bits.length ? bits.join(', ') : 'all at their defaults'));
+
+      if (clean.addonName) line(impPreview, 'Addon shown as “' + clean.addonName + '”');
+      impPreview.hidden = false;
+
+      if (clean.addonLogo) {
+        try {
+          const h = new URL(clean.addonLogo).host;
+          if (h !== location.host) {
+            line(impWarn, 'This config loads its logo from ' + h
+              + '. Your browser and your player will fetch it from there.');
+          }
+        } catch (e) { /* already validated above */ }
+      }
+      if (dropped > 0) {
+        line(impWarn, dropped + (dropped === 1 ? ' setting in that file was' : ' settings in that file were')
+          + ' not recognised and will be ignored.');
+      }
+      if (!catalogsReady) {
+        line(impWarn, 'The tab list has not loaded, so tab order, names and per-tab settings in this '
+          + 'file cannot be applied. Reload the page and import again.');
+      }
+      line(impWarn, 'This replaces every setting on this page, including anything you have changed '
+        + 'but not saved.');
+      if (profileId) {
+        line(impWarn, 'Profile ' + shortId(profileId) + ' is not changed until you press SAVE CHANGES.');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip';
+        b.style.marginTop = '8px';
+        b.textContent = 'Download a backup first';
+        // A rollback file is for its owner, so it keeps the personal fields
+        // whatever the export switch was last left on.
+        b.addEventListener('click', () => downloadExport(true));
+        impWarn.appendChild(b);
+      }
+      impWarn.hidden = false;
+    }
+
+    function validateImportText(text) {
+      try {
+        if (text.length > MAX_IMPORT_BYTES) {
+          reject('That is ' + Math.round(text.length / 1024) + ' KB. A saved AIOSports config is a '
+            + 'few kilobytes at most, so this is not one.');
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+          // Paste-bin hosts and a few APIs hand back JSON-encoded JSON, which
+          // is a confusing failure for something that looks right on screen.
+          if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+        } catch (e) {
+          reject('That is not valid JSON. If you copied it from a chat, check you got the whole '
+            + 'thing including the closing brace.');
+        }
+
+        if (!isPlainObject(parsed)) reject('That file does not contain an AIOSports config.');
+        if (parsed.kind !== EXPORT_KIND) {
+          reject('That is not an AIOSports config export. Look for a file named aiosports-config-….json.');
+        }
+        if (parsed.schemaVersion !== SCHEMA_VERSION) {
+          if (typeof parsed.schemaVersion === 'number' && parsed.schemaVersion > SCHEMA_VERSION) {
+            reject('This file was made by a newer version of AIOSports (format ' + parsed.schemaVersion
+              + '). Update the addon, then import it again.');
+          }
+          reject('This file’s format (' + JSON.stringify(parsed.schemaVersion)
+            + ') is not one this version can read.');
+        }
+        if (!isPlainObject(parsed.config)) reject('That file has no settings in it.');
+
+        const result = sanitiseConfig(parsed.config);
+        if (!Object.keys(result.clean).length) {
+          reject('Nothing in that file could be used. None of its settings are ones this version of '
+            + 'AIOSports understands.');
+        }
+        const size = JSON.stringify(result.clean).length;
+        if (size > MAX_CONFIG_JSON) {
+          reject('Those settings are too large to put in an install link (' + Math.round(size / 1024)
+            + ' KB; the limit is 8 KB).');
+        }
+
+        clearImport();
+        pendingImport = result.clean;
+        renderImportPreview(parsed, result.clean, result.dropped);
+        impConfirm.disabled = false;
+      } catch (err) {
+        showImportError(err && err.friendly ? err.message
+          : 'That file could not be read as an AIOSports config.');
+      }
+    }
+
+    function readImportFile(file) {
+      if (!file) return;
+      if (file.size > MAX_IMPORT_BYTES) {
+        showImportError('That file is ' + Math.round(file.size / 1024) + ' KB. A saved AIOSports '
+          + 'config is a few kilobytes at most, so this is not one.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => validateImportText(String(reader.result || ''));
+      reader.onerror = () => showImportError('Could not read that file. Try picking it again.');
+      reader.readAsText(file);
+    }
+
+    function showImportPanel(which) {
+      const file = which === 'file';
+      impTabFile.setAttribute('aria-pressed', String(file));
+      impTabPaste.setAttribute('aria-pressed', String(!file));
+      impFilePanel.hidden = !file;
+      impPastePanel.hidden = file;
+    }
+
+    importBtn.addEventListener('click', () => {
+      clearImport();
+      impPaste.value = '';
+      showImportPanel('file');
+      impDlg.showModal();
+    });
+
+    impTabFile.addEventListener('click', () => showImportPanel('file'));
+    impTabPaste.addEventListener('click', () => { showImportPanel('paste'); impPaste.focus(); });
+
+    impDrop.addEventListener('click', () => impFile.click());
+    impDrop.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); impFile.click(); }
+    });
+    impFile.addEventListener('change', () => {
+      const f = impFile.files && impFile.files[0];
+      // Cleared so that picking the same file twice still fires a change.
+      impFile.value = '';
+      readImportFile(f);
+    });
+    impDrop.addEventListener('dragover', e => { e.preventDefault(); impDrop.classList.add('over'); });
+    impDrop.addEventListener('dragleave', () => impDrop.classList.remove('over'));
+    impDrop.addEventListener('drop', e => {
+      e.preventDefault();
+      impDrop.classList.remove('over');
+      readImportFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+
+    impPaste.addEventListener('input', () => {
+      const text = impPaste.value.trim();
+      if (!text) { clearImport(); return; }
+      validateImportText(text);
+    });
+
+    impDlg.addEventListener('close', () => {
+      if (impDlg.returnValue !== 'save' || !pendingImport) return;
+      // The same encoder updateLink() uses, and the inverse of the decoder this
+      // page opens with. The settings arrive as an address, and the page
+      // rebuilds itself from it exactly as it would from a shared link.
+      const json = JSON.stringify(pendingImport);
+      const encoded = btoa(unescape(encodeURIComponent(json)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const qs = new URLSearchParams();
+      // Taken from the address bar, never from the file, so an imported config
+      // cannot choose which profile it lands in.
+      if (profileId) qs.set('profile', profileId);
+      qs.set('imported', '1');
+      location.href = '/' + encoded + '/configure?' + qs.toString();
+    });
+
+    // After that navigation: say plainly that nothing is saved yet. An import
+    // that silently looks like a save is how people lose settings they think
+    // they kept.
+    function showImportBanner() {
+      const q = new URLSearchParams(location.search);
+      if (q.get('imported') !== '1') return;
+      q.delete('imported');
+      history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q.toString() : ''));
+      if (saveCard.hidden) {
+        backupCallout.hidden = false;
+        backupCallout.className = 'callout warn';
+        backupCallout.textContent = 'Imported. These settings are on screen only — install from the '
+          + 'link above to use them.';
+        backupCalloutLocked = true;
+        return;
+      }
+      saveCallout.hidden = false;
+      saveCallout.className = 'callout warn';
+      saveCallout.innerHTML = '<strong>Imported, but not saved.</strong> These settings are on screen '
+        + 'only. Press SAVE CHANGES to keep them, or reload the page to discard them.';
+      saveCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    refreshBackupCard();
+
+    refreshSaveUi().then(showImportBanner);
 
     copyBtn.addEventListener('click', (e) => {
       e.preventDefault();
