@@ -358,6 +358,7 @@
                 border-radius: 8px; font-size: 14px; }
     .icon-btn:hover { color: #fff; background: rgba(255,255,255,.06); }
     .icon-btn.on { color: #3fb950; }
+    .icon-btn.home.on, .icon-btn.shuffle.on { color: var(--accent); }
     .cat-menu { position: absolute; z-index: 40; min-width: 200px; background: #1b1b20;
                 border: 1px solid #33333b; border-radius: 12px; padding: 6px;
                 box-shadow: 0 18px 40px rgba(0,0,0,.55); }
@@ -790,6 +791,29 @@
       + '<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>'
       + '<path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 
+    const STROKE =
+      ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+      + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+
+    const HOME_SVG =
+      '<svg width="17" height="17"' + STROKE
+      + '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
+      + '<polyline points="9 22 9 12 15 12 15 22"/></svg>';
+
+    const SHUFFLE_SVG =
+      '<svg width="17" height="17"' + STROKE
+      + '<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>'
+      + '<polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>'
+      + '<line x1="4" y1="4" x2="9" y2="9"/></svg>';
+
+    const TOP_SVG =
+      '<svg width="17" height="17"' + STROKE
+      + '<polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>';
+
+    const BOTTOM_SVG =
+      '<svg width="17" height="17"' + STROKE
+      + '<polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>';
+
     const MORE_SVG =
       '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
       + '<circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
@@ -840,6 +864,11 @@
         eye.classList.toggle('on', !opts.hidden);
         eye.setAttribute('aria-label', (opts.hidden ? 'Show ' : 'Hide ') + item.dataset.name);
       }
+      // Lit when the thing it stands for is on, so a row reads at a glance.
+      const home = item.querySelector('.home');
+      if (home) home.classList.toggle('on', !opts.searchOnly);
+      const shuf = item.querySelector('.shuffle');
+      if (shuf) shuf.classList.toggle('on', !!opts.shuffle);
       applyHideDisabled();
       updateLink();
     }
@@ -980,72 +1009,33 @@
       updateLink();
     });
 
-    // ---- the ⋯ menu --------------------------------------------------------
-    let openMenu = null;
-    function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
-    document.addEventListener('click', e => {
-      if (openMenu && !openMenu.contains(e.target) && !e.target.closest('.dots')) closeMenu();
-    });
+    // Rows in a selection act on the whole selection, as the menu did -- the
+    // rows are visibly ticked, so touching only one would be the surprise.
+    const targets = item =>
+      (item.classList.contains('selected') && selected().length > 1) ? selected() : [item];
 
-    function showMenu(item, anchor) {
-      closeMenu();
-
-      // Opening the menu on a row that is part of a selection acts on the whole
-      // selection. Anything else would be a trap: the rows are visibly checked,
-      // so a menu that quietly touched one of them would be the surprise.
-      const chosen = item.classList.contains('selected') && selected().length > 1
-        ? selected()
-        : [item];
-      const opts = readOpts(item);
-      const menu = document.createElement('div');
-      menu.className = 'cat-menu';
-      if (chosen.length > 1) {
-        const head = document.createElement('div');
-        head.style.cssText = 'padding:7px 10px;font-size:11.5px;color:#8b8f95';
-        head.textContent = 'Applies to ' + chosen.length + ' selected tabs';
-        menu.appendChild(head);
-        const d0 = document.createElement('div'); d0.className = 'sep'; menu.appendChild(d0);
-      }
-      const entry = (label, state, fn) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.innerHTML = '<span>' + label + '</span>';
-        if (state) { const s2 = document.createElement('span'); s2.className = 'state'; s2.textContent = state; b.appendChild(s2); }
-        b.addEventListener('click', () => { fn(); closeMenu(); });
-        menu.appendChild(b);
-      };
-      const sep = () => { const d = document.createElement('div'); d.className = 'sep'; menu.appendChild(d); };
-      const flip = key => () => {
-        // Same rule as the bulk bar: they all end up the same way round.
-        const turnOn = !chosen.every(i => readOpts(i)[key]);
-        for (const target of chosen) setOption(target, key, turnOn);
-        updateLink();
-      };
-
-      const label = chosen.length > 1 ? 'tabs' : 'tab';
-      entry(opts.hidden ? ('Show ' + label) : ('Hide ' + label), null, flip('hidden'));
-      entry('Search only', opts.searchOnly ? 'on' : '', flip('searchOnly'));
-      entry('Disable search', opts.noSearch ? 'on' : '', flip('noSearch'));
-      sep();
-      entry('Randomise order', opts.shuffle ? 'on' : '', flip('shuffle'));
-      entry('Reverse order', opts.reverse ? 'on' : '', flip('reverse'));
-      sep();
-      entry('Move to top', null, () => {
-        for (const target of chosen.slice().reverse()) catalogList.prepend(target);
-        updateLink();
-      });
-      entry('Move to bottom', null, () => {
-        for (const target of chosen) catalogList.appendChild(target);
-        updateLink();
-      });
-
-      document.body.appendChild(menu);
-      const box = anchor.getBoundingClientRect();
-      const w = menu.offsetWidth || 200;
-      menu.style.left = Math.max(8, Math.min(box.right - w, window.innerWidth - w - 8)) + 'px';
-      menu.style.top = (window.scrollY + box.bottom + 6) + 'px';
-      openMenu = menu;
-    }
+    // One button per thing. The menu hid five toggles behind a click and gave no
+    // sign of which were already on; an icon that lights up says both at once.
+    const ROW_ACTIONS = [
+      { key: 'eye', title: 'Shown in the app', svg: EYE_SVG,
+        run: item => { const on = !readOpts(item).hidden;
+                       for (const t of targets(item)) setOption(t, 'hidden', on); } },
+      // "Browsable" is this addon's version of a home board: the tab can be
+      // opened, rather than only reached by searching for it.
+      { key: 'home', title: 'Browsable (not search-only)', svg: HOME_SVG,
+        run: item => { const on = !readOpts(item).searchOnly;
+                       for (const t of targets(item)) setOption(t, 'searchOnly', on); } },
+      { key: 'shuffle', title: 'Shuffle this tab', svg: SHUFFLE_SVG,
+        run: item => { const on = !readOpts(item).shuffle;
+                       for (const t of targets(item)) setOption(t, 'shuffle', on); } },
+      // Reversed so several moved together keep their order rather than invert.
+      { key: 'to-top', title: 'Move to top of list', svg: TOP_SVG,
+        run: item => { for (const t of targets(item).slice().reverse()) catalogList.prepend(t);
+                       updateLink(); } },
+      { key: 'to-bottom', title: 'Move to bottom of list', svg: BOTTOM_SVG,
+        run: item => { for (const t of targets(item)) catalogList.appendChild(t);
+                       updateLink(); } },
+    ];
 
     function renderCatalogs(catalogs, saved) {
       const order = saved && saved.catalogOrder ? String(saved.catalogOrder).split(',') : [];
@@ -1090,23 +1080,16 @@
         input.addEventListener('input', () => updateLink());
         row.appendChild(input);
 
-        const eye = document.createElement('button');
-        eye.type = 'button';
-        eye.className = 'icon-btn eye';
-        eye.addEventListener('click', () => {
-          const o = readOpts(item);
-          if (o.hidden) delete o.hidden; else o.hidden = true;
-          writeOpts(item, o);
-        });
-        row.appendChild(eye);
-
-        const dots = document.createElement('button');
-        dots.type = 'button';
-        dots.className = 'icon-btn dots';
-        dots.innerHTML = MORE_SVG;
-        dots.setAttribute('aria-label', 'More options for ' + cat.name);
-        dots.addEventListener('click', e => { e.stopPropagation(); showMenu(item, dots); });
-        row.appendChild(dots);
+        for (const spec of ROW_ACTIONS) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'icon-btn ' + spec.key;
+          b.innerHTML = spec.svg;
+          b.title = spec.title;
+          b.setAttribute('aria-label', spec.title + ' \u2014 ' + cat.name);
+          b.addEventListener('click', e => { e.stopPropagation(); spec.run(item); });
+          row.appendChild(b);
+        }
 
         item.appendChild(row);
         catalogList.appendChild(item);
