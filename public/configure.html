@@ -59,7 +59,9 @@
       border: 1px solid var(--card-border);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
       width: 100%;
-      max-width: 500px;
+      max-width: 640px;   /* 500 left the longest tab name 26px short, and the
+                           install URL clipped in its field; this clears both
+                           with room to spare and still reads as a form. */
       position: relative;
     }
 
@@ -613,7 +615,7 @@
 
     <div class="section">
       <h3>Catalog Management</h3>
-      <p class="hint">Drag to reorder, type to rename. Tap the eye to show or hide a tab, and the menu beside it for the rest.</p>
+      <p class="hint">Drag to reorder and type to rename. The buttons on each row set whether a tab is shown, browsable, and shuffled, and move it to the top or bottom.</p>
 
       <div class="cat-legend">
         <button type="button" id="hideDisabled" class="chip" aria-pressed="false">Hide disabled</button>
@@ -814,9 +816,6 @@
       '<svg width="17" height="17"' + STROKE
       + '<polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>';
 
-    const MORE_SVG =
-      '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
-      + '<circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 
     const GRIP_SVG = '<span class="grip" title="Drag to reorder" aria-label="Drag to reorder">'
       + '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">'
