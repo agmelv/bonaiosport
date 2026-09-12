@@ -3,6 +3,7 @@ const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
 
+const { redactUrl } = require('../redact');
 class TimStreamsProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -204,7 +205,7 @@ class TimStreamsProvider extends BaseProvider {
         }
 
         if (m3u8Url) {
-          console.log(`[${this.name}] Extracted M3U8 for ${matchTitle}: ${m3u8Url}`);
+          console.log(`[${this.name}] Extracted M3U8 for ${matchTitle}: ${redactUrl(m3u8Url)}`);
           const { BASE_URL } = require('../config');
           const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
             

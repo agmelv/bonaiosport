@@ -153,6 +153,7 @@ async function resolveSource(src, match, config) {
 const { safeFetch: _safeFetch } = require('./impitClient');
 
 
+const { redactUrl } = require('./redact');
 // --- Stream Health Verification ---
 // Pings each direct stream once and drops dead ones (404/403/5xx, or 200 bodies
 // that are not M3U8). Web player links (no url or '/watch?') pass through
@@ -215,7 +216,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
         bodySample = await result.text();
       } catch (fetchErr) {
         clearTimeout(timeout);
-        console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${fetchErr.message}`);
+        console.log(`[Filter] Dropped timeout/error stream: ${redactUrl(targetUrl)} - ${fetchErr.message}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -224,7 +225,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
       // Edge servers return 404 for dead streams, 403 for IP-locked/expired tokens, 502 for upstream failures
       if (res.status === 404 || res.status === 403 || res.status >= 500) {
-        console.log(`[Filter] Dropped dead stream (${res.status}): ${targetUrl}`);
+        console.log(`[Filter] Dropped dead stream (${res.status}): ${redactUrl(targetUrl)}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -232,7 +233,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
       // If it doesn't contain #EXT, it's not a valid m3u8 playlist.
       if (!bodySample.includes('#EXT')) {
-        console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
+        console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${redactUrl(targetUrl)}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -248,7 +249,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
     } catch (err) {
-      console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${err.message}`);
+      console.log(`[Filter] Dropped timeout/error stream: ${redactUrl(targetUrl)} - ${err.message}`);
       return null;
     }
   }));

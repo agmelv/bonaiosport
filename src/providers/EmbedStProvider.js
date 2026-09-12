@@ -3,6 +3,7 @@ const StreamEntity = require('../domain/StreamEntity');
 const { execFile } = require('child_process');
 const path = require('path');
 
+const { redactUrl } = require('../redact');
 class EmbedStProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -123,7 +124,7 @@ class EmbedStProvider extends BaseProvider {
           });
 
           if (m3u8Url) {
-            console.log(`[${this.name}] Natively decrypted M3U8 for ${matchTitle}: ${m3u8Url}`);
+            console.log(`[${this.name}] Natively decrypted M3U8 for ${matchTitle}: ${redactUrl(m3u8Url)}`);
             const { BASE_URL } = require('../config');
             const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
             streams.push(new StreamEntity({
@@ -144,7 +145,7 @@ class EmbedStProvider extends BaseProvider {
                 const { extractSportsEmbed } = require('./SportsEmbedExtractor');
                 const m3u8Url = await extractSportsEmbed(embedUrl);
                 if (m3u8Url) {
-                    console.log(`[${this.name}] Natively decrypted M3U8 for sportsembed: ${m3u8Url}`);
+                    console.log(`[${this.name}] Natively decrypted M3U8 for sportsembed: ${redactUrl(m3u8Url)}`);
                     const { BASE_URL } = require('../config');
                     const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent('https://sportsembed.su/')}&origin=${encodeURIComponent('https://sportsembed.su')}`;
                     streams.push(new StreamEntity({

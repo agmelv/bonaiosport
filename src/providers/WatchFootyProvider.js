@@ -3,6 +3,7 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { parseTimezone } = require('../timezone');
 
+const { redactUrl } = require('../redact');
 class WatchFootyProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -163,7 +164,7 @@ class WatchFootyProvider extends BaseProvider {
                     const { BASE_URL } = require('../config');
                     const m3u8Url = await extractSportsEmbed(s.url);
                     if (m3u8Url) {
-                        console.log(`[WatchFootyProvider] Successfully extracted M3U8: ${m3u8Url}`);
+                        console.log(`[WatchFootyProvider] Successfully extracted M3U8: ${redactUrl(m3u8Url)}`);
                         const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent('https://sportsembed.su/')}&origin=${encodeURIComponent('https://sportsembed.su')}`;
                         entityParams.url = proxyUrl;
                         entityParams.behaviorHints = { notWebReady: true };

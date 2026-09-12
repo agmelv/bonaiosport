@@ -15,6 +15,7 @@
 
 const { request: undiciRequest, Agent } = require('undici');
 
+const { redactUrl } = require('./redact');
 // -- Singleton -----------------------------------------------------------------
 // undefined  = not yet probed
 // null       = probed and unavailable (native binary missing / bad arch)
@@ -97,7 +98,9 @@ async function safeFetch(url, opts = {}) {
         throw impitErr;
       }
       // Transient error - fall through to undici without marking impit broken
-      console.warn(`[impitClient] impit fetch failed (${impitErr.message}), falling back to undici for: ${url}`);
+      // Redacted: this logs whatever URL was being fetched, and on the stream
+      // path that is a signed playlist.
+      console.warn(`[impitClient] impit fetch failed (${impitErr.message}), falling back to undici for: ${redactUrl(url)}`);
     } finally {
       if (timer) clearTimeout(timer);
     }

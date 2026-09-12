@@ -30,6 +30,7 @@ const StreamEntity = require('../domain/StreamEntity');
 const path = require('path');
 const { execFile } = require('child_process');
 
+const { redactUrl } = require('../redact');
 // 🔒
 // Domain flags: known CF-protected domains that must skip server-side scraping.
 // Add new domains here - no code change to the provider class required.
@@ -94,7 +95,7 @@ class EmbedIndiaProvider extends BaseProvider {
 
       const m = stdout.match(/"file":\s*"(https?:\/\/[^"]+\.m3u8.*?)"/);
       if (m) {
-        console.log(`[EmbedIndia] Native WASM Extracted M3U8: ${m[1]}`);
+        console.log(`[EmbedIndia] Native WASM Extracted M3U8: ${redactUrl(m[1])}`);
         const { BASE_URL } = require('../config');
         const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m[1])}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
 
