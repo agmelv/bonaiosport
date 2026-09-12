@@ -396,10 +396,14 @@ function mapMatchToMetaPreview(match, config = {}) {
   // isn't one, which is why the channel with the best-looking artwork in the
   // catalog was the one showing none.
   const channelLogo = isFixture ? null : getChannelLogo(match.title);
+  // A 24/7 channel, and the best logo anyone gave us for it: the provider's own
+  // first, then the channel table, then whatever artwork came with the entry.
+  const is247Channel = !isFixture && (match.category === 'networks' || !match.date);
   const team1Logo = match.team1 && match.team1.logo ? normalizeImageUrl(match.team1.logo) : null;
   const matchPoster = match.poster ? normalizeImageUrl(match.poster) : null;
   const matchThumb = match.thumbnail_url ? normalizeImageUrl(match.thumbnail_url) : null;
   const matchLogo = match.logo ? normalizeImageUrl(match.logo) : null;
+  const channelMark = is247Channel ? (matchLogo || channelLogo || matchThumb) : null;
 
   // The competition's crest is what belongs in the card's logo slot. Before
   // this it was the home side's own crest or, far more often, a dead URL whose
@@ -483,6 +487,16 @@ function mapMatchToMetaPreview(match, config = {}) {
     poster = buildImg(matchPoster, posterText, color) || fallbackPoster;
   } else if (matchupPoster) {
     poster = matchupPoster;
+  } else if (is247Channel && channelMark) {
+    // A channel's artwork is its logo, and a logo is square or taller while a
+    // card is wide. Passing one straight through as the poster is what put a
+    // 300x450 crest in a 16:9 frame with bars down either side. Draw it into
+    // the house card instead, which is 16:9 by construction, and keep the logo
+    // itself for the corner rather than repeating the whole poster there.
+    poster = imageService.eventUrl(BASE_URL, {
+      text: prettifyName(match.title), mark: channelMark, kicker: '24/7', color
+    }) || buildImg(channelMark, posterText, color) || fallbackPoster;
+    logo = channelMark;
   } else if (channelLogo) {
     poster = buildImg(channelLogo, match.title, '161616') || fallbackPoster;
     logo = channelLogo;

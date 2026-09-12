@@ -147,6 +147,16 @@ class UsaTvProvider extends BaseProvider {
         const title = String(m.name || '').trim();
         if (!title) continue;
 
+        // The catalog hands out only the poster, which is a composed 300x450
+        // portrait: the logo centred on a grey panel. The bare logo is a square
+        // PNG with transparency, and it sits at the same filename one directory
+        // across -- the meta endpoint proves the pairing, and deriving it costs
+        // nothing where asking for 169 meta files would not.
+        const poster = typeof m.poster === 'string' ? m.poster : '';
+        const logo = poster.includes('/public/posters/')
+          ? poster.replace('/public/posters/', '/public/logos/')
+          : '';
+
         out.push(new MatchEntity({
           id: `ustv_${m.id}`,
           title,
@@ -155,7 +165,9 @@ class UsaTvProvider extends BaseProvider {
           date: '0',
           popular: '0',
           league: Array.isArray(m.genres) && m.genres.length ? String(m.genres[0]) : 'Live TV',
-          thumbnail_url: typeof m.poster === 'string' ? m.poster : '',
+          thumbnail_url: poster,
+          // The card's corner badge, and what the wide card below is drawn from.
+          logo,
           // One source per channel. Its streams are a second fetch, made only
           // when somebody opens the channel, so listing 169 of them costs the
           // single catalog request above.
