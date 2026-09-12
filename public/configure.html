@@ -159,6 +159,30 @@
       border-color: var(--accent); color: #fff;
       background: rgba(22, 104, 255, .08); outline: none;
     }
+    /* This card wears its title on its own top border rather than inside the
+       body the way the settings cards do. It is a utility box, not another
+       section of settings, and reading as slightly apart from them is the point. */
+    #backupCard { position: relative; padding: 34px 24px 24px; }
+    #backupCard > h3 {
+      position: absolute; top: -1px; left: -1px; margin: 0;
+      padding: 9px 18px; font-size: 13px; letter-spacing: 1.2px;
+      background: #22222e; color: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 15px 0 12px 0;
+    }
+    #backupCard > .hint { margin: 0 0 16px; font-size: 13.5px; }
+    .backup-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .backup-btn {
+      display: inline-flex; align-items: center; gap: 10px;
+      font: inherit; font-size: 14px; font-weight: 500;
+      padding: 12px 20px; border-radius: 10px; cursor: pointer;
+      background: #2c2c33; color: #e8e8ea; border: 1px solid #3a3a42;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .backup-btn:hover { background: #36363f; color: #fff; border-color: #46464f; }
+    .backup-btn:disabled { opacity: .45; cursor: not-allowed; background: #2c2c33; color: #e8e8ea; }
+    .backup-btn svg { flex: 0 0 auto; }
+
     #expFields { max-height: 220px; overflow-y: auto; }
     #expFields div, #impPreview div, #impWarn div { margin: 2px 0; }
     #impWarn { margin-top: 10px; }
@@ -517,6 +541,14 @@
     .btn:active {
       transform: translateY(1px);
     }
+    /* Last, so it out-orders .btn.secondary at the same specificity. A button
+       that is disabled but looks pressable is a button people press and then
+       assume is broken -- and this page had no such style at all, so SAVING…
+       looked live too. */
+    .btn:disabled {
+      opacity: .45; cursor: not-allowed; transform: none;
+      filter: grayscale(.35);
+    }
   </style>
 </head>
 
@@ -727,13 +759,26 @@
     <button id="copyBtn" class="btn secondary">COPY LINK (FOR NUVIO APP)</button>
 
     <div class="section" id="backupCard">
-      <h3>Backup &amp; Share</h3>
-      <p class="hint">Save these settings to a file you can keep, move to another server, or hand to
-        someone else. Importing one replaces everything on this page.</p>
+      <h3>Backups</h3>
+      <p class="hint">Export your settings or restore from a backup file</p>
 
-      <div class="cat-legend">
-        <button type="button" id="exportBtn" class="chip">Export config</button>
-        <button type="button" id="importBtn" class="chip">Import config</button>
+      <div class="backup-actions">
+        <button type="button" id="exportBtn" class="backup-btn">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 15V3"/><path d="m8 7 4-4 4 4"/>
+            <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
+          </svg>
+          Export
+        </button>
+        <button type="button" id="importBtn" class="backup-btn">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/>
+            <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
+          </svg>
+          Import
+        </button>
       </div>
 
       <div class="callout" id="backupCallout" hidden></div>
