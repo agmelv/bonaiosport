@@ -162,15 +162,19 @@
     /* This card wears its title on its own top border rather than inside the
        body the way the settings cards do. It is a utility box, not another
        section of settings, and reading as slightly apart from them is the point. */
-    #backupCard { position: relative; padding: 34px 24px 24px; }
+    /* The top padding clears the tab, which is taken out of flow: too little and
+       the description slides underneath it. Measured, not guessed -- 46px of tab
+       plus a 16px gap. The margin is what the button above would otherwise not
+       give it, .btn carrying none of its own. */
+    #backupCard { position: relative; margin-top: 24px; padding: 62px 24px 24px; }
     #backupCard > h3 {
       position: absolute; top: -1px; left: -1px; margin: 0;
-      padding: 9px 18px; font-size: 13px; letter-spacing: 1.2px;
+      padding: 14px 20px; font-size: 13px; letter-spacing: 1.2px; line-height: 1;
       background: #22222e; color: #fff;
       border: 1px solid var(--card-border);
       border-radius: 15px 0 12px 0;
     }
-    #backupCard > .hint { margin: 0 0 16px; font-size: 13.5px; }
+    #backupCard > .hint { margin: 0 0 18px; font-size: 13.5px; }
     .backup-actions { display: flex; flex-wrap: wrap; gap: 12px; }
     .backup-btn {
       display: inline-flex; align-items: center; gap: 10px;
