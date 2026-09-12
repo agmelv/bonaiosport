@@ -35,9 +35,10 @@ let lastPrewarmAt = 0;
 let prewarmRunning = false;
 const PREWARM_EVERY_MS = 30 * 1000;
 // Eight covered the top of one tab, and a viewer who scrolled past it opened a
-// cold match -- which is a first click that pays for the scrape and comes back
-// with whatever beat the deadline. Twenty-four covers a live board.
-const PREWARM_MATCHES = 24;
+// cold match -- a first click that pays for the whole scrape. Forty covers a
+// live board on a busy Saturday, which is exactly when it matters. This is the
+// half of the fix that keeps the wait below from being felt.
+const PREWARM_MATCHES = 40;
 // Three at a time rather than one: twenty-four sequentially outlasts the
 // interval below, and rounds that overlap are the burst this exists to avoid.
 const PREWARM_CONCURRENCY = 3;
