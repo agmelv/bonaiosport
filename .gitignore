@@ -7,3 +7,10 @@ scratch/
 # Build output. Was committed once and went stale, shipping a bundle that
 # predated the whole login system to anyone running it without Docker.
 dist/
+
+# Build output from the wasm step, committed once by accident.
+dist_wasm/
+
+# No binaries in the repo. A 53 MB cloudflared.exe lived here, which is both
+# dead weight and something nobody cloning this should be asked to trust.
+*.exe

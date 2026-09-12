@@ -5,12 +5,13 @@
 # 🔴 AIOSports
 
 [![Ko-fi](https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mlp20)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
+[![GitHub](https://img.shields.io/badge/GitHub-AIOSports-181717?logo=github&logoColor=white)](https://github.com/mlp2069/aiosports)
+[![Upstream](https://img.shields.io/badge/forked_from-rajhodedara%2Flive--sport--plugin-6e7681?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-3.0.0-brightgreen.svg)](#)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](https://github.com/mlp2069/aiosports/releases/latest)
 
 > 🍴 **THIS IS A FORK.**
-> The upstream project is [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin) and all credit for it belongs there. This fork is [mlp2069/live-sport-plugin](https://github.com/mlp2069/live-sport-plugin), self-hosted, and differs in ways the instructions below assume:
+> The upstream project is [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin) and all credit for it belongs there. This fork is [mlp2069/aiosports](https://github.com/mlp2069/aiosports), self-hosted, and differs in ways the instructions below assume:
 > - **Sign-in.** The catalog and configure pages can sit behind `AUTH_KEY`, and a dashboard behind a separate `ADMIN_TOKEN`. See [Sign-in and the dashboard](#-sign-in-and-the-dashboard).
 > - **Artwork built from crests.** Cards are drawn from team crests and rendered server-side, with a competition badge worked out from the crests rather than from whatever a provider called the league.
 > - **Different tabs.** Soccer, NFL, Other Football, College, Racing and Channels, among others — see [Catalog tabs](#-catalog-tabs).
@@ -55,7 +56,7 @@ Run the addon container in seconds:
 
 ```bash
 # Clone the repository
-git clone https://github.com/mlp2069/live-sport-plugin.git
+git clone https://github.com/mlp2069/aiosports.git
 cd live-sport-plugin
 
 # Start the container in background
@@ -70,7 +71,7 @@ The addon is now available at `http://localhost:7000` (or `http://YOUR_SERVER_IP
 
 1. **Install and run the addon:**
    ```bash
-   git clone https://github.com/mlp2069/live-sport-plugin.git
+   git clone https://github.com/mlp2069/aiosports.git
    cd live-sport-plugin
    npm install
    npm run build
@@ -104,7 +105,7 @@ The addon is now available at `http://localhost:7000` (or `http://YOUR_SERVER_IP
 
 ```bash
 # Clone and build
-git clone https://github.com/mlp2069/live-sport-plugin.git
+git clone https://github.com/mlp2069/aiosports.git
 cd live-sport-plugin
 npm install
 npm run build

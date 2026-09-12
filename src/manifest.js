@@ -9,7 +9,7 @@ const { addonBuilder } = require('stremio-addon-sdk');
 
 const manifest = {
   id: 'community.nuvio.live-sports',
-  version: '3.0.0',
+  version: '1.0.0',
   name: 'AIOSports',
   description:
     'The ultimate live sports aggregator. Stream live Football, NBA, NFL, NHL, F1, and more. ' +
