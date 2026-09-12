@@ -18,6 +18,18 @@ RUN npm install
 # Copy source code and assets
 COPY . .
 
+# A build identifier. .dockerignore keeps .git out of the context, so the image
+# has no commit to report and `git rev-parse` here would only fail. A UTC stamp
+# answers the question people actually ask of it -- "is this the build I just
+# made?" -- and this layer is rebuilt whenever the COPY above changes, which is
+# exactly when the answer differs.
+#
+# BUILD_SHA is honoured when a caller passes one (docker build --build-arg
+# BUILD_SHA=$(git rev-parse --short HEAD)); it is simply absent otherwise.
+ARG BUILD_SHA=""
+RUN date -u +%Y.%m.%d.%H%M > /app/BUILD_ID \
+ && printf '%s' "$BUILD_SHA" > /app/BUILD_SHA
+
 # Install internal resolver dependencies
 RUN cd resolver && npm install
 

@@ -204,6 +204,37 @@ app.post('/api/logout', (req, res) => {
   res.json({ authenticated: false });
 });
 
+/**
+ * Which build this is.
+ *
+ * The image records a UTC stamp at build time because .dockerignore keeps .git
+ * out of the context, so a container genuinely has no commit to report. Running
+ * from a working tree there IS one, so it is read from git instead -- the same
+ * line ends up more precise for whoever is actually developing.
+ */
+const BUILD_INFO = (() => {
+  const read = f => { try { return fs.readFileSync(path.join('/app', f), 'utf8').trim(); } catch (e) { return ''; } };
+  let build = read('BUILD_ID');
+  let sha = read('BUILD_SHA');
+  if (!sha) {
+    try {
+      sha = child_process.execSync('git rev-parse --short HEAD', {
+        cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000
+      }).toString().trim();
+    } catch (e) { sha = ''; }
+  }
+  if (!build) {
+    try {
+      build = child_process.execSync('git log -1 --date=format:%Y.%m.%d.%H%M --format=%cd', {
+        cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000
+      }).toString().trim();
+    } catch (e) { build = ''; }
+  }
+  return { version: require('./manifest').manifest.version, build, sha };
+})();
+
+app.get('/api/version', (req, res) => res.json(BUILD_INFO));
+
 app.get('/api/site/auth', (req, res) => {
   res.json({ authenticated: isAuthed(req), keyRequired: !!process.env.AUTH_KEY });
 });
@@ -1179,6 +1210,24 @@ app.get('/:config?/manifest.json', (req, res, next) => {
       .replace(/[\u0000-\u001f\u007f]/g, '')
       .trim()
       .slice(0, 40);
+  }
+
+  // Shown under the name in a player's addon list. Same treatment as the name,
+  // with more room because it is a sentence rather than a label.
+  if (typeof parsedConfig.addonDescription === 'string' && parsedConfig.addonDescription.trim()) {
+    newManifest.description = parsedConfig.addonDescription
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 300);
+  }
+
+  // Only an absolute http(s) address. A player fetches this from its own
+  // machine, so a relative path would resolve against the wrong host, and
+  // allowing any string here would let a config point a logo at javascript: or
+  // data: in whatever renders it.
+  if (typeof parsedConfig.addonLogo === 'string') {
+    const logo = parsedConfig.addonLogo.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 300);
+    if (/^https?:\/\/\S+$/i.test(logo)) newManifest.logo = logo;
   }
 
   if (parsedConfig.catalogNames && typeof parsedConfig.catalogNames === 'object') {

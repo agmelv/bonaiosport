@@ -5,6 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AIOSports | Setup</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/logo.png">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@700;900&display=swap"
     rel="stylesheet">
   <style>
@@ -73,29 +75,48 @@
     }
     .btn.secondary:hover { background: #2f2f37; }
 
-    /* The heading is the field. Its own caret colour because the h1 paints its
-       text with a gradient through -webkit-text-fill-color: transparent, and a
-       caret inheriting that is a caret you cannot see. */
-    .addon-name {
-      caret-color: var(--accent);
-      outline: none;
-      border-radius: 8px;
-      padding: 0 6px;
-      min-width: 40px;
-      border-bottom: 2px dashed transparent;
-      transition: border-color .15s, background .15s;
+    /* Pencil sits in the h1, which paints its text transparent to show a
+       gradient through it -- so this needs its own fill or the icon vanishes. */
+    .pencil-btn {
+      -webkit-text-fill-color: currentColor;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 34px; height: 34px; flex: 0 0 auto;
+      background: rgba(255, 255, 255, .06); color: var(--text-muted);
+      border: 1px solid var(--card-border); border-radius: 10px; cursor: pointer;
+      transition: background .15s, color .15s;
     }
-    .addon-name:hover { border-bottom-color: rgba(255,255,255,.22); }
-    .addon-name:focus {
-      border-bottom-color: var(--accent);
-      background: rgba(255,255,255,.04);
+    .pencil-btn:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+
+    .build-line {
+      margin: 2px 0 10px; font-size: 12px; color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      display: flex; gap: 8px; justify-content: center; align-items: center;
     }
-    .addon-name:empty::before {
-      content: 'Name this addon';
-      -webkit-text-fill-color: var(--text-muted);
-      opacity: .7;
+    .build-line #buildId { opacity: .75; }
+
+    .modal { border: 0; padding: 0; background: transparent; max-width: 520px; width: calc(100% - 32px); }
+    .modal::backdrop { background: rgba(0, 0, 0, .6); backdrop-filter: blur(3px); }
+    .modal-body {
+      background: #16161a; border: 1px solid var(--card-border);
+      border-radius: 18px; padding: 24px; text-align: left;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
     }
-    .addon-name-hint { text-align: center; margin: 6px 0 0; }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .modal-head h3 { margin: 0; }
+    .modal-x {
+      width: 34px; height: 34px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+      background: none; border: 0; color: var(--text-muted); border-radius: 8px; cursor: pointer;
+    }
+    .modal-x:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+    .modal .input-group .hint { margin: 6px 0 0; }
+    .modal textarea {
+      width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, .2);
+      border: 1px solid var(--card-border); border-radius: 12px; color: #fff;
+      font: inherit; font-size: 14px; resize: vertical; outline: none;
+    }
+    .modal textarea:focus { border-color: #3a3a44; }
+    .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
+    .modal-actions .btn { margin-top: 0; }
 
     /* A URL is for copying, not for reading aloud. Field plus a button, the way
        every other tool that hands you one does it. */
@@ -477,12 +498,56 @@
 <body>
   <div class="container">
     <div class="header">
-      <img src="/logo.png" alt="Nuvio Live Sports" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
-      <h1><span class="dot"></span><span id="addonName" class="addon-name" contenteditable="plaintext-only"
-          spellcheck="false" role="textbox" aria-label="Addon name, as it appears in Stremio"
-          title="Type to rename this addon">AIOSports</span></h1>
-      <p class="hint addon-name-hint">Type above to rename the addon. This is the name your player shows.</p>
-      <p class="subtitle">Customize your ultimate live sports dashboard.</p>
+      <img id="addonLogoImg" src="/logo.png" alt="" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
+      <h1>
+        <span class="dot"></span><span id="addonName">AIOSports</span>
+        <button type="button" id="editAddonBtn" class="pencil-btn" title="Customize addon" aria-label="Customize addon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+          </svg>
+        </button>
+      </h1>
+      <p class="build-line"><span id="addonVersion"></span><span id="buildId"></span></p>
+      <p class="subtitle" id="addonSubtitle">Customize your ultimate live sports dashboard.</p>
+
+      <!-- A real <dialog>: Escape closes it, focus is trapped, and the backdrop
+           is the browser's rather than a div pretending to be one. -->
+      <dialog id="addonDialog" class="modal">
+        <form method="dialog" class="modal-body">
+          <div class="modal-head">
+            <h3>Customize Addon</h3>
+            <button type="submit" value="cancel" class="modal-x" aria-label="Close">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <div class="input-group">
+            <label for="dlgName">Addon Name</label>
+            <input type="text" id="dlgName" maxlength="40" spellcheck="false" autocomplete="off">
+            <p class="hint">Shown wherever the addon is installed.</p>
+          </div>
+
+          <div class="input-group">
+            <label for="dlgLogo">Logo URL</label>
+            <input type="text" id="dlgLogo" spellcheck="false" autocomplete="off"
+                   placeholder="Leave blank for the default logo">
+            <p class="hint">Must be a full https:// address your player can reach.</p>
+          </div>
+
+          <div class="input-group">
+            <label for="dlgDesc">Addon Description</label>
+            <textarea id="dlgDesc" rows="4" maxlength="300" spellcheck="false"></textarea>
+            <p class="hint">Shown under the name in your player's addon list.</p>
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" value="cancel" class="btn secondary" id="dlgCancel">Cancel</button>
+            <button type="submit" value="save" class="btn" id="dlgSave">Save Changes</button>
+          </div>
+        </form>
+      </dialog>
     </div>
 
     <div class="section">
@@ -1085,33 +1150,71 @@
       return active ? active.dataset.value : 'none';
     };
 
-    // The addon's own name, typed into the heading.
+    // Addon identity, edited in a dialog rather than by typing into the heading.
+    // A heading that is secretly a text field is a heading people do not realise
+    // they can change; a pencil says so.
     const DEFAULT_ADDON_NAME = 'AIOSports';
     const addonNameEl = document.getElementById('addonName');
-    // Read as text, never as markup: this goes into a URL that is handed around,
-    // and the same bound the catalog names use applies here.
-    const addonNameValue = () =>
-      (addonNameEl.textContent || '')
-        .replace(/[\u0000-\u001f\u007f]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 40);
+    const addonLogoImg = document.getElementById('addonLogoImg');
+    const addonSubtitleEl = document.getElementById('addonSubtitle');
+    const DEFAULT_SUBTITLE = addonSubtitleEl.textContent;
 
-    addonNameEl.addEventListener('input', () => updateLink());
-    // Enter would otherwise put a line break inside a heading.
-    addonNameEl.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); addonNameEl.blur(); }
+    // What the user has set, held here and written into the config by updateLink.
+    const identity = { name: '', logo: '', description: '' };
+
+    const cleanText = (v, max) => String(v || '')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, max);
+
+    const addonNameValue = () => cleanText(identity.name, 40);
+
+    function paintIdentity() {
+      addonNameEl.textContent = addonNameValue() || DEFAULT_ADDON_NAME;
+      addonSubtitleEl.textContent = cleanText(identity.description, 300) || DEFAULT_SUBTITLE;
+      addonLogoImg.src = identity.logo || '/logo.png';
+    }
+
+    // Version and build, the way any self-hosted thing should say which copy of
+    // itself is running -- the first question asked when something looks wrong.
+    (async () => {
+      try {
+        const v = await (await fetch('/api/version')).json();
+        const ver = document.getElementById('addonVersion');
+        const bid = document.getElementById('buildId');
+        if (v.version) ver.textContent = 'v' + v.version + (v.build ? ' \u00b7 ' + v.build : '');
+        // Only when there is one: a container built from a git URL has no commit
+        // to report, and an empty pair of brackets says nothing.
+        if (v.sha) bid.textContent = '(' + v.sha + ')';
+      } catch (e) { /* the line simply stays empty */ }
+    })();
+
+    const dlg = document.getElementById('addonDialog');
+    const dlgName = document.getElementById('dlgName');
+    const dlgLogo = document.getElementById('dlgLogo');
+    const dlgDesc = document.getElementById('dlgDesc');
+
+    document.getElementById('editAddonBtn').addEventListener('click', () => {
+      dlgName.value = addonNameValue() || DEFAULT_ADDON_NAME;
+      dlgLogo.value = identity.logo || '';
+      dlgDesc.value = cleanText(identity.description, 300);
+      // showModal rather than show: it is the one that brings a backdrop and
+      // keeps focus inside, and Escape closes it for free.
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
     });
-    // plaintext-only is not everywhere yet, so paste is flattened by hand too.
-    addonNameEl.addEventListener('paste', e => {
-      e.preventDefault();
-      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\s+/g, ' ');
-      document.execCommand('insertText', false, text);
-    });
-    // Emptied entirely, it goes back to the default rather than leaving the
-    // addon nameless in a player's list.
-    addonNameEl.addEventListener('blur', () => {
-      if (!addonNameValue()) { addonNameEl.textContent = DEFAULT_ADDON_NAME; updateLink(); }
+
+    dlg.addEventListener('close', () => {
+      if (dlg.returnValue !== 'save') return;
+      const name = cleanText(dlgName.value, 40);
+      identity.name = (name && name !== DEFAULT_ADDON_NAME) ? name : '';
+      identity.description = cleanText(dlgDesc.value, 300);
+      // Only an absolute http(s) address: a player fetches this from its own
+      // machine, so anything relative would resolve against the wrong host.
+      const logo = cleanText(dlgLogo.value, 300);
+      identity.logo = /^https?:\/\/\S+$/i.test(logo) ? logo : '';
+      paintIdentity();
+      updateLink();
     });
 
     // Clock format. Unlike stream order this one is not clearable -- a time has
@@ -1287,9 +1390,10 @@
         if (loading) loading.textContent = 'Could not load the tab list (' + err.message + ').';
       });
 
-    if (typeof existingConfig.addonName === 'string' && existingConfig.addonName.trim()) {
-      addonNameEl.textContent = existingConfig.addonName.trim().slice(0, 40);
-    }
+    identity.name = typeof existingConfig.addonName === 'string' ? existingConfig.addonName : '';
+    identity.logo = typeof existingConfig.addonLogo === 'string' ? existingConfig.addonLogo : '';
+    identity.description = typeof existingConfig.addonDescription === 'string' ? existingConfig.addonDescription : '';
+    paintIdentity();
 
     if (existingConfig.timeFormat === '24') {
       timeFormatRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t.dataset.value === '24'));
@@ -1369,9 +1473,11 @@
       // 12-hour is the default, so only 24 needs carrying.
       if (timeFormatValue() === '24') config.timeFormat = '24';
 
-      // Only when it has actually been changed, so an untouched config stays short.
+      // Only what has actually been changed, so an untouched config stays short.
       const chosenName = addonNameValue();
       if (chosenName && chosenName !== DEFAULT_ADDON_NAME) config.addonName = chosenName;
+      if (identity.logo) config.addonLogo = identity.logo;
+      if (identity.description) config.addonDescription = identity.description;
 
       // Only carried when they differ from the addon's own, so an untouched
       // config stays as short as it was.
