@@ -159,9 +159,32 @@ const { redactUrl } = require('./redact');
 // that are not M3U8). Web player links (no url or '/watch?') pass through
 // untouched. Runs once per mint (see mintVerifiedSources), not per request, so
 // cached results are served without re-verification.
+// How many playlists are checked at once. Unbounded, one fixture opened a dozen
+// simultaneous requests to the same handful of edge hosts, and prewarm ran eight
+// fixtures beside it -- so the addon congested the CDN it was asking about and
+// then dropped, as dead, streams it had extracted successfully a second earlier.
+// The logs showed exactly that: "Successfully extracted" followed by "Dropped
+// timeout/error stream ... impit timeout 5000ms" for the same URL.
+const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 6;
+
+/** Run `job` over `items`, at most `limit` at a time, preserving order. */
+async function mapLimit(items, limit, job) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await job(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
-  const checkedStreams = await Promise.all(streams.map(async (s) => {
+  const checkedStreams = await mapLimit(streams, VERIFY_CONCURRENCY, (async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links are kept blindly.
     if (!s.url || s.url.includes('/watch?')) return s;
 
@@ -206,9 +229,12 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
       try {
         // _safeFetch handles impit -> undici fallback automatically on all platforms
+        // Only the head of the playlist is needed: a valid one starts #EXTM3U on
+        // its first line. A server that ignores Range sends the whole body, which
+        // is what happened before, so this can only help.
         const result = await _safeFetch(targetUrl, {
           method: 'GET',
-          headers: reqHeaders,
+          headers: { ...reqHeaders, Range: 'bytes=0-2047' },
           signal: abortController.signal,
           timeoutMs: 5000,
         });
