@@ -1063,7 +1063,16 @@
         .filter(cb => cb.checked)
         .map(cb => cb.value);
       const orderedValues = orderedRows.map(row => row.dataset.value);
-      const tz = timezoneSelect.value || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      // A zone saved by an older build can be one this browser no longer knows
+      // ("US/Pacific-New", a renamed IANA zone). Formatting against it throws,
+      // which killed the whole save with nothing on screen to explain it. Fall
+      // back to whatever this browser resolves to rather than refusing to save.
+      let tz = timezoneSelect.value || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      } catch (e) {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      }
 
       let manifestUrl = window.location.origin + '/manifest.json';
 

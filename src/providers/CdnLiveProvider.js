@@ -70,8 +70,8 @@ class CdnLiveProvider extends BaseProvider {
         for (const [idx, ch] of item.channels.entries()) {
           if (ch.url) {
             try {
-              const { request } = require('undici');
-              const playerRes = await request(ch.url, {
+              const { safeFetch } = require('../impitClient');
+              const playerRes = await safeFetch(ch.url, {
                 headersTimeout: 15000, bodyTimeout: 15000,
                 headers: {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -80,8 +80,8 @@ class CdnLiveProvider extends BaseProvider {
                 signal: AbortSignal.timeout(10000)
               });
               
-              if (playerRes.statusCode >= 200 && playerRes.statusCode < 300) {
-                const html = await playerRes.body.text();
+              if (playerRes.status >= 200 && playerRes.status < 300) {
+                const html = await playerRes.text();
                 const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
                 if (decoderMatch) {
                   const decoderName = decoderMatch[1];

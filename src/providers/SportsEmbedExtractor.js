@@ -84,11 +84,10 @@ async function extractSportsEmbed(embedUrl) {
     exports.ovpc12b4fa4bac(16);
     ctx = exports.ovpc12b4fa4bac(-16);
     
-    const https = require('https');
-    const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 10000 });
-    const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-    const resp = await fetch('https://sportsembed.su/api/get', {
-        agent: keepAliveAgent,
+    const { getImpit } = require('../impitClient');
+    const impit = getImpit();
+    let resp;
+    const fetchArgs = {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-protobuf',
@@ -100,7 +99,17 @@ async function extractSportsEmbed(embedUrl) {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
         },
         body: protoBytes
-    });
+    };
+    
+    if (impit) {
+        resp = await impit.fetch('https://sportsembed.su/api/get', fetchArgs);
+    } else {
+        const https = require('https');
+        const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 10000 });
+        const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+        fetchArgs.agent = keepAliveAgent;
+        resp = await fetch('https://sportsembed.su/api/get', fetchArgs);
+    }
     
     const resBuf = Buffer.from(await resp.arrayBuffer());
     if (resBuf.length < 50) throw new Error('API Blocked / Forbidden: ' + resBuf.toString());

@@ -1,4 +1,4 @@
-const { request } = require('undici');
+const { safeFetch } = require('../impitClient');
 const cheerio = require('cheerio');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');

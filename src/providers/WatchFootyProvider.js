@@ -114,16 +114,16 @@ class WatchFootyProvider extends BaseProvider {
             } else if (s.url.includes('sportsembed.su') || s.url.includes('watchfooty.st/embed')) {
               let resolvedViaIframe = false;
               try {
-                const { request } = require('undici');
-                const htmlRes = await request(s.url, {
+                const { safeFetch } = require('../impitClient');
+                const htmlRes = await safeFetch(s.url, {
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Referer': 'https://watchfooty.st/',
                     'Accept': 'text/html'
                   },
-                  timeout: 6000
+                  timeoutMs: 6000
                 });
-                const html = await htmlRes.body.text();
+                const html = await htmlRes.text();
                 const iframeMatch = html.match(/src="(https?:\/\/[^"]+)"/g);
                 if (iframeMatch) {
                   for (const attr of iframeMatch) {

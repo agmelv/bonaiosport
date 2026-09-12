@@ -1,4 +1,4 @@
-const { request } = require('undici');
+const { safeFetch } = require('../impitClient');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');

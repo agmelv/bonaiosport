@@ -43,9 +43,9 @@ class EmbedStProvider extends BaseProvider {
     const IFRAME_FALLBACK_DOMAINS = ['embedindia.st', 'embedindia.com', 'embedsport.xyz', 'sportsembed.su'];
     if (streams.length === 0 && !embedUrl.includes('sportsembed.su')) {
       try {
-        const { request, Agent } = require('undici');
-        const dispatcher = new Agent({ keepAliveTimeout: 15000, keepAliveMaxTimeout: 30000, connect: { timeout: 15000 } });
-        const htmlRes = await request(embedUrl, {
+        const { safeFetch } = require('../impitClient');
+        const dispatcher = new (require('undici').Agent)({ keepAliveTimeout: 15000, keepAliveMaxTimeout: 30000, connect: { timeout: 15000 } });
+        const htmlRes = await safeFetch(embedUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
             'Referer': referer,
@@ -55,7 +55,7 @@ class EmbedStProvider extends BaseProvider {
           bodyTimeout: 6000,
           headersTimeout: 6000
         });
-        const html = await htmlRes.body.text();
+        const html = await htmlRes.text();
         // Match <iframe src="https://embedindia.st/..."> pattern
         const iframeMatch = html.match(/src="(https:\/\/([^/"]+)[^"]+)"/g);
         if (iframeMatch) {

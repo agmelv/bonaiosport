@@ -149,8 +149,8 @@ class StreamSports99Provider extends BaseProvider {
             // --- INTERNAL FALLBACK ---
             console.log("[DEBUG SS99] ENTERING EXTRACTION TRY BLOCK FOR", ch.url);
             try {
-              const { request } = require('undici');
-              const playerRes = await request(ch.url, {
+              const { safeFetch } = require('../impitClient');
+              const playerRes = await safeFetch(ch.url, {
                 headersTimeout: 15000, bodyTimeout: 15000,
                 headers: {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -159,10 +159,10 @@ class StreamSports99Provider extends BaseProvider {
                 signal: AbortSignal.timeout(10000)
               });
               
-              console.log(`[DEBUG SS99] playerRes.ok: ${playerRes.ok}, status: ${playerRes.statusCode}`);
+              console.log(`[DEBUG SS99] playerRes.ok: ${playerRes.ok}, status: ${playerRes.status}`);
               
-              if (playerRes.ok || playerRes.statusCode === 200) {
-                const html = await playerRes.body.text();
+              if (playerRes.ok || playerRes.status === 200) {
+                const html = await playerRes.text();
                 const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
                 console.log(`[DEBUG SS99] HTML length: ${html.length}, decoderMatch: ${!!decoderMatch}`);
                 if (decoderMatch) {

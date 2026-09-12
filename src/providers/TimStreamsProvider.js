@@ -1,4 +1,3 @@
-const { request } = require('undici');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');

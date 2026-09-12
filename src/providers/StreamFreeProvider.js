@@ -89,12 +89,12 @@ class StreamFreeProvider extends BaseProvider {
       const statusUrl = `https://streamfree.top/api/stream-status/${sourceId}`;
       const availableQualities = {};
       try {
-        const { request } = require('undici');
-        const statusRes = await request(statusUrl, {
+        const { safeFetch } = require('../impitClient');
+        const statusRes = await safeFetch(statusUrl, {
            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
         });
-        if (statusRes.statusCode === 200) {
-           const statusData = await statusRes.body.json();
+        if (statusRes.status === 200) {
+           const statusData = await statusRes.json();
            for (const s of Object.values(statusData.sources || {})) {
              if (s && s.available && s.qualities) {
                for (const [q, ok] of Object.entries(s.qualities)) {

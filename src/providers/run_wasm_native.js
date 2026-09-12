@@ -96,6 +96,22 @@ global.WebAssembly.instantiateStreaming = async (resp, importObject) => {
 
 const originalFetch = global.fetch;
 
+// Built once, not once per request. Impit is a native client; constructing one
+// per fetch pays for a TLS stack on every call, and the handler below runs for
+// each WASM fetch. `undefined` means not yet tried, `null` means unavailable.
+let _impit;
+function wasmImpit() {
+  if (_impit !== undefined) return _impit;
+  try {
+    const { Impit } = require('impit');
+    _impit = new Impit();
+  } catch (e) {
+    console.warn("[WASM] impit native addon not found, using originalFetch.");
+    _impit = null;
+  }
+  return _impit;
+}
+
 global.fetch = async (url, opts) => {
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);
   
@@ -130,11 +146,39 @@ global.fetch = async (url, opts) => {
       reqHeaders.set('Origin', targetOrigin);
       reqHeaders.set('Content-Type', 'application/octet-stream');
       
-      const response = await originalFetch(proxyUrl, {
-          method: fetchOpts.method || 'POST',
-          headers: reqHeaders,
-          body: reqBody ? Buffer.from(reqBody) : undefined
-      });
+      let response;
+      const impit = wasmImpit();
+      const headersObj = {};
+      reqHeaders.forEach((v, k) => { headersObj[k] = v; });
+
+      // One retry, not five. This runs in a subprocess the stream path waits on,
+      // and that caller gives up at SOURCE_HARD_DEADLINE_MS (9s). Five attempts
+      // spend 8s in backoff alone before the last one even starts, so every
+      // stream they eventually rescued would arrive after the parent had stopped
+      // listening -- effort nobody receives. One retry covers the transient
+      // failure this is for and still lands inside the window.
+      const ATTEMPTS = 2;
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        try {
+          if (impit) {
+            response = await impit.fetch(proxyUrl, {
+                method: fetchOpts.method || 'POST',
+                headers: headersObj,
+                body: reqBody ? Buffer.from(reqBody) : undefined
+            });
+          } else {
+            response = await originalFetch(proxyUrl, {
+                method: fetchOpts.method || 'POST',
+                headers: reqHeaders,
+                body: reqBody ? Buffer.from(reqBody) : undefined
+            });
+          }
+          break;
+        } catch (e) {
+          if (attempt === ATTEMPTS) throw e;
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
       
       if (!response.ok) {
           console.error(`[WASM] Proxy fetch failed: ${response.status} ${response.statusText}`);
