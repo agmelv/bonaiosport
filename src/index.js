@@ -955,19 +955,20 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   const newManifest = JSON.parse(JSON.stringify(manifest));
   
   if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
-    const enabledSports = parsedConfig.sports.split(',');
-    
-    // General catalogs to always keep
-    const keepCatalogs = ['nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_teams'];
-    
-    // Add specific catalogs based on selection
-    const sportCatalogs = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts'];
-    for (const sport of sportCatalogs) {
-      if (enabledSports.includes(sport)) keepCatalogs.push(`nuvio_sports_${sport}`);
-    }
-    if (enabledSports.includes('other')) keepCatalogs.push('nuvio_sports_other');
-    
-    newManifest.catalogs = newManifest.catalogs.filter(c => keepCatalogs.includes(c.id));
+    const enabled = new Set(parsedConfig.sports.split(',').map(x => x.trim()).filter(Boolean));
+
+    // Which sport a tab belongs to, worked out from its own id rather than from
+    // a list kept alongside. The list fell behind as tabs were added, and the
+    // failure was silent and backwards: College, Other Football and Channels
+    // were dropped by any sports filter, including one that had them ticked.
+    const ALWAYS = new Set(['live', 'upcoming', 'teams', 'channels']);
+    const SPORT_FOR_CATALOG = { other_football: 'american_football' };
+
+    newManifest.catalogs = newManifest.catalogs.filter(c => {
+      const key = String(c.id).replace(/^nuvio_sports_/, '');
+      if (ALWAYS.has(key)) return true;
+      return enabled.has(SPORT_FOR_CATALOG[key] || key);
+    });
   }
   
   // The viewer's own tab order and names, set on the configure page.
