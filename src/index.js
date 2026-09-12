@@ -127,29 +127,38 @@ app.set(
 
 app.use(cors());
 
-// /saved/... is the saved configuration, wearing the URL of an ordinary one.
+// A saved profile, wearing the URL of an ordinary config.
+//
+//   /saved/...                  the profile made before profiles existed
+//   /p/<uuid>/...               one of several named profiles
 //
 // Rewriting here rather than adding routes means every path that already
 // understands a config segment -- the manifest, the SDK's catalog, meta and
 // stream routes, even /configure -- keeps working without knowing this exists.
 // It has to run before all of them, which is why it sits this early.
 app.use((req, res, next) => {
-  if (!/^\/saved(\/|$|\?)/.test(req.url)) return next();
-  const saved = loadSavedConfig();
+  const m = req.url.match(/^\/(?:saved|p\/([^/?]+))(\/|$|\?)/);
+  if (!m) return next();
+
+  const id = m[1] ? decodeURIComponent(m[1]) : LEGACY_ID;
+  const prefixLen = m[1] ? ('/p/' + m[1]).length : '/saved'.length;
+  const saved = loadProfile(id);
+
   if (!saved) {
-    // A person who followed /saved/configure wants the page, not a paragraph of
-    // JSON about why they cannot have it. Send them where they were going --
-    // the configure page, which then says what is and is not saved.
-    const wantsPage = /^\/saved(\/configure\/?)?(\?|$)/.test(req.url)
+    // Someone who followed a profile link wants the page, not a paragraph of
+    // JSON about why they cannot have it. Send them where they were going.
+    const rest = req.url.slice(prefixLen);
+    const wantsPage = /^(\/configure\/?)?(\?|$)/.test(rest)
       || String(req.get('accept') || '').includes('text/html');
     if (wantsPage) return res.redirect(302, '/configure');
 
     // A player asking for the manifest gets an answer it can act on.
     return res.status(404).json({
-      error: 'Nothing saved yet. Open /configure, set it up, and press Save.'
+      error: 'No such saved profile. Open /configure, set it up, and press Save.'
     });
   }
-  req.url = '/' + encodeConfigSegment(saved) + req.url.slice('/saved'.length);
+
+  req.url = '/' + encodeConfigSegment(saved) + req.url.slice(prefixLen);
   next();
 });
 
@@ -255,11 +264,20 @@ app.get('/api/site/auth', (req, res) => {
  * that before they rely on it rather than after they lose their settings.
  */
 app.get('/api/config/saved', (req, res) => {
-  const saved = loadSavedConfig();
+  // Which profile the page is asking about; absent means the legacy one.
+  const id = typeof req.query.id === 'string' && req.query.id ? req.query.id : LEGACY_ID;
+  const saved = loadProfile(id);
+  const base = getRequestBaseUrl(req);
   res.json({
+    id,
     exists: !!saved,
     durable: savedConfigIsDurable(),
-    url: getRequestBaseUrl(req) + '/saved/manifest.json'
+    url: base + (id === LEGACY_ID ? '/saved' : '/p/' + id) + '/manifest.json',
+    // Enough to offer a list; the configs themselves are not handed out here.
+    profiles: listProfiles().map(pid => ({
+      id: pid,
+      url: base + (pid === LEGACY_ID ? '/saved' : '/p/' + pid) + '/manifest.json'
+    }))
   });
 });
 
@@ -269,23 +287,46 @@ app.post('/api/config/save', express.json({ limit: '64kb' }), (req, res) => {
   if (!isAuthed(req)) {
     return res.status(403).json({ error: 'Sign in before saving.' });
   }
-  const config = req.body;
+  const config = req.body && req.body.config !== undefined ? req.body.config : req.body;
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     return res.status(400).json({ error: 'Expected a configuration object.' });
   }
+
+  // No id means "make me a new one". An id must already exist, so a caller
+  // cannot choose where their profile lands or overwrite one by guessing.
+  let id = typeof req.body.id === 'string' ? req.body.id : '';
+  if (!id) {
+    id = crypto.randomUUID();
+  } else if (id !== LEGACY_ID && !UUID_RE.test(id)) {
+    return res.status(400).json({ error: 'Not a profile id.' });
+  }
+
   try {
-    writeSavedConfig(config);
+    writeProfile(id, config);
   } catch (err) {
     return res.status(500).json({
-      error: `Could not write ${SAVED_CONFIG_FILE}: ${err.message}. ` +
-             'Mount a volume there (see the README) or set DATA_DIR somewhere writable.'
+      error: `Could not write the profile: ${err.message}. ` +
+             'Mount a volume at the data directory (see the README) or set DATA_DIR somewhere writable.'
     });
   }
+
+  const base = getRequestBaseUrl(req);
   res.json({
     saved: true,
+    id,
     durable: savedConfigIsDurable(),
-    url: getRequestBaseUrl(req) + '/saved/manifest.json'
+    url: base + (id === LEGACY_ID ? '/saved' : '/p/' + id) + '/manifest.json'
   });
+});
+
+app.delete('/api/config/saved', (req, res) => {
+  if (!isAuthed(req)) return res.status(403).json({ error: 'Sign in first.' });
+  const id = typeof req.query.id === 'string' ? req.query.id : '';
+  const file = profilePath(id);
+  if (!file) return res.status(400).json({ error: 'Not a profile id.' });
+  try { fs.unlinkSync(file); } catch (e) { /* already gone */ }
+  _profiles.delete(id);
+  res.json({ deleted: true, id });
 });
 
 app.get('/dashboard', requirePage, (req, res) => {
@@ -1064,34 +1105,78 @@ app.use((req, res, next) => {
  * Saved settings live here instead, behind a URL that never changes: install
  * /saved/manifest.json once and later edits arrive without touching the player.
  *
- * One saved configuration per instance, because one AUTH_KEY is one identity --
- * everybody who can sign in is the same person as far as this server knows.
+ * Profiles are keyed by a v4 uuid, so one server can hold several independent
+ * setups -- a household where two people want different sports, or one person
+ * keeping a lean phone profile beside a full one on the TV.
+ *
+ * The uuid is the whole secret. It is 122 bits from a CSPRNG, it never leaves
+ * the server except in the URL its owner installs, and it names a file that
+ * holds nothing but catalog preferences. Nothing is encrypted into the URL
+ * because nothing sensitive is in it -- the config lives here, on disk.
+ *
+ * Writing still requires signing in, so knowing a uuid lets someone use a
+ * profile, never overwrite one.
  */
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const SAVED_CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const PROFILE_DIR = path.join(DATA_DIR, 'profiles');
+// Where the single pre-profile config lived. Still read, still served, so an
+// install made before profiles existed keeps working untouched.
+const LEGACY_CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const LEGACY_ID = 'default';
 
-let _savedConfig;   // undefined = not read yet, null = none saved
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function loadSavedConfig() {
-  if (_savedConfig !== undefined) return _savedConfig;
-  try {
-    _savedConfig = JSON.parse(fs.readFileSync(SAVED_CONFIG_FILE, 'utf8'));
-    if (!_savedConfig || typeof _savedConfig !== 'object' || Array.isArray(_savedConfig)) _savedConfig = null;
-  } catch (e) {
-    _savedConfig = null;             // nothing saved yet, or unreadable
-  }
-  return _savedConfig;
+const _profiles = new Map();   // id -> config, read through
+
+function profilePath(id) {
+  // Never build a path from an unchecked id: a caller supplies it, and '..' in
+  // one would otherwise walk straight out of the profiles directory.
+  if (id === LEGACY_ID) return LEGACY_CONFIG_FILE;
+  if (!UUID_RE.test(id)) return null;
+  return path.join(PROFILE_DIR, id + '.json');
 }
 
-function writeSavedConfig(config) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+function loadProfile(id) {
+  if (_profiles.has(id)) return _profiles.get(id);
+  const file = profilePath(id);
+  let config = null;
+  if (file) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) config = parsed;
+    } catch (e) { config = null; }   // absent or unreadable
+  }
+  _profiles.set(id, config);
+  return config;
+}
+
+function writeProfile(id, config) {
+  const file = profilePath(id);
+  if (!file) throw new Error('bad profile id');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   // Written beside the target and renamed, so a crash midway cannot leave a
   // half-written file that then fails to parse on the next boot.
-  const tmp = SAVED_CONFIG_FILE + '.tmp';
+  const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(config), 'utf8');
-  fs.renameSync(tmp, SAVED_CONFIG_FILE);
-  _savedConfig = config;
+  fs.renameSync(tmp, file);
+  _profiles.set(id, config);
 }
+
+function listProfiles() {
+  const out = [];
+  if (loadProfile(LEGACY_ID)) out.push(LEGACY_ID);
+  try {
+    for (const f of fs.readdirSync(PROFILE_DIR)) {
+      if (f.endsWith('.json') && UUID_RE.test(f.slice(0, -5))) out.push(f.slice(0, -5));
+    }
+  } catch (e) { /* no profiles directory yet */ }
+  return out;
+}
+
+// Kept so the rest of the file reads the same: the legacy id is just a profile.
+const loadSavedConfig = () => loadProfile(LEGACY_ID);
+const writeSavedConfig = config => writeProfile(LEGACY_ID, config);
+const SAVED_CONFIG_FILE = LEGACY_CONFIG_FILE;
 
 /** Whether this directory will still exist after the container is rebuilt. */
 function savedConfigIsDurable() {

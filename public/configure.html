@@ -134,6 +134,11 @@
       border: 1px solid var(--card-border); outline: none;
     }
     .copy-row input[type="text"]:focus { border-color: #3a3a44; }
+    .copy-row select {
+      flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 12px 14px;
+      border-radius: 12px; background: rgba(0, 0, 0, .25); color: #e8e8ea;
+      border: 1px solid var(--card-border); outline: none; cursor: pointer;
+    }
     .copy-btn {
       flex: 0 0 auto; width: 46px; display: flex; align-items: center; justify-content: center;
       background: rgba(255, 255, 255, 0.06); color: #c9ced4;
@@ -660,6 +665,26 @@
       <h3>Your Configuration</h3>
       <p class="hint">Settings normally live inside the addon's link, so changing one means installing
         it again. Save them here instead and this address stays the same.</p>
+
+      <div class="input-group">
+        <label for="profileSelect">Profile</label>
+        <div class="copy-row">
+          <select id="profileSelect"></select>
+          <button type="button" id="newProfileBtn" class="copy-btn" title="Start a new profile"
+                  aria-label="Start a new profile">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button type="button" id="deleteProfileBtn" class="copy-btn" title="Delete this profile"
+                  aria-label="Delete this profile">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+          </button>
+        </div>
+        <p class="hint">Each profile is its own install URL, so two people can keep different settings on one server.</p>
+      </div>
 
       <div class="input-group">
         <label for="savedUrl">Install URL</label>
@@ -1492,10 +1517,48 @@
     const savedUrlEl = document.getElementById('savedUrl');
     const copySavedUrl = document.getElementById('copySavedUrl');
 
+    // Which profile this page is editing. Empty until the first save, which is
+    // when the server mints one -- the page never invents an id, so two tabs
+    // cannot both decide they are the same new profile.
+    let profileId = new URLSearchParams(location.search).get('profile') || '';
+    const profileSelect = document.getElementById('profileSelect');
+    const newProfileBtn = document.getElementById('newProfileBtn');
+    const deleteProfileBtn = document.getElementById('deleteProfileBtn');
+
+    const shortId = id => id === 'default' ? 'Default profile' : id.slice(0, 8) + '…' + id.slice(-4);
+
+    newProfileBtn.addEventListener('click', () => {
+      // A new profile starts from what is on screen; saving is what creates it.
+      profileId = '';
+      profileSelect.innerHTML = '<option value="">New profile — press Save to create it</option>';
+      saveCallout.hidden = false;
+      saveCallout.className = 'callout';
+      saveCallout.textContent = 'Press Save to create this profile and get its own install URL.';
+      savedUrlEl.value = '';
+    });
+
+    profileSelect.addEventListener('change', () => {
+      const id = profileSelect.value;
+      if (!id || id === profileId) return;
+      // Load that profile by reopening the page against it, so every field on
+      // the page is rebuilt from the saved config rather than half-updated.
+      location.href = '/p/' + id + '/configure';
+    });
+
+    deleteProfileBtn.addEventListener('click', async () => {
+      if (!profileId) return;
+      if (!confirm('Delete ' + shortId(profileId) + '? Anything installed from its URL will stop working.')) return;
+      try {
+        await fetch('/api/config/saved?id=' + encodeURIComponent(profileId), { method: 'DELETE' });
+      } catch (e) { /* reported by the refresh below */ }
+      profileId = '';
+      location.href = '/configure';
+    });
+
     async function refreshSaveUi() {
       let gate = { authenticated: false }, state = {};
       try { gate = await (await fetch('/api/site/auth')).json(); } catch (e) {}
-      try { state = await (await fetch('/api/config/saved')).json(); } catch (e) {}
+      try { state = await (await fetch('/api/config/saved?id=' + encodeURIComponent(profileId || 'default'))).json(); } catch (e) {}
 
       // Offered to someone signed in. On an open instance there is no sign-in
       // to do, so it is offered there too.
@@ -1503,7 +1566,29 @@
       saveCard.hidden = !canSave;
       if (!canSave) return;
 
-      savedUrlEl.value = state.url || (window.location.origin + '/saved/manifest.json');
+      if (state.exists && state.id) profileId = state.id;
+      savedUrlEl.value = (state.exists && state.url) ? state.url : '';
+
+      const list = state.profiles || [];
+      profileSelect.innerHTML = '';
+      if (!list.length) {
+        profileSelect.innerHTML = '<option value="">New profile — press Save to create it</option>';
+      } else {
+        for (const pr of list) {
+          const o = document.createElement('option');
+          o.value = pr.id;
+          o.textContent = shortId(pr.id);
+          o.selected = pr.id === profileId;
+          profileSelect.appendChild(o);
+        }
+        if (!profileId) {
+          const o = document.createElement('option');
+          o.value = ''; o.textContent = 'New profile — press Save to create it'; o.selected = true;
+          profileSelect.appendChild(o);
+        }
+      }
+      deleteProfileBtn.disabled = !profileId;
+      deleteProfileBtn.style.opacity = profileId ? '' : '.4';
 
       if (state.durable === false) {
         saveCallout.hidden = false;
@@ -1550,10 +1635,12 @@
         const res = await fetch('/api/config/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(currentConfig)
+          body: JSON.stringify({ id: profileId || undefined, config: currentConfig })
         });
         const body = await res.json().catch(() => ({}));
         if (res.ok && body.saved) {
+          // The server owns the id, so take whatever it minted.
+          if (body.id) profileId = body.id;
           saveBtn.innerText = 'SAVED';
           saveBtn.style.background = '#10b981';
           await refreshSaveUi();
