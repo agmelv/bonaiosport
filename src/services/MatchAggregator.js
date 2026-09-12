@@ -345,8 +345,8 @@ function _categoryFromLeague(match) {
 }
 
 class MatchAggregator {
-  constructor({ streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, cacheService, yamlProviders }) {
-    this.providers = [streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, ...(yamlProviders || [])];
+  constructor({ streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, usaTvProvider, cacheService, yamlProviders }) {
+    this.providers = [streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, usaTvProvider, ...(yamlProviders || [])];
     this.cacheService = cacheService;
   }
 
@@ -400,7 +400,20 @@ class MatchAggregator {
     //     RedZone"; both resolve to the one logo. A channel has no legs to
     //     confuse, so this is checked before the date guard that keeps two
     //     nights of the same fixture apart.
-    if (p1.chan && p2.chan && p1.chan === p2.chan) return true;
+    // The logo alone is not enough. It is resolved by name and is deliberately
+    // forgiving, so ESPN and ESPN Deportes answer to the same crest, as do NBC
+    // Sports Boston, California and Philadelphia, and four separate SportsNet
+    // regionals. Nine channels would have collapsed into three. Requiring the
+    // token sets to match as well keeps the case this rule exists for -- "NFL
+    // RedZone" and the mangled "NFL vs RedZone" both tokenise to {nfl,redzone}
+    // -- while a regional's own city keeps it apart from its siblings.
+    if (p1.chan && p2.chan && p1.chan === p2.chan) {
+      if (p1.tokens.size === p2.tokens.size) {
+        let shared = 0;
+        for (const w of p1.tokens) if (p2.tokens.has(w)) shared++;
+        if (shared === p1.tokens.size) return true;
+      }
+    }
 
     // 1. Category mismatch guard.
     //

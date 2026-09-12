@@ -59,5 +59,14 @@ t(false, same(ev('sf_i','Real Madrid vs Barcelona','football',D,[]),
 t(false, same(ev('sf_k','Köln vs Werder Bremen','football',D,[]),
               ev('spk_l','Köln vs Werder Bremen','football',D + 26*3600*1000,[])), 'same fixture, next day');
 
+console.log('--- 24/7 channels: one crest is shared by several of them')
+// The logo is resolved by name and is forgiving on purpose, so these answer to
+// the same crest. Nine of the USA TV channels would have collapsed into three.
+const ch = t => ({ id: 't' + t.replace(/\W/g, ''), title: t, category: 'networks', date: 0, sources: [] })
+t(true,  same(ch('NFL RedZone'), ch('NFL vs RedZone')), 'one channel spelled two ways still merges')
+t(false, same(ch('ESPN'), ch('ESPN Deportes')), 'ESPN is not ESPN Deportes')
+t(false, same(ch('NBC Sports Boston'), ch('NBC Sports California')), 'NBC Sports regionals stay apart')
+t(false, same(ch('SportsNet New York'), ch('SportsNet Pittsburgh')), 'SportsNet regionals stay apart')
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

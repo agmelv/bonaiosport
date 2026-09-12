@@ -14,7 +14,7 @@ const SOURCE_HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS) || 9
 
 // Source selection (shared by handleStream and prewarmMatch)
 function selectSources(matchSources, config) {
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'streamfree': 8, 'timstreams': 9, 'sportyhunter': 12, 'streamsports': 13, 'iptv-org': 14, 'embedindia': 15 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'streamfree': 8, 'timstreams': 9, 'usatv': 10, 'sportyhunter': 12, 'streamsports': 13, 'iptv-org': 14, 'embedindia': 15 };
 
   // A user-defined order, set in the configure page, outranks the built-in
   // priorities entirely — it is an explicit preference, where SOURCE_PRIORITY
@@ -441,7 +441,8 @@ async function handleStream(type, id, config) {
     sportyhunter: 'SportyHunter', streamsports: 'StreamSports',
     'iptv-org': 'Direct IPTV', 'streamsports99': 'StreamSports99',
     'streamic': 'Streamic',
-    'embedindia': 'EmbedIndia', 'embedst': 'Embed.st', 'streamedpk': 'Streamed.pk'
+    'embedindia': 'EmbedIndia', 'embedst': 'Embed.st', 'streamedpk': 'Streamed.pk',
+    'usatv': 'USA TV'
   };
 
   streams.forEach(s => {
