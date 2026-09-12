@@ -338,10 +338,12 @@ async function handleStream(type, id, config) {
 
   await Promise.race([allDone, sleep(SOURCE_DEADLINE_MS)]);
 
-  // Returning an empty list would send the viewer back with nothing, which is
-  // worse than waiting a little longer. So when the deadline passes with no
-  // source having answered at all, give the rest a second chance rather than
-  // give up -- still bounded, just bounded higher.
+  // Only when nothing at all has landed. Waiting for a fuller list was tried and
+  // measured worse: on matches whose sources are simply empty, holding on for
+  // six streams spent the whole extra budget to gain nothing -- a mean of 8.5 s
+  // to return one stream, where stopping early returned the same one stream in
+  // three. Sources that are slow rather than empty are handled by warming them
+  // before the click, not by waiting longer after it.
   if (collected.length === 0 && finished < resolvePromises.length) {
     await Promise.race([allDone, sleep(SOURCE_HARD_DEADLINE_MS - SOURCE_DEADLINE_MS)]);
   }
@@ -498,8 +500,16 @@ async function handleStream(type, id, config) {
   // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
   return {
     streams,
-    cacheMaxAge: 30,
-    staleRevalidate: 30,
+    // Deliberately not cached by the client.
+    //
+    // The protocol has no way to deliver streams progressively -- one request,
+    // one array -- so a source that resolves after the response cannot be sent.
+    // It does land in the cache, though, which makes the client's own reload
+    // button the way to see it: pressing it re-asks and gets the fuller list,
+    // in milliseconds, because the work is already done. A thirty-second cache
+    // defeated exactly that, handing back the same thin list it had just shown.
+    cacheMaxAge: 0,
+    staleRevalidate: 0,
     staleError: 60
   };
 }

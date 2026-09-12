@@ -14,6 +14,42 @@ const leagueBadges = require('./services/LeagueBadgeService');
 const VISITOR_FIRST = /\s(?:@|at)\s/i;
 
 /**
+ * Warm the fixtures a viewer is most likely to open, while they are still
+ * reading the list.
+ *
+ * Warming on the detail page was too late: that request arrives a moment before
+ * the click it was meant to cover, so the first click still paid for the first
+ * scrape and came back with whatever had resolved by the deadline. Browsing a
+ * tab is a much earlier signal, and the seconds spent there are free.
+ *
+ * Live fixtures only, most imminent first, and one at a time -- a burst of
+ * scrapes is the thing this exists to avoid. Bounded by time as well as by
+ * count, so a catalog polled in a loop does not warm in a loop.
+ */
+let lastPrewarmAt = 0;
+const PREWARM_EVERY_MS = 30 * 1000;
+const PREWARM_MATCHES = 8;
+
+function prewarmTopMatches(matches, conf) {
+  const now = Date.now();
+  if (now - lastPrewarmAt < PREWARM_EVERY_MS) return;
+  lastPrewarmAt = now;
+
+  const live = matches.filter(m => m && m.date && isMatchLive(m)).slice(0, PREWARM_MATCHES);
+  if (!live.length) return;
+
+  (async () => {
+    for (const m of live) {
+      try {
+        await prewarmMatch(m, conf || {});
+      } catch {
+        // One match failing to warm costs that match's first click, nothing else.
+      }
+    }
+  })().catch(() => {});
+}
+
+/**
  * A kickoff as somebody reads it aloud: "1:00 PM (ET)".
  *
  * The zone is named by its abbreviation where one exists, which is what a
@@ -579,6 +615,10 @@ async function handleCatalog(type, id, extra, config) {
     if (dateA > 0 && dateB > 0) return dateA - dateB;
     return 0;
   });
+
+  // Fire-and-forget, before the mapping work, so the warming has the longest
+  // possible head start on the click it is meant to cover.
+  prewarmTopMatches(filteredMatches, conf);
 
   let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf));
 
