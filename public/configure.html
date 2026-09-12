@@ -19,6 +19,14 @@
       --glass: rgba(255, 255, 255, 0.02);
     }
 
+    /* Without this, `width: 100%` plus padding measures wider than 100%.
+       .btn is the case that bit: as an <a> it defaulted to content-box, so
+       INSTALL ADDON came out 313px + 16px padding either side = 345px on a
+       375px phone and pushed the whole page into a sideways scroll. The
+       neighbouring COPY LINK looked fine only because it is a <button>, which
+       browsers already default to border-box. */
+    *, *::before, *::after { box-sizing: border-box; }
+
     body {
       margin: 0;
       padding: 20px;
@@ -46,6 +54,43 @@
       max-width: 500px;
       position: relative;
     }
+
+    .footer-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .footer-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      /* A grid item will not shrink below its own content unless told to:
+         min-width defaults to auto. These two sat in 134px columns, refused to
+         go under 172px, and overlapped each other by 28px -- which is the
+         button that appeared to spill over its neighbour. */
+      min-width: 0;
+      min-height: 46px;
+      padding: 12px 16px;
+      border-radius: 30px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .footer-link svg { flex: none; }
+    .footer-link:hover { background: rgba(255, 255, 255, 0.14); }
+
+    .footer-link.kofi {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .footer-link.kofi:hover { background: #2f7bff; }
 
     @media (max-width: 600px) {
       body { padding: 10px; }
@@ -466,12 +511,12 @@
       <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
         ☕ <strong>Support Nuvio Live Sports</strong><br>Help keep our servers, scrapers, and 24/7 sports streams online!
       </p>
-      <div class="footer-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-        <a href="https://ko-fi.com/mlp20" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 46px; padding: 12px 18px; border-radius: 30px; text-decoration: none; font-weight: 700; font-size: 14px; line-height: 1; background: #FF5E5B; color: #fff; border: 1px solid #FF5E5B;">
+      <div class="footer-actions">
+        <a class="footer-link kofi" href="https://ko-fi.com/mlp20" target="_blank" rel="noopener noreferrer">
           <svg height="18" viewBox="0 0 24 24" width="18" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
           Support on Ko-fi
         </a>
-        <a href="https://github.com/mlp2069/live-sport-plugin" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 46px; padding: 12px 18px; border-radius: 30px; text-decoration: none; font-weight: 700; font-size: 14px; line-height: 1; background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.18);">
+        <a class="footer-link" href="https://github.com/mlp2069/live-sport-plugin" target="_blank" rel="noopener noreferrer">
           <svg height="18" viewBox="0 0 16 16" width="18" fill="currentColor"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
           GitHub
         </a>
