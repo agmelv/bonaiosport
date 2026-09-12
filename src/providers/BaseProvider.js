@@ -51,7 +51,14 @@ class BaseProvider {
     if (cat.includes('americanfootball') || cat.includes('nfl') || cat.includes('afl') || cat.includes('gridiron')) return 'american_football';
     if (cat.includes('soccer') || cat.includes('football')) return 'football';
     if (cat.includes('motor') || cat.includes('racing') || cat.includes('cycling') || cat.includes('f1')) return 'motorsport';
-    if (cat.includes('fight') || cat.includes('mma') || cat.includes('boxing') || cat.includes('wrestling') || cat.includes('knuckle') || cat.includes('ufc')) return 'mma';
+    // 'martialarts' catches TimStreams' "Mixed Martial Arts", which spells out
+    // what every other feed abbreviates. It contains none of the other words
+    // here -- not even 'mma' -- so it fell through as its own category, which
+    // put those fights in Other instead of MMA and, worse, stopped them
+    // merging with the same fight from another provider: the aggregator's
+    // category guard rejects the pair before it ever compares the titles, so
+    // the streams stayed split across two listings.
+    if (cat.includes('fight') || cat.includes('mma') || cat.includes('martialarts') || cat.includes('boxing') || cat.includes('wrestling') || cat.includes('knuckle') || cat.includes('ufc')) return 'mma';
     if (cat.includes('basketball') || cat.includes('nba')) return 'basketball';
     if (cat.includes('golf')) return 'golf';
     if (cat.includes('rugby')) return 'rugby';
