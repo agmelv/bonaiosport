@@ -5,8 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AIOSports | Setup</title>
-  <link rel="icon" type="image/png" href="/logo.png">
-  <link rel="apple-touch-icon" href="/logo.png">
+  <link rel="icon" type="image/png" href="/logo-v2.png">
+  <link rel="apple-touch-icon" href="/logo-v2.png">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@700;900&display=swap"
     rel="stylesheet">
   <style>
@@ -559,7 +559,7 @@
 <body>
   <div class="container">
     <div class="header">
-      <img id="addonLogoImg" src="/logo.png" alt="" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
+      <img id="addonLogoImg" src="/logo-v2.png" alt="" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(22, 104, 255, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
       <h1>
         <span class="dot"></span><span id="addonName">AIOSports</span>
         <button type="button" id="editAddonBtn" class="pencil-btn" title="Customize addon" aria-label="Customize addon">
@@ -570,7 +570,7 @@
         </button>
       </h1>
       <p class="build-line"><span id="addonVersion"></span><span id="buildId"></span></p>
-      <p class="subtitle" id="addonSubtitle">Customize your ultimate live sports dashboard.</p>
+      <p class="subtitle" id="addonSubtitle">Choose your sports, sources and teams.</p>
 
       <!-- A real <dialog>: Escape closes it, focus is trapped, and the backdrop
            is the browser's rather than a div pretending to be one. -->
@@ -757,6 +757,13 @@
       </div>
 
       <div class="callout" id="saveCallout" hidden></div>
+
+      <div class="input-group" id="editLinkNote" style="display: none; margin-top: 16px;">
+        <label for="editLink">Edit link</label>
+        <input type="text" id="editLink" readonly spellcheck="false">
+        <p class="hint">Keep this private. This server has no password set, so this link is the only way
+          to change the profile from another device or browser.</p>
+      </div>
 
       <button id="saveBtn" class="btn" style="margin-top: 16px;">SAVE CHANGES</button>
     </div>
@@ -1362,7 +1369,7 @@
     function paintIdentity() {
       addonNameEl.textContent = addonNameValue() || DEFAULT_ADDON_NAME;
       addonSubtitleEl.textContent = cleanText(identity.description, 300) || DEFAULT_SUBTITLE;
-      addonLogoImg.src = identity.logo || '/logo.png';
+      addonLogoImg.src = identity.logo || '/logo-v2.png';
     }
 
     // Version and build, the way any self-hosted thing should say which copy of
@@ -1726,9 +1733,37 @@
       || (/^\/saved(\/|$)/.test(location.pathname) ? 'default' : '')
       || new URLSearchParams(location.search).get('profile')
       || '';
+    // Edit keys, for an instance with no AUTH_KEY. The server hands one over
+    // when a profile is created and keeps only its hash; this browser keeps the
+    // key. An edit link (…/configure#key=…) carries it to another device, and
+    // is taken out of the address bar as soon as it has been read.
+    const KEY_STORE = 'aiosports.profileKeys';
+    const profileKeys = () => {
+      try { return JSON.parse(localStorage.getItem(KEY_STORE) || '{}') || {}; } catch (e) { return {}; }
+    };
+    const rememberProfileKey = (id, key) => {
+      try { const all = profileKeys(); all[id] = key; localStorage.setItem(KEY_STORE, JSON.stringify(all)); } catch (e) {}
+    };
+    const forgetProfileKey = id => {
+      try { const all = profileKeys(); delete all[id]; localStorage.setItem(KEY_STORE, JSON.stringify(all)); } catch (e) {}
+    };
+    const keyHeaders = id => {
+      const key = id && profileKeys()[id];
+      return key ? { 'X-Profile-Key': key } : {};
+    };
+    {
+      const fromLink = new URLSearchParams(location.hash.slice(1)).get('key');
+      if (fromLink && profileId) rememberProfileKey(profileId, fromLink);
+      if (fromLink) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
+    }
+    // Set when the profile on screen exists but this browser may not change it.
+    let readOnlyProfile = false;
+
     const profileSelect = document.getElementById('profileSelect');
     const newProfileBtn = document.getElementById('newProfileBtn');
     const deleteProfileBtn = document.getElementById('deleteProfileBtn');
+    const editLinkNote = document.getElementById('editLinkNote');
+    const editLinkInput = document.getElementById('editLink');
 
     const shortId = id => id === 'default' ? 'Default profile' : id.slice(0, 8) + '…' + id.slice(-4);
 
@@ -1754,7 +1789,15 @@
       if (!profileId) return;
       if (!confirm('Delete ' + shortId(profileId) + '? Anything installed from its URL will stop working.')) return;
       try {
-        await fetch('/api/config/saved?id=' + encodeURIComponent(profileId), { method: 'DELETE' });
+        const res = await fetch('/api/config/saved?id=' + encodeURIComponent(profileId), {
+          method: 'DELETE', headers: keyHeaders(profileId)
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          alert(body.error || 'Could not delete this profile.');
+          return;
+        }
+        forgetProfileKey(profileId);
       } catch (e) { /* reported by the refresh below */ }
       profileId = '';
       location.href = '/configure';
@@ -1763,7 +1806,10 @@
     async function refreshSaveUi() {
       let gate = { authenticated: false }, state = {};
       try { gate = await (await fetch('/api/site/auth')).json(); } catch (e) {}
-      try { state = await (await fetch('/api/config/saved?id=' + encodeURIComponent(profileId || 'default'))).json(); } catch (e) {}
+      try {
+        state = await (await fetch('/api/config/saved?id=' + encodeURIComponent(profileId || 'default'),
+          { headers: keyHeaders(profileId || 'default') })).json();
+      } catch (e) {}
 
       // Offered to someone signed in. On an open instance there is no sign-in
       // to do, so it is offered there too.
@@ -1775,8 +1821,15 @@
       // reply about the legacy profile could rename the one being edited.
       if (!profileId && state.exists && state.id) profileId = state.id;
       savedUrlEl.value = (state.exists && state.url) ? state.url : '';
+      readOnlyProfile = !!(profileId && state.exists && state.canEdit === false);
 
-      const list = state.profiles || [];
+      // Signed in, the server lists every profile. Otherwise it lists none,
+      // and the ones this browser holds keys for stand in.
+      let list = state.profiles || [];
+      if (!list.length) {
+        list = Object.keys(profileKeys()).map(id => ({ id }));
+        if (profileId && state.exists && !list.some(pr => pr.id === profileId)) list.unshift({ id: profileId });
+      }
       profileSelect.innerHTML = '';
       if (!list.length) {
         profileSelect.innerHTML = '<option value="">New profile — press Save to create it</option>';
@@ -1794,8 +1847,27 @@
           profileSelect.appendChild(o);
         }
       }
-      deleteProfileBtn.disabled = !profileId;
-      deleteProfileBtn.style.opacity = profileId ? '' : '.4';
+      const canDelete = !!profileId && !readOnlyProfile;
+      deleteProfileBtn.disabled = !canDelete;
+      deleteProfileBtn.style.opacity = canDelete ? '' : '.4';
+
+      editLinkNote.style.display = 'none';
+      if (readOnlyProfile) {
+        saveCallout.hidden = false;
+        saveCallout.className = 'callout warn';
+        saveCallout.innerHTML = '<strong>Saved from another browser.</strong> This browser can use this '
+          + 'profile but not change it. Open its edit link from the browser that saved it (a profile made '
+          + 'before edit links existed has its link in the server log), sign in to the dashboard with '
+          + 'ADMIN_TOKEN, or press Save to keep these settings as a new profile of your own.';
+        return;
+      }
+      // With no site password the edit link is the only way to change this
+      // profile from anywhere else, so it is shown wherever this browser has it.
+      const heldKey = state.open && state.exists && profileId && profileKeys()[profileId];
+      if (heldKey && state.url) {
+        editLinkInput.value = state.url.replace(/\/manifest\.json$/, '/configure') + '#key=' + heldKey;
+        editLinkNote.style.display = '';
+      }
 
       if (state.durable === false) {
         saveCallout.hidden = false;
@@ -1850,13 +1922,16 @@
       try {
         const res = await fetch('/api/config/save', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: profileId || undefined, config: currentConfig })
+          headers: { 'Content-Type': 'application/json', ...keyHeaders(profileId) },
+          // A profile this browser may not change is saved as a new one.
+          body: JSON.stringify({ id: (!readOnlyProfile && profileId) || undefined, config: currentConfig })
         });
         const body = await res.json().catch(() => ({}));
         if (res.ok && body.saved) {
           // The server owns the id, so take whatever it minted.
           if (body.id) profileId = body.id;
+          if (body.editKey) rememberProfileKey(body.id, body.editKey);
+          readOnlyProfile = false;
           // The address bar still holds the config as it was when this page
           // opened -- /saved/configure redirects to a snapshot of it, and that
           // snapshot does not move when a save does. Reloading would rebuild

@@ -35,7 +35,8 @@ try {
 }
 
 function crestKey(url) {
-  const m = /\/teamlogos\/([^/]+)\/\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url || ''));
+  // Rugby crests carry an extra "teams" segment: teamlogos/rugby/teams/500/<id>.png.
+  const m = /\/teamlogos\/([^/]+)\/(?:teams\/)?\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url || ''));
   return m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : '';
 }
 
@@ -400,7 +401,19 @@ function resolveMatchup(match) {
   const fromTable = (side, ambiguous) =>
     ambiguous ? null : lookupTeam(side, match.category, scope);
 
-  const dedupe = list => [...new Set(list.filter(Boolean))];
+  // One crest, one candidate. ESPN serves the same crest again under
+  // /scoreboard/ (the Raiders' copy is a 4096-pixel, 572 KB file), and as a
+  // "second choice" it only doubled the fetches each card queued on one host.
+  const dedupe = list => {
+    const seen = new Set();
+    return list.filter(u => {
+      if (!u) return false;
+      const k = crestKey(u) || u;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
   const aLogos = dedupe([fromTable(a, undecidable(a, inA)), providedLogo(match.team1)]);
   const bLogos = dedupe([fromTable(b, undecidable(b, inB)), providedLogo(match.team2)]);
 
@@ -414,9 +427,16 @@ function resolveMatchup(match) {
   };
 }
 
+/** Forget every name-to-crest answer, for "Clear everything". */
+function clearMemo() {
+  cache.clear();
+}
+
 module.exports = {
   resolveMatchup,
   canonicalName,
+  crestKey,
+  clearMemo,
   resolvingLeagues,
   lookupTeam,
   splitSides,

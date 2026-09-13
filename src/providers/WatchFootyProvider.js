@@ -165,7 +165,7 @@ class WatchFootyProvider extends BaseProvider {
                     const m3u8Url = await extractSportsEmbed(s.url);
                     if (m3u8Url) {
                         console.log(`[WatchFootyProvider] Successfully extracted M3U8: ${redactUrl(m3u8Url)}`);
-                        const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent('https://sportsembed.su/')}&origin=${encodeURIComponent('https://sportsembed.su')}`;
+                        const proxyUrl = `${BASE_URL}${require('../manifestLink').manifestPath(m3u8Url, 'https://sportsembed.su/', 'https://sportsembed.su')}`;
                         entityParams.url = proxyUrl;
                         entityParams.behaviorHints = { notWebReady: true };
                         streams.push(new StreamEntity(entityParams));

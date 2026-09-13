@@ -294,7 +294,7 @@ class TimStreamsProvider extends BaseProvider {
         if (m3u8Url) {
           console.log(`[${this.name}] Extracted M3U8 for ${matchTitle}: ${redactUrl(m3u8Url)}`);
           const { BASE_URL } = require('../config');
-          const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
+          const proxyUrl = `${BASE_URL}${require('../manifestLink').manifestPath(m3u8Url, referer, new URL(referer).origin)}`;
             
           streams.push(new StreamEntity({
             name: 'TimStreams',

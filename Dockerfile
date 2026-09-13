@@ -41,6 +41,11 @@ ENV PORT=7000
 ENV NODE_ENV=production
 EXPOSE 7000
 
+# Lets Docker report the container as unhealthy, not merely running. The slim
+# image has no curl, so node asks.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||7000)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
 # Start server directly with node
 CMD ["node", "dist/index.js"]
 

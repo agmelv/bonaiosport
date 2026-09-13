@@ -9,13 +9,15 @@ const { addonBuilder } = require('stremio-addon-sdk');
 const { GENRES } = require('./channelGenres');
 
 const manifest = {
-  id: 'community.nuvio.live-sports',
+  // Its own id, not upstream's. Sharing 'community.nuvio.live-sports' made the
+  // two addons look like one to anything that keys installed addons by id.
+  id: 'community.aiosports',
   version: '1.0.1',
   name: 'AIOSports',
   description:
-    'The ultimate live sports aggregator. Stream live Football, NBA, NFL, NHL, F1, and more. ' +
-    'Scrapes high-speed streams from multiple providers including StreamFree, TimStreams, and IPTV. Zero-lag proxy included.',
-  logo: '/logo.png',
+    'Live sports fixtures and 24/7 channels from several public sources, gathered into one catalog ' +
+    'with artwork for every event and channel. Self-hosted.',
+  logo: '/logo-v2.png',
 
   types: ['tv'],
   resources: ['catalog', 'meta', 'stream'],

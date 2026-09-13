@@ -32,6 +32,11 @@ const LEAGUE_LOGOS = {};
 // the whole catalog.
 const TEAM_NAMES = {};
 
+// crest key -> ESPN's official [color, alternateColor] for that team. Cards
+// paint each half in the team's colours; a crest's own pixels are a poor
+// witness (a silver-and-black shield has no colour in it at all).
+const TEAM_COLORS = {};
+
 // Which competitions each crest turns up in, keyed by crest rather than by name.
 // A card already knows the crest it resolved for each side, so a crest is the
 // one identifier that needs no disambiguation to look a competition up by.
@@ -268,6 +273,14 @@ function addTeams(candidates, teams, slug, comp) {
     // First league to name a crest wins; the same club reached through a
     // continental cup carries the same name anyway.
     if (ck && team.displayName && !TEAM_NAMES[ck]) TEAM_NAMES[ck] = String(team.displayName).trim();
+    // Official colours, the same way: the first league to name the crest wins.
+    if (ck && !TEAM_COLORS[ck]) {
+      const hex = v => (/^[0-9a-f]{6}$/i.test(String(v || '')) ? String(v).toLowerCase() : null);
+      const colors = [hex(team.color), hex(team.alternateColor)].filter(Boolean);
+      // Black and c60000 is ESPN's stand-in for "no colours on file".
+      const standIn = colors.length === 2 && colors[0] === '000000' && colors[1] === 'c60000';
+      if (colors.length && !standIn) TEAM_COLORS[ck] = colors;
+    }
     // A team with no published logo still takes part in the ambiguity check
     // below, it just can't be the answer. Skipping it outright would let a key
     // two clubs answer to resolve to whichever of them happens to have a crest
@@ -427,6 +440,10 @@ async function main() {
   const namesDest = path.join(path.dirname(dest), 'espn-team-names.json');
   fs.writeFileSync(namesDest, JSON.stringify(TEAM_NAMES));
   console.log(`wrote ${path.relative(process.cwd(), namesDest)} — ${Object.keys(TEAM_NAMES).length} canonical names`);
+
+  const colorsDest = path.join(path.dirname(dest), 'espn-team-colors.json');
+  fs.writeFileSync(colorsDest, JSON.stringify(TEAM_COLORS));
+  console.log(`wrote ${path.relative(process.cwd(), colorsDest)} — ${Object.keys(TEAM_COLORS).length} teams' colours`);
 
   const leagueDest = path.join(path.dirname(dest), 'espn-leagues.json');
   fs.writeFileSync(leagueDest, JSON.stringify(LEAGUE_LOGOS));

@@ -97,7 +97,7 @@ class EmbedIndiaProvider extends BaseProvider {
       if (m) {
         console.log(`[EmbedIndia] Native WASM Extracted M3U8: ${redactUrl(m[1])}`);
         const { BASE_URL } = require('../config');
-        const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m[1])}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+        const proxyUrl = `${BASE_URL}${require('../manifestLink').manifestPath(m[1], referer, origin)}`;
 
         return new StreamEntity({
           name: 'EmbedIndia',

@@ -1,31 +1,31 @@
 services:
-  nuvio:
+  aiosports:
     build: .
-    container_name: nuvio-live-sports
+    container_name: aiosports
     ports:
       - "7000:7000"
+    # Everything in .env reaches the app: ADDON_URL, AUTH_KEY, ADMIN_TOKEN and
+    # the rest of .env.example. Optional, so the stack still starts without one.
+    # Needs Docker Compose v2.24 or newer.
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # The port inside the container. To use another port on your machine,
+      # change the left-hand side of "7000:7000" above instead.
       - PORT=7000
       # Kickoff times for viewers who have not picked a timezone in /configure
       - TZ=${TZ:-America/New_York}
-      # If you are hosting this on a public VPS, set your domain or IP
-      # - ADDON_URL=http://your-server-ip:7000
-      #
-      # Sign-in. Both optional; an empty value leaves that door open.
-      # AUTH_KEY guards the catalog and configure pages, ADMIN_TOKEN the
-      # dashboard and anything that changes state. The addon's own endpoints
-      # (manifest, catalogs, streams, artwork) are never gated -- Nuvio cannot
-      # sign in, so gating them would stop the addon working.
+      # Also taken from the shell or a stack's own variables, for setups with
+      # no .env file beside this one (Portainer, CI, exported variables).
+      - ADDON_URL=${ADDON_URL:-}
       - AUTH_KEY=${AUTH_KEY:-}
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
-      # Pause between cards while warming the poster cache in the background.
-      - WARM_GAP_MS=${WARM_GAP_MS:-250}
-      # Where a saved configuration is written. The volume below is what
-      # makes it outlive a rebuild.
+      - LINK_SECRET=${LINK_SECRET:-}
+      # Where saved profiles are written. The volume below is what makes them
+      # outlive a rebuild.
       - DATA_DIR=/data
     volumes:
-      # Settings saved from /configure. Without this the container keeps
-      # them until it is next rebuilt and then quietly starts over.
       - aiosports-data:/data
     restart: unless-stopped
 

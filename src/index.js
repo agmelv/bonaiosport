@@ -20,7 +20,7 @@
 // -- was read by nobody, and the site stayed open with no sign anything was
 // wrong. Docker escaped it only because Compose does its own .env substitution.
 // `override: false` keeps real environment variables winning over the file.
-require('dotenv').config({ override: false });
+require('dotenv').config({ override: false, quiet: true });
 
 const express = require('express');
 const cors    = require('cors');
@@ -126,6 +126,64 @@ app.set(
 );
 
 app.use(cors());
+app.disable('x-powered-by');
+
+// Per-address ceilings on the routes that cost this server real work or reach
+// out to somebody else's: artwork renders, playlist fetches, embed fetches.
+// Set far above what a household asks for -- one address can be a TV and two
+// phones each opening every tab, and the Channels tab alone is about 540
+// covers -- so they only bite on something hammering the server. A cover
+// refused here is a blank tile in somebody's player. The card warmer comes
+// from loopback and is exempt. RATE_LIMIT=off turns them off.
+const RATE_RULES = [
+  { prefix: '/img', perMinute: 6000 },
+  { prefix: '/api/manifest', perMinute: 1200 },
+  { prefix: '/api/proxy-embed', perMinute: 60 }
+];
+const rateHits = new Map();   // "rule|address" -> { start, count }
+app.use((req, res, next) => {
+  if (/^(0|off|false|no)$/i.test(String(process.env.RATE_LIMIT || '').trim())) return next();
+  // Lower-cased, because Express routes match /API/MANIFEST as readily as
+  // /api/manifest, and a limit that only knew one spelling was no limit.
+  const reqPath = req.path.toLowerCase();
+  const rule = RATE_RULES.find(r => reqPath === r.prefix || reqPath.startsWith(r.prefix + '/'));
+  if (!rule) return next();
+  // Exempt only this process's own loopback requests -- the card warmer. Read
+  // from the socket, not req.ip: behind a private-address peer that forwards
+  // headers as sent, req.ip is whatever X-Forwarded-For claims, 127.0.0.1 included.
+  const peer = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if ((peer === '127.0.0.1' || peer === '::1') && !req.headers['x-forwarded-for']) return next();
+  const address = String(req.ip || '').replace(/^::ffff:/, '');
+  const now = Date.now();
+  const key = rule.prefix + '|' + address;
+  let rec = rateHits.get(key);
+  if (!rec || now - rec.start >= 60000) {
+    rec = { start: now, count: 0 };
+    rateHits.set(key, rec);
+    // Keyed by address, so it is swept, and dropped whole if a flood of
+    // addresses outruns the sweep.
+    if (rateHits.size > 20000) {
+      for (const [k, v] of rateHits) if (now - v.start >= 60000) rateHits.delete(k);
+      if (rateHits.size > 50000) rateHits.clear();
+    }
+  }
+  if (++rec.count > rule.perMinute) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((rec.start + 60000 - now) / 1000))));
+    return res.status(429).send('Too many requests');
+  }
+  next();
+});
+
+// Artwork is drawn from URLs other people control. Whatever comes back, a
+// browser must treat it as an image and nothing more: no sniffing it into a
+// page, and no script even if an SVG gets through.
+app.use('/img', (req, res, next) => {
+  // The warmer steps aside while a player is loading artwork.
+  if (req.get('user-agent') !== cardWarmer.WARMER_UA) cardWarmer.noteClient();
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox");
+  next();
+});
 
 // A saved profile, wearing the URL of an ordinary config.
 //
@@ -171,6 +229,10 @@ app.use((req, res, next) => {
   // editing, and the uuid never has to be decodable for that to work.
   const asPage = rest.match(/^\/configure\/?(\?(.*))?$/);
   if (asPage) {
+    // The redirect carries the whole config in its Location, so it goes only
+    // to someone allowed to open the configure page. Before this, a signed-out
+    // visitor read /saved/configure's settings straight out of the 302.
+    if (process.env.AUTH_KEY && !isAuthed(req)) return res.redirect(302, '/login');
     const extra = asPage[2] ? '&' + asPage[2] : '';
     return res.redirect(302, '/' + encoded + '/configure?profile=' + encodeURIComponent(id) + extra);
   }
@@ -180,28 +242,37 @@ app.use((req, res, next) => {
 });
 
 /**
- * Warm the cards for every sport tab. Runs at boot and after a catalog refresh,
- * so the first person to open a tab finds the work already done.
+ * Every artwork URL the catalogs hand out -- posters, the wide backgrounds a TV
+ * shows in its rows, corner logos -- grouped by catalog, so the warmer can take
+ * the top of every tab before the bottom of any. Upcoming is included: people
+ * open it, and not all of its cards are in the other tabs.
  */
-function startWarm() {
-  return cardWarmer.warm(async () => {
-    const { manifest } = require('./manifest');
-    const ids = (manifest.catalogs || []).map(c => c.id).filter(id => !/_(teams|upcoming)$/.test(id));
-    const posters = [];
-    const logos = [];
-    for (const id of ids) {
-      try {
-        const { metas } = await handleCatalog('tv', id, {}, {});
-        const part = cardWarmer.urlsFrom(metas);
-        posters.push(...part.posters);
-        logos.push(...part.logos);
-      } catch {
-        // One tab failing to enumerate costs that tab's warmth, nothing else.
-      }
+async function collectWarmUrls() {
+  const { manifest } = require('./manifest');
+  const ids = (manifest.catalogs || []).map(c => c.id).filter(id => !/_teams$/.test(id));
+  const perCatalog = [];
+  for (const id of ids) {
+    try {
+      const { metas } = await handleCatalog('tv', id, {}, {}, { revalidate: false });
+      perCatalog.push(cardWarmer.urlsFrom(metas));
+    } catch {
+      // One tab failing to enumerate costs that tab's warmth, nothing else.
     }
-    return { posters, logos };
-  }).catch(err => console.error('[CardWarmer]', err.message));
+  }
+  return { perCatalog };
 }
+
+/**
+ * Warm the cards. Runs 45 s after boot, after a catalog re-sync (at most every
+ * ten minutes), every WARM_INTERVAL_MS from the last run, straight after the
+ * cache is cleared, and from the dashboard's Warm button.
+ */
+function startWarm(reason = 'manual') {
+  return Promise.resolve(cardWarmer.warm(collectWarmUrls, reason))
+    .catch(err => console.error('[CardWarmer]', err.message));
+}
+
+const WARM_INTERVAL_MS = Number(process.env.WARM_INTERVAL_MS) || 4 * 60 * 60 * 1000;
 
 // Serve the web debugger UI and Configuration Page
 app.use(guardStaticPages);
@@ -222,7 +293,7 @@ app.post('/api/login', (req, res) => {
   if (!key) return res.json({ authenticated: true, keyRequired: false });
   if (throttled(req)) return res.status(429).json({ error: 'Too many failed sign-ins. Wait a few minutes.' });
   if (!isAuthed(req)) {
-    noteFailure(req);
+    noteFailureOnce(req);
     return res.status(403).json({ error: 'That password was not accepted.' });
   }
   FAILURES.delete(failureKey(req));
@@ -290,12 +361,17 @@ app.get('/api/config/saved', (req, res) => {
     exists: !!saved,
     durable: savedConfigIsDurable(),
     url: base + (id === LEGACY_ID ? '/saved' : '/p/' + id) + '/manifest.json',
-    // Only to someone signed in. The uuid IS the secret -- it is the entire
-    // reason a profile is private -- so handing the list to anyone who asks
-    // would give away every profile on the server. The earlier note here
-    // reasoned that the configs were not included; that missed the point,
-    // because the id alone is enough to read one.
-    profiles: isAuthed(req)
+    // Whether this caller may change it: signed in with a real key, or holding
+    // the profile's own edit key (see mayEditProfile).
+    canEdit: !!saved && mayEditProfile(req, id),
+    // No AUTH_KEY: profiles are guarded by their edit keys alone.
+    open: !process.env.AUTH_KEY,
+    // Only to someone signed in with a real key. The uuid IS the secret -- it
+    // is the entire reason a profile is private -- so handing the list to
+    // anyone who asks would give away every profile on the server. On an
+    // instance with no AUTH_KEY everybody counts as signed in, which is why
+    // this is not isAuthed().
+    profiles: ownsEverything(req)
       ? listProfiles().map(pid => ({
           id: pid,
           url: base + (pid === LEGACY_ID ? '/saved' : '/p/' + pid) + '/manifest.json'
@@ -316,29 +392,51 @@ app.post('/api/config/save', express.json({ limit: '64kb' }), (req, res) => {
   }
 
   // No id means "make me a new one". An id must already exist, so a caller
-  // cannot choose where their profile lands or overwrite one by guessing.
+  // cannot choose where their profile lands, and changing one takes the right
+  // to: a real sign-in, or that profile's edit key.
   let id = typeof req.body.id === 'string' ? req.body.id : '';
+  let editKey = '';
   if (!id) {
+    // Where anybody may create one, there is a ceiling on how many, or a
+    // script could fill the disk with them.
+    if (!ownsEverything(req) && listProfiles().length >= OPEN_PROFILE_LIMIT) {
+      return res.status(403).json({ error: 'This server has reached its limit of saved profiles.' });
+    }
     id = crypto.randomUUID();
+    editKey = crypto.randomBytes(24).toString('base64url');
   } else if (id !== LEGACY_ID && !UUID_RE.test(id)) {
     return res.status(400).json({ error: 'Not a profile id.' });
+  } else if (!loadProfile(id) && !(id === LEGACY_ID && ownsEverything(req))) {
+    return res.status(404).json({ error: 'No such profile. Press New profile and save to create one.' });
+  } else if (!mayEditProfile(req, id)) {
+    return res.status(403).json({
+      error: 'This profile was saved from another browser. Open its edit link to change it, '
+        + 'sign in to the dashboard with ADMIN_TOKEN, or press New profile and save your own.'
+    });
   }
 
   try {
+    // The key first: a profile written without one could never be changed.
+    if (editKey) writeEditKey(id, editKey);
     writeProfile(id, config);
   } catch (err) {
+    console.error('[profiles] could not write', id, err.message);
     return res.status(500).json({
-      error: `Could not write the profile: ${err.message}. ` +
+      error: 'Could not write the profile. ' +
              'Mount a volume at the data directory (see the README) or set DATA_DIR somewhere writable.'
     });
   }
 
   const base = getRequestBaseUrl(req);
+  const home = base + (id === LEGACY_ID ? '/saved' : '/p/' + id);
   res.json({
     saved: true,
     id,
     durable: savedConfigIsDurable(),
-    url: base + (id === LEGACY_ID ? '/saved' : '/p/' + id) + '/manifest.json'
+    url: home + '/manifest.json',
+    // Handed over once. It is what lets this profile be changed from another
+    // device when there is no AUTH_KEY; the server keeps only its hash.
+    ...(editKey ? { editKey, editUrl: home + '/configure#key=' + editKey } : {})
   });
 });
 
@@ -347,7 +445,11 @@ app.delete('/api/config/saved', (req, res) => {
   const id = typeof req.query.id === 'string' ? req.query.id : '';
   const file = profilePath(id);
   if (!file) return res.status(400).json({ error: 'Not a profile id.' });
+  if (!mayEditProfile(req, id)) {
+    return res.status(403).json({ error: 'Only the browser that saved this profile, or someone signed in, can delete it.' });
+  }
   try { fs.unlinkSync(file); } catch (e) { /* already gone */ }
+  try { fs.unlinkSync(editKeyPath(id)); } catch (e) { /* never had one */ }
   _profiles.delete(id);
   res.json({ deleted: true, id });
 });
@@ -397,6 +499,36 @@ function noteFailure(req) {
   }
 }
 
+/** Count a failure at most once per request, however many checks saw it. */
+function noteFailureOnce(req) {
+  if (req._failureNoted) return;
+  req._failureNoted = true;
+  noteFailure(req);
+}
+
+/**
+ * Compare a password a caller supplied in a header or the query string.
+ *
+ * Every wrong one counts toward the same lockout as the sign-in forms, and a
+ * caller already locked out is not compared at all. Only the forms used to
+ * count, so /api/site/auth?key=… and /api/cache/auth?token=… answered "right"
+ * or "wrong" to as many guesses as anyone cared to send.
+ *
+ * Compared as bytes. A password with any character outside ASCII has a byte
+ * length that differs from its string length, and timingSafeEqual throws on a
+ * length mismatch -- so comparing string lengths first would have turned one
+ * accented character in the password into a 500 on every attempt.
+ */
+function suppliedSecretMatches(req, given, secret) {
+  if (!given) return false;
+  if (throttled(req)) return false;
+  const a = Buffer.from(String(given), 'utf8');
+  const b = Buffer.from(secret, 'utf8');
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) return true;
+  noteFailureOnce(req);
+  return false;
+}
+
 /**
  * A signed, expiring ticket for the browser. The password itself never goes in
  * the cookie -- this is an HMAC over the expiry keyed by the password, so a
@@ -437,14 +569,7 @@ function isAdmin(req) {
   const token = process.env.ADMIN_TOKEN;
   if (token) {
     if (ticketValid(cookieValue(req, ADMIN_COOKIE), token)) return true;
-    const given = req.get('x-admin-token') || req.query.token || '';
-    // Compare as bytes. A password with any character outside ASCII has a byte
-    // length that differs from its string length, and timingSafeEqual throws on
-    // a length mismatch -- so comparing string lengths first would have turned
-    // one accented character in the password into a 500 on every attempt.
-    const a = Buffer.from(String(given), 'utf8');
-    const b = Buffer.from(token, 'utf8');
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
+    return suppliedSecretMatches(req, req.get('x-admin-token') || req.query.token || '', token);
   }
   // No token, no admin. There used to be a fallback here that granted admin to
   // any caller on a private address, and under Docker -- which is how almost
@@ -461,12 +586,17 @@ function isAdmin(req) {
 }
 
 function requireAdmin(req, res) {
+  // A signed-in admin's cookie is honoured before the lockout. The lockout is
+  // counted per address, and wrong guesses from a shared one -- a household,
+  // carrier NAT -- must not shut out the admin who has already signed in.
+  const token = process.env.ADMIN_TOKEN;
+  if (token && ticketValid(cookieValue(req, ADMIN_COOKIE), token)) return true;
   if (throttled(req)) {
     res.status(429).json({ error: 'Too many failed sign-ins. Wait a few minutes and try again.' });
     return false;
   }
   if (isAdmin(req)) { FAILURES.delete(failureKey(req)); return true; }
-  noteFailure(req);
+  noteFailureOnce(req);
   // Say which rule is actually in force. Telling someone who has already set a
   // token to go and set one sends them to check a setting that is already right.
   res.status(403).json({
@@ -517,10 +647,7 @@ function isAuthed(req) {
   if (!key) return true;                       // no site key configured: open
   if (isAdmin(req)) return true;               // admin implies access
   if (ticketValid(cookieValue(req, AUTH_COOKIE), key)) return true;
-  const given = req.get('x-auth-key') || req.query.key || '';
-  const a = Buffer.from(String(given), 'utf8');
-  const b = Buffer.from(key, 'utf8');
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return suppliedSecretMatches(req, req.get('x-auth-key') || req.query.key || '', key);
 }
 
 /**
@@ -568,13 +695,23 @@ app.get('/api/cache/stats', (req, res) => {
 app.post('/api/cache/clear', (req, res) => {
   if (!requireAdmin(req, res)) return;
   const what = String(req.query.what || 'all');
-  res.json({ cleared: imageService.clearCache(what), what });
+  if (!['cards', 'upstream', 'all'].includes(what)) {
+    return res.status(400).json({ error: 'what must be cards, upstream or all' });
+  }
+  const cleared = imageService.clearCache(what);
+  // Emptying the server's caches changes nothing a player already holds: they
+  // keep images by URL. A new generation gives every card a new URL, the
+  // catalogs (sent no-cache) hand those out on the next open, and the warmer
+  // starts drawing them now rather than on the next browse.
+  const generation = require('./services/ArtGeneration').bump('clear:' + what);
+  cardWarmer.restart(collectWarmUrls, 'clear').catch(err => console.error('[CardWarmer]', err.message));
+  res.json({ cleared, what, generation, warmer: cardWarmer.status() });
 });
 
 app.post('/api/cache/warm', (req, res) => {
   if (!requireAdmin(req, res)) return;
   if (cardWarmer.status().running) return res.json({ started: false, reason: 'already running', warmer: cardWarmer.status() });
-  startWarm();
+  startWarm('manual');
   res.json({ started: true, warmer: cardWarmer.status() });
 });
 
@@ -607,11 +744,17 @@ const homeAwayService = require('./services/HomeAwayService');
 // catalog falls back to reading orientation off the title separator.
 homeAwayService.ensureFresh().catch(() => {});
 
+const PASSTHROUGH_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
+
 app.get('/img/placeholder', async (req, res) => {
-  const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  await imageService.sendCard(req, res, svg, 'public, max-age=86400, stale-while-revalidate=604800');
+  if (imageService.sendCachedCard(req, res)) return;
+  const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333');
+  const current = imageService.isCurrentArt(req);
+  await imageService.sendCard(req, res, svg,
+    current ? imageService.CACHE_CONTROL.FULL : imageService.CACHE_CONTROL.STALE_URL,
+    { remember: current });
 });
 
 app.get('/img', async (req, res) => {
@@ -621,15 +764,24 @@ app.get('/img', async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
   const entry = await imageService.getImage(req.query.url);
-  if (entry) {
-    res.setHeader('Content-Type', entry.contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-    return res.send(entry.buffer);
+  // Passed on as it arrived only in a format that cannot carry script.
+  // Anything else that decodes -- an SVG above all -- is redrawn as a PNG.
+  // The redrawn copy rides on the cached entry, so it is drawn once per fetch.
+  const image = entry && (PASSTHROUGH_IMAGE_TYPES.has(entry.contentType)
+    ? entry
+    : (entry.png || (entry.png = await imageService.toPng(entry.buffer))));
+  if (image) {
+    res.setHeader('Content-Type', image.contentType);
+    // A copy past its freshness is being replaced right now: kept briefly.
+    res.setHeader('Cache-Control', imageService.isStaleEntry(entry)
+      ? imageService.CACHE_CONTROL.SECOND_CHOICE
+      : imageService.CACHE_CONTROL.FULL);
+    return res.send(image.buffer);
   }
   // Upstream image unavailable: a generated card stands in, rasterised like
   // every other generated card so it doesn't arrive as an SVG a client can't draw.
   const svg = imageService.svgPlaceholder(text, color);
-  await imageService.sendCard(req, res, svg, 'public, max-age=300');
+  await imageService.sendCard(req, res, svg, imageService.CACHE_CONTROL.FALLBACK);
 });
 
 // /img/event?text=&mark=&mark2=&kicker=&color=  -> badge card for an event that
@@ -646,6 +798,7 @@ app.get('/img/event', async (req, res) => {
   // without fetching its logo again.
   if (imageService.sendCachedCard(req, res)) return;
 
+  const current = imageService.isCurrentArt(req);
   const M = await firstImage([req.query.mark, req.query.mark2].filter(Boolean));
   const coverParam = req.query.cover === '1';
   if (!M) {
@@ -658,10 +811,12 @@ app.get('/img/event', async (req, res) => {
       const asked = !!(req.query.mark || req.query.mark2);
       return imageService.sendCard(req, res,
         imageService.svgEvent(text, null, color, { kicker: req.query.kicker || '', cover: true }),
-        asked ? 'no-store' : 'public, max-age=86400, stale-while-revalidate=604800',
-        { remember: !asked });
+        asked
+          ? imageService.CACHE_CONTROL.FALLBACK
+          : (current ? imageService.CACHE_CONTROL.FULL : imageService.CACHE_CONTROL.STALE_URL),
+        { remember: !asked && current });
     }
-    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), 'public, max-age=300');
+    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), imageService.CACHE_CONTROL.FALLBACK);
   }
   // A channel cover sits its logo straight on flat grey, so a logo that ships
   // on its own solid rectangle has that rectangle taken out first.
@@ -674,6 +829,9 @@ app.get('/img/event', async (req, res) => {
       : M.entry;
   // The logo's own size, so the cover never draws it larger than it is.
   const size = coverParam ? await imageService.imageSize(entry.buffer) : { width: 0, height: 0 };
+  // The second mark stood in for a first one that failed a moment ago, or the
+  // logo drawn is a copy past its freshness that is being replaced right now.
+  const secondChoice = (!!req.query.mark && M.url !== req.query.mark) || imageService.isStaleEntry(M.entry);
   return imageService.sendCard(
     req, res,
     imageService.svgEvent(text, entry, color, {
@@ -684,11 +842,13 @@ app.get('/img/event', async (req, res) => {
       markW: size.width,
       markH: size.height
     }),
-    'public, max-age=86400, stale-while-revalidate=604800',
+    secondChoice
+      ? imageService.CACHE_CONTROL.SECOND_CHOICE
+      : (current ? imageService.CACHE_CONTROL.FULL : imageService.CACHE_CONTROL.STALE_URL),
     // Kept only when the first-choice logo is the one drawn. A card made from
     // the fallback because the preferred logo failed a moment ago should be
-    // drawn again next time, not served for twelve hours.
-    { remember: !req.query.mark || M.url === req.query.mark }
+    // drawn again soon -- not kept for a day by the player or twelve hours here.
+    { remember: !secondChoice && current }
   );
 });
 
@@ -706,10 +866,29 @@ app.get('/img/event', async (req, res) => {
 // usual second candidate is a dead provider URL that 404s instantly and then
 // sits in getImage()'s negative cache.
 const firstImage = async (urls) => {
-  const entries = await Promise.all(urls.map(url => imageService.getImage(url)));
-  const i = entries.findIndex(e => e && e.buffer);
-  return i === -1 ? null : { entry: entries[i], url: urls[i] };
+  // All started together, taken in order: a first choice that has arrived is
+  // used without waiting on a slower second one.
+  const pending = urls.map(url => imageService.getImage(url));
+  for (let i = 0; i < pending.length; i++) {
+    const entry = await pending[i];
+    if (entry && entry.buffer) return { entry, url: urls[i] };
+  }
+  return null;
 };
+
+// Cards drawn around something missing, logged at most once per URL per ten
+// minutes: enough to see a burst of misses in `docker logs`, not enough to
+// drown it.
+const artFallbackSeen = new Map();
+function logArtFallback(kind, req) {
+  const key = kind + '|' + req.originalUrl;
+  const now = Date.now();
+  if (now - (artFallbackSeen.get(key) || 0) < 10 * 60 * 1000) return;
+  artFallbackSeen.set(key, now);
+  if (artFallbackSeen.size > 2000) artFallbackSeen.delete(artFallbackSeen.keys().next().value);
+  const short = v => String(v || '').slice(0, 40);
+  console.log(`[art] matchup ${kind}: ${short(req.query.a)} vs ${short(req.query.b)} (${short(req.get('user-agent'))})`);
+}
 
 app.get('/img/matchup', async (req, res) => {
   const a = req.query.a || '';
@@ -718,33 +897,56 @@ app.get('/img/matchup', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
+  // A card drawn before -- by a player or by the warmer -- goes straight out.
+  if (imageService.sendCachedCard(req, res)) return;
+
   // The poster is fetched alongside the crests rather than after they fail:
   // it is only ever needed on the failure path, but waiting to find that out
   // would serialise a second timeout onto the first.
-  const [A, B, poster] = await Promise.all([
+  const posterPending = req.query.fb ? imageService.getImage(req.query.fb) : null;
+  const [A, B] = await Promise.all([
     firstImage([req.query.al, req.query.al2].filter(Boolean)),
-    firstImage([req.query.bl, req.query.bl2].filter(Boolean)),
-    req.query.fb ? imageService.getImage(req.query.fb) : null
+    firstImage([req.query.bl, req.query.bl2].filter(Boolean))
   ]);
+  const askedA = !!(req.query.al || req.query.al2);
+  const askedB = !!(req.query.bl || req.query.bl2);
+  const missed = (!A && askedA) || (!B && askedB);
+  const poster = missed && posterPending ? await posterPending : null;
 
-  if ((!A || !B) && poster && poster.buffer) {
+  // Held to the same formats as /img, for the same reason: fb= is a URL anyone
+  // can write.
+  const posterArt = poster && poster.buffer
+    ? (PASSTHROUGH_IMAGE_TYPES.has(poster.contentType)
+      ? poster
+      : (poster.png || (poster.png = await imageService.toPng(poster.buffer))))
+    : null;
+
+  // What players may keep follows from what was actually drawn. Anything drawn
+  // around a crest that missed is no-store: a player told it may keep one for
+  // an hour kept the Dolphins as a line of text on a TV long after the server
+  // had the crest again.
+  const decision = imageService.matchupDecision({
+    A, B, askedA, askedB, al: req.query.al, bl: req.query.bl,
+    posterUsed: !!posterArt, current: imageService.isCurrentArt(req),
+    stale: imageService.isStaleEntry(A && A.entry) || imageService.isStaleEntry(B && B.entry)
+  });
+  res.setHeader('X-Art-Kind', decision.kind);
+  if (decision.kind !== 'full') logArtFallback(decision.kind, req);
+
+  if (posterArt) {
     // A half-resolved card loses to real provider artwork, same as before —
     // but decided here, on what actually fetched, not on what the catalog hoped.
-    // Short TTL: this path is only reached because a crest fetch failed, and
-    // if that was transient the next request should get the crests back.
-    res.setHeader('Content-Type', poster.contentType);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.send(poster.buffer);
+    res.setHeader('Content-Type', posterArt.contentType);
+    res.setHeader('Cache-Control', decision.cacheControl);
+    return res.send(posterArt.buffer);
   }
 
   if (!A && !B) {
-    // Nothing resolved: the plain name card rather than an empty frame. Short
-    // TTL so a transient upstream failure doesn't pin a name card for a day.
-    return imageService.sendCard(req, res, imageService.svgPlaceholder(`${a}\nvs\n${b}`, color), 'public, max-age=300');
+    // Nothing resolved: the plain name card rather than an empty frame.
+    return imageService.sendCard(req, res, imageService.svgPlaceholder(`${a}\nvs\n${b}`, color),
+      decision.cacheControl, { remember: decision.remember });
   }
 
-  // One-sided cards get a shorter TTL too: the missing crest may just have
-  // been an upstream hiccup, and the next request should get a chance at it.
   // A background wants the same card drawn larger. Bounded, because the size
   // is in the URL and rasterising is the expensive part of serving one.
   const size = {};
@@ -758,15 +960,19 @@ app.get('/img/matchup', async (req, res) => {
     bUrl: B ? B.url : null,
     ...size
   });
-  return imageService.sendCard(req, res, svg, A && B
-    ? 'public, max-age=86400, stale-while-revalidate=604800'
-    : 'public, max-age=3600');
+  return imageService.sendCard(req, res, svg, decision.cacheControl, { remember: decision.remember });
 });
 
 // ─── Shared safe HTTP client (impit + undici fallback) ───────────────────────
 // Works on Windows, Linux x64/ARM64, Alpine/musl. If impit native binary is
 // absent, all fetches silently use undici — streams continue to work.
 const { safeFetch: _safeFetch } = require('./impitClient');
+const { assertPublicUrl, publicAgent } = require('./netGuard');
+const { manifestPath, verifyManifestQuery } = require('./manifestLink');
+
+// A playlist is kilobytes. Anything past this is not one.
+const MANIFEST_MAX_BYTES = 2 * 1024 * 1024;
+const MANIFEST_MAX_REDIRECTS = 3;
 
 // ─── Manifest proxy: short-TTL cache + request coalescing ───────────────────
 // Live HLS players reload /api/manifest every 2-6 s per viewer. A validated
@@ -855,17 +1061,37 @@ async function fetchUpstreamManifest(targetUrl, referer, origin) {
   // A live playlist that takes longer than this is already useless to the player,
   // which polls every few seconds. The budget now covers the whole call rather
   // than each attempt, so this is the real ceiling.
-  const result = await _safeFetch(targetUrl, { headers, timeoutMs: 4000 });
-  if (!result.ok) throw new Error(`HTTP ${result.status}`);
-  return await result.text();
+  //
+  // Redirects are followed here, one hop at a time, rather than inside the
+  // client, so every address the fetch is sent to passes the private-address
+  // check and not just the first. The body is capped for the same reason the
+  // link is signed: the upstream is somebody else's server.
+  const deadline = Date.now() + 4000;
+  let url = targetUrl;
+  for (let hop = 0; hop <= MANIFEST_MAX_REDIRECTS; hop++) {
+    await assertPublicUrl(url);
+    const left = deadline - Date.now();
+    if (left <= 0) throw new Error('timeout');
+    const result = await _safeFetch(url, {
+      headers, timeoutMs: left, redirect: 'manual', maxBytes: MANIFEST_MAX_BYTES, dispatcher: publicAgent
+    });
+    if (result.status >= 300 && result.status < 400 && result.location) {
+      url = new URL(result.location, url).toString();
+      continue;
+    }
+    if (!result.ok) throw new Error(`HTTP ${result.status}`);
+    return { body: await result.text(), url };
+  }
+  throw new Error('too many redirects');
 }
 
 app.get('/api/manifest', async (req, res) => {
+  // Only links this server minted. Anything else was an open proxy that
+  // fetched whatever it was given from the owner's connection (manifestLink.js).
+  if (!verifyManifestQuery(req.query)) return res.status(403).send('Invalid stream link');
   const targetUrl = req.query.url;
   const referer = req.query.referer || 'https://embed.st/';
   const origin = req.query.origin || 'https://embed.st';
-
-  if (!targetUrl) return res.status(400).send('Missing url');
 
   const cacheKey = `${targetUrl}|${referer}|${origin}`;
   const entry = manifestCacheGet(cacheKey);
@@ -886,7 +1112,7 @@ app.get('/api/manifest', async (req, res) => {
     let fetchPromise = manifestInFlight.get(cacheKey);
     if (!fetchPromise) {
       fetchPromise = (async () => {
-        const out = await fetchUpstreamManifest(targetUrl, referer, origin);
+        const { body: out, url: finalUrl } = await fetchUpstreamManifest(targetUrl, referer, origin);
         if (!out.includes('#EXT')) {
           console.error('[ManifestProxy] Upstream returned non-m3u8 body for', targetUrl);
           throw new Error('Upstream returned non-m3u8 body');
@@ -900,7 +1126,9 @@ app.get('/api/manifest', async (req, res) => {
 
           let absoluteUrl = l;
           try {
-            const chunkUrl = new URL(l, targetUrl);
+            // Relative to where the playlist was actually served from, which
+            // after a redirect is not the address that was asked for.
+            const chunkUrl = new URL(l, finalUrl);
             const manifestUrl = new URL(targetUrl);
 
             manifestUrl.searchParams.forEach((val, key) => {
@@ -914,7 +1142,7 @@ app.get('/api/manifest', async (req, res) => {
           }
 
           if (absoluteUrl.includes('.m3u8')) {
-            return `/api/manifest?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+            return manifestPath(absoluteUrl, referer, origin);
           }
 
           if ((absoluteUrl.includes('.image') || absoluteUrl.includes('.js')) && !absoluteUrl.includes('.ts') && !absoluteUrl.includes('.m3u8')) {
@@ -969,11 +1197,13 @@ app.get('/api/manifest', async (req, res) => {
     const fails = (manifestFailures.get(cacheKey) || 0) + 1;
     manifestFailures.set(cacheKey, fails);
     if (manifestFailures.size > MANIFEST_CACHE_MAX * 2) manifestFailures.clear();
+    // The reason stays in the log. Sent back, "connect ECONNREFUSED ip:port"
+    // told a caller which ports were open on the network behind this server.
     manifestCacheSetNegative(
-      cacheKey, 502, 'Manifest proxy error: ' + err.message,
+      cacheKey, 502, 'Manifest proxy error',
       fails >= 2 ? MANIFEST_NEGATIVE_TTL_MS : MANIFEST_TRANSIENT_TTL_MS
     );
-    return res.status(502).send('Manifest proxy error: ' + err.message);
+    return res.status(502).send('Manifest proxy error');
   }
 });
 
@@ -984,20 +1214,21 @@ app.get('/api/manifest', async (req, res) => {
 //
 // SSRF mitigation: only allowed embed domains are accepted (CG-05 / D-05).
 
+// Checked 2026-09-13 and removed: embedindia.com and embedsport.xyz were not
+// registered, embedstream.top was pending deletion, embedindia.st resolved to
+// 0.0.0.0 and vecloud.net to nothing. A lapsed name on this list is one anyone
+// can buy, and then this route fetches their page for them.
 const ALLOWED_EMBED_DOMAINS = new Set([
-  'embedindia.st',
-  'embedindia.com',
-  'embedsport.xyz',
   'embed.st',
   'embedme.top',
   'embedstream.me',
-  'embedstream.top',
   'streamtape.com',
   'sportsurge.net',
-  'vecloud.net',
   'viprow.me',
   'vipbox.lc',
 ]);
+
+const EMBED_MAX_BYTES = 2 * 1024 * 1024;
 
 const PROXY_EMBED_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -1031,20 +1262,43 @@ app.get('/api/proxy-embed', async (req, res) => {
     };
     if (referer) headers['Referer'] = referer;
 
-    const upstream = await fetch(parsed.toString(), {
-      headers,
-      signal: AbortSignal.timeout(12000),
-      redirect: 'follow'
-    });
+    // Redirects are followed by hand, so every hop is held to the same list
+    // and the same private-address check. Followed automatically, one allowed
+    // domain that redirects was a way to fetch anything at all.
+    const deadline = Date.now() + 12000;
+    let target = parsed;
+    let html = null;
+    for (let hop = 0; hop <= 3 && html === null; hop++) {
+      if (!ALLOWED_EMBED_DOMAINS.has(target.hostname) || !['http:', 'https:'].includes(target.protocol)) {
+        return res.status(403).json({ error: 'The embed redirected outside the allowed domains.' });
+      }
+      await assertPublicUrl(target.toString());
+      const upstream = await _safeFetch(target.toString(), {
+        headers,
+        timeoutMs: Math.max(1000, deadline - Date.now()),
+        redirect: 'manual',
+        maxBytes: EMBED_MAX_BYTES,
+        dispatcher: publicAgent
+      });
+      if (upstream.status >= 300 && upstream.status < 400 && upstream.location) {
+        target = new URL(upstream.location, target);
+        continue;
+      }
+      html = await upstream.text();
+    }
+    if (html === null) return res.status(502).json({ error: 'Failed to fetch embed page' });
 
-    const html = await upstream.text();
-
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    // Plain text, not a page. The extractor on /watch only ever reads it as a
+    // string, and served as HTML from this origin it would run as this site,
+    // with the visitor's sign-in cookies.
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(html);
   } catch (err) {
     console.error(`[proxy-embed] Fetch failed for ${parsed.hostname}: ${err.message}`);
-    res.status(502).json({ error: 'Failed to fetch embed page', detail: err.message });
+    res.status(502).json({ error: 'Failed to fetch embed page' });
   }
 });
 
@@ -1076,6 +1330,8 @@ app.use((req, res, next) => {
   
   if (!isAddonRoute) return next();
 
+  // Catalogs and metas are the lists of artwork addresses.
+  const isList = req.path.includes('/catalog/') || req.path.includes('/meta/');
   const currentBaseUrl = getRequestBaseUrl(req);
   const originalWrite = res.write;
   const originalEnd = res.end;
@@ -1087,6 +1343,35 @@ app.use((req, res, next) => {
 
   res.end = function (chunk, encoding, callback) {
     if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+
+    // A catalog or meta is sent as something a player must not keep, as
+    // AIOMetadata sends its own. Kept, a player goes on naming cards by the
+    // addresses it had; re-read on every open, it picks up new ones the moment
+    // the artwork generation changes. The ETag makes a re-read that finds
+    // nothing new a 304 instead of the whole list.
+    const finish = (buf, enc) => {
+      if (isList && res.statusCode === 200 && !res.headersSent) {
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        const etag = 'W/"' + crypto.createHash('sha1').update(buf).digest('base64url') + '"';
+        res.setHeader('ETag', etag);
+        const offered = String(req.headers['if-none-match'] || '').split(',').map(s => s.trim());
+        if (offered.includes(etag)) {
+          res.statusCode = 304;
+          res.removeHeader('Content-Length');
+          res.removeHeader('Content-Type');
+          return originalEnd.call(res, undefined, undefined, callback);
+        }
+      }
+      // Only for a body that is actually sent: an empty 304 or a HEAD from
+      // Express keeps the headers Express chose.
+      if (!res.headersSent && buf.length && req.method !== 'HEAD'
+        && res.statusCode !== 304 && res.statusCode !== 204) {
+        res.setHeader('Content-Length', buf.length);
+      }
+      return originalEnd.call(res, buf, enc, callback);
+    };
 
     if (chunks.length > 0) {
       const bodyBuffer = Buffer.concat(chunks);
@@ -1145,16 +1430,14 @@ app.use((req, res, next) => {
         if (modified) {
           const newBodyString = JSON.stringify(body);
           const newBuffer = Buffer.from(newBodyString, 'utf8');
-          res.setHeader('Content-Length', newBuffer.length);
-          return originalEnd.call(res, newBuffer, 'utf8', callback);
+          return finish(newBuffer, 'utf8');
         }
       } catch (_) {
         // Not JSON or parse failure; fall through
       }
     }
 
-    const finalBuffer = Buffer.concat(chunks);
-    originalEnd.call(res, finalBuffer, encoding, callback);
+    return finish(Buffer.concat(chunks), encoding);
   };
 
   next();
@@ -1181,10 +1464,10 @@ app.use((req, res, next) => {
  * holds nothing but catalog preferences. Nothing is encrypted into the URL
  * because nothing sensitive is in it -- the config lives here, on disk.
  *
- * Writing still requires signing in, so knowing a uuid lets someone use a
- * profile, never overwrite one.
+ * Changing one takes a real sign-in or that profile's edit key, so knowing a
+ * uuid lets someone use a profile, never overwrite one.
  */
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const { DATA_DIR } = require('./config');
 const PROFILE_DIR = path.join(DATA_DIR, 'profiles');
 // Where the single pre-profile config lived. Still read, still served, so an
 // install made before profiles existed keeps working untouched.
@@ -1194,6 +1477,43 @@ const LEGACY_ID = 'default';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const _profiles = new Map();   // id -> config, read through
+
+// On an instance with no AUTH_KEY everybody "is signed in", so signing in
+// cannot be what stops a stranger rewriting a household's profile. There, a
+// profile is guarded by its own edit key: minted when the profile is created,
+// handed to that browser once, and kept here only as a hash beside it.
+const OPEN_PROFILE_LIMIT = Number(process.env.PROFILE_LIMIT) || 500;
+
+/** Signed in with a real key -- AUTH_KEY set and given, or ADMIN_TOKEN. */
+function ownsEverything(req) {
+  return (!!process.env.AUTH_KEY && isAuthed(req)) || isAdmin(req);
+}
+
+function editKeyPath(id) {
+  const file = profilePath(id);
+  return file ? file.replace(/\.json$/, '.key') : null;
+}
+
+const hashEditKey = key => crypto.createHash('sha256').update(String(key)).digest('hex');
+
+function writeEditKey(id, key) {
+  const file = editKeyPath(id);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, hashEditKey(key), { mode: 0o600 });
+}
+
+/** May this caller change or delete the profile? */
+function mayEditProfile(req, id) {
+  if (ownsEverything(req)) return true;
+  const given = req.get('x-profile-key') || '';
+  const file = editKeyPath(id);
+  if (!given || !file) return false;
+  let want;
+  try { want = fs.readFileSync(file, 'utf8').trim(); } catch (e) { return false; }
+  const a = Buffer.from(hashEditKey(given));
+  const b = Buffer.from(want);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 function profilePath(id) {
   // Never build a path from an unchecked id: a caller supplies it, and '..' in
@@ -1213,7 +1533,9 @@ function loadProfile(id) {
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) config = parsed;
     } catch (e) { config = null; }   // absent or unreadable
   }
-  _profiles.set(id, config);
+  // Only profiles that exist are remembered. Ids that name nothing are whatever
+  // a caller typed, and remembering each of those would grow without end.
+  if (config) _profiles.set(id, config);
   return config;
 }
 
@@ -1244,6 +1566,29 @@ function listProfiles() {
 const loadSavedConfig = () => loadProfile(LEGACY_ID);
 const writeSavedConfig = config => writeProfile(LEGACY_ID, config);
 const SAVED_CONFIG_FILE = LEGACY_CONFIG_FILE;
+
+/**
+ * Profiles saved before edit keys existed have none, and on an instance with no
+ * AUTH_KEY that left them impossible to change -- the install URL in the player
+ * frozen for good. Each gets a key at boot, printed once to this log: whoever
+ * reads the server's log is whoever runs the server.
+ */
+function issueMissingEditKeys() {
+  if (process.env.AUTH_KEY) return;
+  for (const id of listProfiles()) {
+    const file = editKeyPath(id);
+    if (!file || fs.existsSync(file)) continue;
+    const key = crypto.randomBytes(24).toString('base64url');
+    try {
+      writeEditKey(id, key);
+      const home = id === LEGACY_ID ? '/saved' : '/p/' + id;
+      console.log(`[profiles] ${id} had no edit key. Open ${home}/configure#key=${key} on this server to edit it.`);
+    } catch (e) {
+      console.error(`[profiles] could not give ${id} an edit key: ${e.message}`);
+    }
+  }
+}
+issueMissingEditKeys();
 
 /** Whether this directory will still exist after the container is rebuilt. */
 function savedConfigIsDurable() {
@@ -1576,7 +1921,7 @@ app.get('/watch', (req, res) => {
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     @keyframes fadeOut { to { opacity: 0; pointer-events: none; } }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js" integrity="sha384-cciJ0zi8d1uMKC2zJd7jvPY4HQt7W4ByUI/FlMkltvBi31aW61rcpVBhpmW8/NwX" crossorigin="anonymous"></script>
 </head>
 <body>
   <div id="topbar"><span class="dot"></span><span>${safeTitle}</span></div>
@@ -1786,16 +2131,8 @@ app.get('/watch', (req, res) => {
     @keyframes spin { to { transform: rotate(360deg); } }
     #loader .match { font-size: 18px; font-weight: 600; text-align: center; padding: 0 24px; }
     #loader .hint  { font-size: 13px; opacity: 0.5; }
-    
-    #p2p-status {
-      position: fixed; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); color: #0f0;
-      padding: 5px 10px; border-radius: 4px; font-size: 12px; font-family: monospace; z-index: 20;
-      display: none;
-    }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-core@latest/build/p2p-media-loader-core.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-hlsjs@latest/build/p2p-media-loader-hlsjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js" integrity="sha384-cciJ0zi8d1uMKC2zJd7jvPY4HQt7W4ByUI/FlMkltvBi31aW61rcpVBhpmW8/NwX" crossorigin="anonymous"></script>
 </head>
 <body>
   <div id="loader">
@@ -1812,8 +2149,6 @@ app.get('/watch', (req, res) => {
   <button id="fs-btn" tabindex="0" title="Toggle Fullscreen (or Press OK on Remote)">
     <span>\u26F6 Fullscreen</span>
   </button>
-
-  <div id="p2p-status">P2P Active: 0 Peers</div>
 
   <iframe
     id="player"
@@ -1863,7 +2198,6 @@ app.get('/watch', (req, res) => {
     const loader = document.getElementById('loader');
     const iframe = document.getElementById('player');
     const video = document.getElementById('video-player');
-    const p2pStatus = document.getElementById('p2p-status');
     const targetUrl = "${safeUrl}";
     const isM3u8 = targetUrl.includes('.m3u8');
     
@@ -1873,31 +2207,11 @@ app.get('/watch', (req, res) => {
     if (isM3u8) {
       iframe.style.display = 'none';
       video.style.display = 'block';
-      p2pStatus.style.display = 'block';
 
-      if (p2pml.hlsjs.Engine.isSupported()) {
-        const engine = new p2pml.hlsjs.Engine();
-        
-        engine.on('peer_connect', () => {
-           p2pStatus.innerText = 'P2P Active: ' + engine.getSettings().swarmId + ' peers connected';
-        });
-
-        const hls = new Hls({
-          liveSyncDurationCount: 3,
-          liveMaxLatencyDurationCount: 5,
-          lowLatencyMode: true,
-          enableWorker: true,
-          loader: engine.createLoaderClass()
-        });
-
-        p2pml.hlsjs.initHlsJsPlayer(hls);
-        hls.loadSource(finalUrl);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().catch(e => console.log('Autoplay blocked'));
-          loader.classList.add('hidden');
-        });
-      } else if (Hls.isSupported()) {
+      // Plain hls.js. A P2P loader used to run here, which shared every
+      // viewer's address with strangers watching the same stream through
+      // public trackers, and pulled two unpinned scripts onto this origin.
+      if (Hls.isSupported()) {
         const hls = new Hls({
           liveSyncDurationCount: 3,
           liveMaxLatencyDurationCount: 5,
@@ -1932,13 +2246,27 @@ app.get('/watch', (req, res) => {
 // Render pings this to confirm the service is alive
 
 app.get('/health', (_, res) => {
-  let cache = null;
-  try { cache = container.resolve('streamResolveCache').stats(); } catch (_) {}
-  res.json({ status: 'ok', service: 'nuvio-live-sports', streamResolveCache: cache });
+  // Alive, and nothing else. The cache counts that used to ride along named
+  // every provider and how busy each was, to anyone who asked; the dashboard
+  // has them, behind ADMIN_TOKEN.
+  res.json({ status: 'ok', service: 'aiosports' });
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
+// A re-sync that brought new or changed fixtures asks for their artwork to be
+// drawn before anyone opens the tab. A re-sync that changed nothing asks for
+// nothing -- otherwise a warm pass that happened to trigger a re-sync would
+// queue another pass, and that one another. The warmer debounces the rest.
+let lastSyncSignature = null;
+container.resolve('cronService').onSynced = matches => {
+  const signature = crypto.createHash('sha1')
+    .update((matches || []).map(m => `${m.id}|${m.date}|${m.title}`).sort().join('\n'))
+    .digest('base64');
+  if (signature === lastSyncSignature) return;
+  lastSyncSignature = signature;
+  Promise.resolve(cardWarmer.request(collectWarmUrls, 'sync')).catch(() => {});
+};
 container.resolve('cronService').start();
 
 const BIND_HOST = process.env.HOST || process.env.IP || '0.0.0.0';
@@ -1948,11 +2276,17 @@ app.listen(PORT, BIND_HOST, () => {
   console.log('║          🔴 AIOSports                              ║');
   console.log('╠══════════════════════════════════════════════════════╣');
   console.log(`║  Port       : ${String(PORT).padEnd(39)}║`);
-  console.log(`║  Public URL : ${BASE_URL.padEnd(39)}║`);
-  console.log('║                                                      ║');
-  console.log('║  📋 Paste into Nuvio → Settings → Addons:           ║');
-  console.log(`║  ${(BASE_URL + '/manifest.json').padEnd(52)}║`);
   console.log('╚══════════════════════════════════════════════════════╝');
+  // A guessed address is not offered as the one to install. Inside Docker the
+  // guess is the container's own bridge address, which no phone or TV can
+  // reach, and people pasted it straight into their player.
+  if (process.env.ADDON_URL) {
+    console.log(`  Install   : open ${BASE_URL}/configure`);
+  } else {
+    console.log(`  Install   : open http://<this computer's address>:${PORT}/configure in a browser.`);
+    console.log('              Stremio needs https, so set ADDON_URL to your https address');
+    console.log('              once you have one (see the README).');
+  }
   console.log('');
 
   // Say out loud which gates are actually on. Both of these fail open when
@@ -1964,6 +2298,11 @@ app.listen(PORT, BIND_HOST, () => {
   console.log(`  Sign-in   : ${siteKey ? 'AUTH_KEY set' : 'NOT SET — anyone who can reach this can browse it'}`);
   console.log(`  Dashboard : ${adminKey ? 'ADMIN_TOKEN set' : 'NOT SET — dashboard is closed until you set one'}`);
   console.log(`  Proxies   : trust proxy = ${TRUST_PROXY || 'loopback/private only (default)'}`);
+  for (const [name, value] of [['AUTH_KEY', siteKey], ['ADMIN_TOKEN', adminKey]]) {
+    if (value && value.length < 16) {
+      console.log(`  ! ${name} is only ${value.length} characters. Use 16 or more random ones on anything the internet can reach.`);
+    }
+  }
   // Said out loud at every boot, because the failure it warns about only shows
   // up on the *next* deploy -- by which time the settings are already gone.
   const durable = savedConfigIsDurable();
@@ -1982,13 +2321,12 @@ app.listen(PORT, BIND_HOST, () => {
   // and the catalog is real: warming an empty catalog just warms nothing.
   setTimeout(() => {
     console.log('[CardWarmer] warming catalog art in the background');
-    startWarm();
+    startWarm('boot');
   }, 45000);
 
-  // And again on a long cycle, to pick up fixtures that have since appeared.
-  setInterval(() => {
-    if (!cardWarmer.status().running) startWarm();
-  }, 6 * 60 * 60 * 1000);
+  // And again on a cycle anchored on the last run. Re-syncs, which bring new
+  // fixtures all day, also ask for a pass (wired where the cron starts).
+  cardWarmer.schedule(collectWarmUrls, WARM_INTERVAL_MS);
 });
 
 

@@ -47,16 +47,46 @@ const _undiciAgent = new Agent({
   keepAliveMaxTimeout: 30000,
 });
 
+function tooLarge() {
+  const err = new Error('response too large');
+  err.code = 'E_TOO_LARGE';
+  return err;
+}
+
+/**
+ * A body read with a ceiling. For a URL somebody else chose, "read it all" is
+ * an invitation to point it at a file the size of the container's memory.
+ * Takes impit's web stream or undici's Node stream alike.
+ */
+async function readCapped(stream, maxBytes, declaredLength) {
+  if (Number(declaredLength) > maxBytes) {
+    try { if (stream.cancel) await stream.cancel(); else stream.destroy(); } catch (_) {}
+    throw tooLarge();
+  }
+  // A stream released early can emit 'error'; unheard, that ends the process.
+  if (typeof stream.on === 'function') stream.on('error', () => {});
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    total += chunk.byteLength;
+    if (total > maxBytes) throw tooLarge();   // leaving the loop releases the stream
+    chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 // -- Core helper --------------------------------------------------------------
 /**
  * safeFetch - fetches a URL using impit when available, falls back to undici.
  *
  * @param {string} url
- * @param {object} opts   - { method, headers, body, signal, timeoutMs }
- * @returns {{ ok, status, text: () => string, json: () => object }}
+ * @param {object} opts   - { method, headers, body, signal, timeoutMs,
+ *                            redirect ('manual' to get a 3xx back instead of following it),
+ *                            maxBytes (refuse a larger body), dispatcher (for the undici path) }
+ * @returns {{ ok, status, location, text: () => string, json: () => object }}
  */
 async function safeFetch(url, opts = {}) {
-  const { method = 'GET', headers = {}, body, signal, timeoutMs = 15000 } = opts;
+  const { method = 'GET', headers = {}, body, signal, timeoutMs = 15000, redirect, maxBytes = 0, dispatcher } = opts;
   const impit = getImpit();
 
   // One budget for the whole call, not one per attempt. The fallback below used
@@ -71,7 +101,9 @@ async function safeFetch(url, opts = {}) {
     let timer = null;
     try {
       const res = await Promise.race([
-        impit.fetch(url, { method, headers, body, signal: control.signal }),
+        impit.fetch(url, redirect
+          ? { method, headers, body, signal: control.signal, redirect }
+          : { method, headers, body, signal: control.signal }),
         new Promise((_, rej) => {
           timer = setTimeout(() => {
             // Tear the request down as well as giving up on it. Losing the race
@@ -81,14 +113,19 @@ async function safeFetch(url, opts = {}) {
           }, remaining());
         }),
       ]);
-      const textData = await res.text();
+      const textData = maxBytes
+        ? await readCapped(res.body, maxBytes, res.headers.get('content-length'))
+        : await res.text();
       return {
         ok: res.status >= 200 && res.status < 300,
         status: res.status,
+        location: res.headers.get('location') || '',
         text: async () => textData,
         json: async () => JSON.parse(textData),
       };
     } catch (impitErr) {
+      // Too big is an answer about the file, not a fault in impit.
+      if (impitErr && impitErr.code === 'E_TOO_LARGE') throw impitErr;
       // The fallback is for impit being broken, not for impit having already
       // spent the budget. Retrying a host that just failed to answer in the
       // time allowed only spends it twice -- which is how a 4 s budget became
@@ -122,12 +159,15 @@ async function safeFetch(url, opts = {}) {
     signal: signal ? AbortSignal.any([signal, budget]) : budget,
     headersTimeout: left,
     bodyTimeout: left,
-    dispatcher: _undiciAgent,
+    dispatcher: dispatcher || _undiciAgent,
   });
-  const textData = await res.body.text();
+  const textData = maxBytes
+    ? await readCapped(res.body, maxBytes, res.headers['content-length'])
+    : await res.body.text();
   return {
     ok: res.statusCode >= 200 && res.statusCode < 300,
     status: res.statusCode,
+    location: String(res.headers.location || ''),
     text: async () => textData,
     json: async () => JSON.parse(textData),
   };

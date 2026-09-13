@@ -25,15 +25,68 @@ const { request, Agent, interceptors } = require('undici');
 // hands back the redirect itself, the 200-only check in getImage() rejects it,
 // and the card falls back to a name plate — which is why no soccer fixture had
 // a crest. undici 8 dropped the maxRedirections option in favour of this.
-const redirectAgent = new Agent().compose(interceptors.redirect({ maxRedirections: 3 }));
+//
+// Every hop, redirects included, connects through the private-address guard:
+// the URL is whatever a caller put in /img?url=, and without it that was a way
+// to read the Docker host and the home network as pictures.
+const { guardedConnect } = require('../netGuard');
+const redirectAgent = new Agent({ connect: guardedConnect() })
+  .compose(interceptors.redirect({ maxRedirections: 3 }));
 
 // Generated cards are cached for a day by the client, and the URL for a given
 // fixture is the same before and after a change to how they're drawn — so a
 // restyle would leave viewers looking at the old artwork until the TTL expired.
 // Bump this whenever svgMatchup() or svgPlaceholder() changes what they draw;
 // it rides along in every generated image URL and retires the stale copies.
-const RENDER_VERSION = 4;
+const RENDER_VERSION = 5;
 const crestColor = require('./CrestColorService');
+const artGeneration = require('./ArtGeneration');
+
+// The version in every generated URL: how cards are drawn, plus the cache
+// generation that clearing the cache bumps (see ArtGeneration.js).
+function artVersion() {
+  return `${RENDER_VERSION}.${artGeneration.get()}`;
+}
+
+/** Whether a request names today's artwork, not a URL a player kept from before. */
+function isCurrentArt(req) {
+  return String((req && req.query && req.query.v) || '') === artVersion();
+}
+
+// What players are told they may keep. Only a card drawn exactly as intended --
+// first-choice logos, current URL -- is kept for a day. One drawn from a
+// second-choice logo is kept briefly. One drawn around a logo that missed, or a
+// provider poster standing in, is not kept at all, so the next look retries.
+// Players cache by URL: a fallback they were allowed to keep is a wrong card on
+// their screen for as long as they keep it, whatever the server draws meanwhile.
+const CACHE_CONTROL = {
+  FULL: 'public, max-age=86400, stale-while-revalidate=86400',
+  SECOND_CHOICE: 'public, max-age=900',
+  STALE_URL: 'public, max-age=3600',
+  FALLBACK: 'no-store'
+};
+
+/**
+ * How a matchup card may be cached, from what was actually drawn. `A` and `B`
+ * are what firstImage() found ({ url }) or null; `askedA`/`askedB` whether that
+ * side had any crest to try; `al`/`bl` the first-choice crests.
+ */
+function matchupDecision({ A, B, askedA = true, askedB = true, al, bl, posterUsed, current, stale = false }) {
+  if (posterUsed) return { kind: 'poster', cacheControl: CACHE_CONTROL.FALLBACK, remember: false };
+  const missed = (!A && askedA) || (!B && askedB);
+  if (missed || (!A && !B)) {
+    return { kind: !A && !B ? 'name' : 'one-sided', cacheControl: CACHE_CONTROL.FALLBACK, remember: false };
+  }
+  // Drawn from a crest past its freshness while a new copy is fetched -- after
+  // a clear, the copy may be the very thing the clear was meant to be rid of.
+  if (stale) return { kind: 'stale', cacheControl: CACHE_CONTROL.SECOND_CHOICE, remember: false };
+  if ((A && al && A.url !== al) || (B && bl && B.url !== bl)) {
+    return { kind: 'second-choice', cacheControl: CACHE_CONTROL.SECOND_CHOICE, remember: false };
+  }
+  return current
+    ? { kind: 'full', cacheControl: CACHE_CONTROL.FULL, remember: true }
+    : { kind: 'full', cacheControl: CACHE_CONTROL.STALE_URL, remember: false };
+}
 const crypto = require('crypto');
 const sharp = require('sharp');
 
@@ -46,6 +99,18 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // answered 429, GitHub and imgur timed out, and those channels came back as
 // name-only covers.
 const IMAGE_TTL_MS = 6 * 60 * 60 * 1000;
+// Past its TTL a logo is still served for up to a week while a new copy is
+// fetched behind it, and one is fetched early in the last tenth of its life.
+const IMAGE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const REFRESH_AHEAD_FRACTION = 0.1;
+// After a clear, how long a card waits for a new copy of a logo before drawing
+// with the old one.
+const REVALIDATE_WAIT_MS = 3000;
+
+/** Past its freshness: being served while a new copy is fetched. */
+function isStaleEntry(entry) {
+  return !!entry && typeof entry.expiresAt === 'number' && entry.expiresAt <= Date.now();
+}
 const CACHE_MAX_ENTRIES = 2000;
 const CACHE_MAX_BYTES = 160 * 1024 * 1024;
 const IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
@@ -206,13 +271,31 @@ function luminance(hex) {
  * to sit a crest on. When both sides land on the same colour (two red teams)
  * the split stops reading as two halves, so one side is pushed darker.
  */
+// The half behind a team with no colour of its own: a black-and-silver shield,
+// a white wordmark. It used to borrow a dark shade of the opponent's colour,
+// which painted the Raiders in Dolphins teal.
+const NEUTRAL_HALF = '2a2d32';
+// The same, for a colourless crest that is itself dark -- no light parts to
+// show up against charcoal.
+const NEUTRAL_HALF_LIFTED = '5c616a';
+// How close (summed RGB difference) an official colour must be to one the crest
+// shows to count as that colour. At 90 Brighton's filed teal passed for the
+// blue of its badge and painted the half teal.
+const SAME_COLOUR = 60;
+
 function cardColors(aStats, bStats, fallback) {
-  const hexOk = v => (/^([0-9a-fA-F]{6})$/.test(String(v)) ? String(v) : null);
+  const hexOk = v => (/^([0-9a-fA-F]{6})$/.test(String(v)) ? String(v).toLowerCase() : null);
   const base = hexOk(fallback) || '1f2430';
   const read = st => {
-    if (!st) return { colors: [], light: 0 };
-    if (Array.isArray(st)) return { colors: st.map(hexOk).filter(Boolean), light: 1 };
-    return { colors: (st.colors || []).map(hexOk).filter(Boolean), light: st.light || 0 };
+    if (!st) return { colors: [], light: 0, crest: false, brand: [] };
+    if (Array.isArray(st)) return { colors: st.map(hexOk).filter(Boolean), light: 1, crest: true, brand: [] };
+    return {
+      colors: (st.colors || []).map(hexOk).filter(Boolean),
+      // null when the crest could not be read: unknown, not "no light pixels".
+      light: typeof st.light === 'number' ? st.light : null,
+      crest: st.crest !== false,
+      brand: (st.brand || []).map(hexOk).filter(Boolean)
+    };
   };
   const A = read(aStats);
   const B = read(bStats);
@@ -220,14 +303,31 @@ function cardColors(aStats, bStats, fallback) {
   const spread = (x, y) => [0, 1, 2].reduce((acc, i) =>
     acc + Math.abs(parseInt(x.slice(i * 2, i * 2 + 2), 16) - parseInt(y.slice(i * 2, i * 2 + 2), 16)), 0);
 
-  // A crest with no colour at all (a black-and-white badge) has no half of its
-  // own. A dark shade of the opponent's colour keeps the card coherent; the
-  // category colour nudged lighter produced washed-out pinks.
-  let a = A.colors[0] || (B.colors.length ? shade(B.colors[0], -0.55) : base);
-  // Two teams that both come back orange stop reading as two halves. Prefer a
-  // colour the crest actually wears over distorting its primary one.
-  let b = B.colors.find(c => spread(c, a) >= 90) || B.colors[0] ||
-    (A.colors.length ? shade(A.colors[0], -0.55) : base);
+  // What a side can be painted in, strongest first. An official colour the
+  // crest visibly wears ranks where the crest ranks it -- Syracuse is orange,
+  // not the navy ESPN lists first, and the Dolphins stay aqua ahead of orange.
+  // An official colour the crest does not show at all comes after the crest's
+  // own colours: some clubs are filed under a colour their badge never uses.
+  // With no crest palette to judge by, official colours keep ESPN's order.
+  // Near-duplicates collapse, so an alternate is a genuinely different colour.
+  const choices = S => {
+    const items = [];
+    const represented = new Set();
+    S.brand.filter(crestColor.isChromatic).forEach((c, i) => {
+      const match = S.colors.findIndex(p => spread(p, c) < SAME_COLOUR);
+      if (match !== -1) represented.add(match);
+      items.push({ c, brand: true, rank: match !== -1 ? match : (S.colors.length ? 100 + i : i) });
+    });
+    S.colors.forEach((c, i) => {
+      if (!represented.has(i)) items.push({ c, brand: false, rank: i + 0.5 });
+    });
+    items.sort((x, y) => x.rank - y.rank);
+    const out = [];
+    for (const item of items) if (!out.some(o => spread(o.c, item.c) < 30)) out.push(item);
+    return out;
+  };
+  const LA = choices(A);
+  const LB = choices(B);
 
   // Crests sit on top of this, most of them white-heavy, so a very light half
   // would swallow its own logo. Only the genuinely light colours get pulled
@@ -237,23 +337,65 @@ function cardColors(aStats, bStats, fallback) {
   // WITH a white outline reads fine on a dark half, while one without it
   // (Richmond's solid navy spider) disappears — so only that second kind gets
   // its half lifted.
-  const seat = (c, stats, derived) => {
+  const seatPalette = (c, stats, derived) => {
     const l = luminance(c);
     if (l > 0.75) return shade(c, -0.38);
     if (l > 0.45) return shade(c, -0.26);
     if (l > 0.20) return shade(c, -0.16);
-    if (!derived && l < 0.15 && stats.light < 0.12) return shade(c, 0.32);
+    if (!derived && l < 0.15 && stats.light != null && stats.light < 0.12) return shade(c, 0.32);
     if (l < 0.04) return shade(c, 0.10);
     return c;
   };
-  a = seat(a, A, !A.colors.length);
-  b = seat(b, B, !B.colors.length);
+  // An official colour is the team's colour; it is only toned down when it is
+  // light enough to wash out a white crest -- and lifted, as a crest colour
+  // would be, when it is dark behind a dark crest with nothing light in it
+  // (the Yankees' navy NY on navy).
+  const seatBrand = (c, stats) => {
+    const l = luminance(c);
+    if (l > 0.75) return shade(c, -0.38);
+    if (l > 0.55) return shade(c, -0.22);
+    if (l < 0.15 && stats.crest && stats.light != null && stats.light < 0.12) return shade(c, 0.32);
+    return c;
+  };
+  const seat = (choice, stats) => (choice.brand ? seatBrand(choice.c, stats) : seatPalette(choice.c, stats, false));
+  const neutral = stats => (stats.crest && stats.light != null && stats.light < 0.12 ? NEUTRAL_HALF_LIFTED : NEUTRAL_HALF);
+
+  let a;
+  let b;
+  if (!LA.length && !LB.length) {
+    // Neither side has a colour: the category colour, as always.
+    a = seatPalette(base, A, true);
+    b = seatPalette(base, B, true);
+  } else {
+    let ca = LA[0] || null;
+    // Two teams that both come back orange stop reading as two halves. Prefer a
+    // colour the team actually wears over distorting its primary one.
+    const cb = LB.find(x => !ca || spread(x.c, ca.c) >= 90) || LB[0] || null;
+    if (ca && cb && spread(ca.c, cb.c) < 90) {
+      const alt = LA.slice(1).find(x => spread(x.c, cb.c) >= 90);
+      if (alt) ca = alt;
+    }
+    a = ca ? seat(ca, A) : neutral(A);
+    b = cb ? seat(cb, B) : neutral(B);
+    A.used = ca ? ca.c : null;
+    B.used = cb ? cb.c : null;
+  }
 
   // Still colliding (one crest, or a crest with a single colour): nudge rather
   // than leave a card that looks like one flat panel.
   if (spread(a, b) < 90) b = luminance(b) > 0.35 ? shade(b, -0.28) : shade(b, 0.24);
 
-  return { a, b };
+  // The stripe along a half: that team's other official colour, when it stands
+  // well apart from the half it sits on. Official colours only, so a club known
+  // just by its crest's pixels keeps the plain card it had -- and only one the
+  // crest shows, unless the crest shows no colour at all (the Raiders' silver).
+  // ESPN files hundreds of clubs under stand-in colours (one red for 223 of
+  // them), and a stripe in a colour the badge never wears is worse than none.
+  const accentFor = (S, half) => S.brand.find(c =>
+    c !== S.used && spread(c, half) >= 160
+    && (!S.colors.length || S.colors.some(p => spread(p, c) < SAME_COLOUR))) || null;
+
+  return { a, b, accentA: accentFor(A, a), accentB: accentFor(B, b) };
 }
 
 /**
@@ -271,11 +413,17 @@ function cardColors(aStats, bStats, fallback) {
  */
 function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
   const { w = 800, h = 450, aUrl = null, bUrl = null } = opts;
-  const { a: colA, b: colB } = cardColors(
-    crestColor.paletteForCrest(aUrl, aEntry),
-    crestColor.paletteForCrest(bUrl, bEntry),
+  const { a: colA, b: colB, accentA, accentB } = cardColors(
+    crestColor.statsForCrest(aUrl, aEntry),
+    crestColor.statsForCrest(bUrl, bEntry),
     color
   );
+  // A team's second colour, as a stripe along the foot of its half: the
+  // Dolphins read as aqua and orange, not aqua alone.
+  const band = Math.max(6, Math.round(h * 0.022));
+  const stripe = (hex, x0, x1) => (hex
+    ? `<rect x="${x0.toFixed(1)}" y="${h - band}" width="${(x1 - x0).toFixed(1)}" height="${band}" fill="#${hex}" fill-opacity="0.95"/>`
+    : '');
 
   const cx = [w * 0.27, w * 0.73];
   const crest = 250;
@@ -322,6 +470,8 @@ function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
   <rect width="${w}" height="${h}" fill="url(#bg)"/>
   <rect width="${w}" height="${h}" fill="url(#glowA)"/>
   <rect width="${w}" height="${h}" fill="url(#glowB)"/>
+  ${stripe(accentA, 0, w * 0.46)}
+  ${stripe(accentB, w * 0.54, w)}
   ${half(aName, aEntry, 0)}
   ${half(bName, bEntry, 1)}
   <text x="50%" y="${crestMid.toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="52" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#drop)">VS</text>
@@ -388,8 +538,34 @@ async function rasterize(svg) {
 // before, or the warmer has made, costs a map lookup. Only cards whose art
 // arrived are kept; a card drawn around a missing logo must be drawn again.
 const cardCache = new Map();
-const CARD_CACHE_MAX = 3000;
+// Room for every tab's posters and the wide backgrounds beside them, bounded by
+// bytes as well now that 1280x720 cards live here too.
+const CARD_CACHE_MAX = 4500;
+const CARD_CACHE_MAX_BYTES = 192 * 1024 * 1024;
 const CARD_TTL_MS = 12 * 60 * 60 * 1000;
+let cardBytes = 0;
+
+function cardDrop(key) {
+  const old = cardCache.get(key);
+  if (!old) return;
+  cardCache.delete(key);
+  cardBytes -= old.jpeg.length;
+}
+
+function cardPut(key, entry) {
+  cardDrop(key);
+  cardCache.set(key, entry);
+  cardBytes += entry.jpeg.length;
+  while (cardCache.size > CARD_CACHE_MAX || (cardBytes > CARD_CACHE_MAX_BYTES && cardCache.size > 1)) {
+    cardDrop(cardCache.keys().next().value);
+  }
+}
+
+/** Whether a finished card is held for this path and query. Touches nothing. */
+function hasFreshCard(key) {
+  const hit = cardCache.get(key);
+  return !!hit && Date.now() <= hit.expiresAt;
+}
 
 function cardKey(req) {
   if (String(req.query.format || '').toLowerCase() === 'svg') return null;
@@ -401,7 +577,7 @@ function sendCachedCard(req, res) {
   const key = cardKey(req);
   const hit = key ? cardCache.get(key) : null;
   if (!hit || Date.now() > hit.expiresAt) {
-    if (hit) cardCache.delete(key);
+    if (hit) cardDrop(key);
     stats.cardMisses++;
     return false;
   }
@@ -428,13 +604,22 @@ async function sendCard(req, res, svg, cacheControl, opts = {}) {
   try {
     const jpeg = await rasterize(svg);
     res.setHeader('Content-Type', 'image/jpeg');
-    const key = opts.remember && cacheControl !== 'no-store' ? cardKey(req) : null;
-    if (key) {
-      if (cardCache.size >= CARD_CACHE_MAX) cardCache.delete(cardCache.keys().next().value);
-      cardCache.set(key, { jpeg, cacheControl, expiresAt: Date.now() + CARD_TTL_MS });
+    // The generation can move while a card is drawn (a clear mid-render). A
+    // card that started current but finished stale is not sent or kept as one.
+    let control = cacheControl;
+    if (control === CACHE_CONTROL.FULL && req.query && req.query.v !== undefined && !isCurrentArt(req)) {
+      control = CACHE_CONTROL.STALE_URL;
+      res.setHeader('Cache-Control', control);
     }
+    // Never kept here if players were told not to keep it for a day either.
+    const keep = opts.remember && control === CACHE_CONTROL.FULL;
+    const key = keep ? cardKey(req) : null;
+    if (key) cardPut(key, { jpeg, cacheControl: control, expiresAt: Date.now() + CARD_TTL_MS });
     return res.send(jpeg);
   } catch (err) {
+    // A card that failed to rasterise goes out as SVG, which players cannot
+    // all draw -- so it is not something any of them should keep.
+    res.setHeader('Cache-Control', CACHE_CONTROL.FALLBACK);
     res.setHeader('Content-Type', 'image/svg+xml');
     return res.send(svg);
   }
@@ -1222,6 +1407,24 @@ async function fetchImage(url) {
 }
 
 /**
+ * A fetched image redrawn as PNG, for anything that should not be passed on as
+ * it arrived. An SVG is a document that can carry script; a PNG is pixels.
+ */
+async function toPng(buffer) {
+  try {
+    // The density is for vector input: at the default 72 dpi an SVG whose
+    // width says 64 became a 64-pixel PNG. Raster input ignores it.
+    const png = await sharp(buffer, { failOn: 'none', density: 288 })
+      .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer();
+    return { buffer: png, contentType: 'image/png' };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Fetch a remote image once, validate it, cache it. Returns
  * { buffer, contentType } or null on any failure.
  */
@@ -1236,37 +1439,60 @@ async function getImage(rawUrl) {
   const local = localMark(url);
   if (local) return local;
 
-  const now = Date.now();
+  let now = Date.now();
+  let hit = cache.get(url);
+  // Just cleared: the copy held may be the very thing the owner cleared to be
+  // rid of. A new copy gets a few seconds to arrive before a card is drawn from
+  // the old one -- which, if it comes to that, is stale and kept by nobody.
+  if (hit && hit.revalidate && now < (hit.staleUntil || 0) && !(negatives.get(url) > now)) {
+    const pending = inFlight.get(url) || startFetch(url, { background: true });
+    const fresh = await Promise.race([pending, sleep(REVALIDATE_WAIT_MS).then(() => null)]);
+    if (fresh) return fresh;
+    now = Date.now();
+    hit = cache.get(url);
+  }
+  if (hit && now < (hit.staleUntil || hit.expiresAt)) {
+    hit.lastAccess = now;
+    // Move to the end: the most recently used entry is the last to go.
+    cache.delete(url);
+    cache.set(url, hit);
+    stats.fetchHits++;
+    // Near the end of its life, or past it: hand over the copy we have and
+    // fetch a new one behind it. A logo that drew a card an hour ago keeps
+    // drawing it while its host is slow, busy or briefly down -- a logo gone
+    // cold instead is how a card got drawn without its crest.
+    if (now > hit.expiresAt - IMAGE_TTL_MS * REFRESH_AHEAD_FRACTION) refreshImage(url);
+    return hit;
+  }
+  if (hit) cacheDrop(url);
+
   const neg = negatives.get(url);
   if (neg) {
     if (now < neg) return null; // recently failed/slow: do not re-attempt yet
     negatives.delete(url);
   }
-
-  const hit = cache.get(url);
-  if (hit) {
-    if (now < hit.expiresAt) {
-      hit.lastAccess = now;
-      // Move to the end: the most recently used entry is the last to go.
-      cache.delete(url);
-      cache.set(url, hit);
-      stats.fetchHits++;
-      return hit;
-    }
-    cacheDrop(url);
-  }
   stats.fetchMisses++;
 
-  const pending = inFlight.get(url);
-  if (pending) return pending;
+  return inFlight.get(url) || startFetch(url);
+}
 
+/** A new copy of a cached image, fetched behind the one being served. */
+function refreshImage(url) {
+  if (inFlight.has(url)) return;
+  const neg = negatives.get(url);
+  if (neg && Date.now() < neg) return;
+  startFetch(url, { background: true });
+}
+
+function startFetch(url, { background = false } = {}) {
   const p = (async () => {
     let result = null;
     let out = null;
     try {
       out = await fetchImage(url);
       if (out.result) {
-        result = { ...out.result, expiresAt: Date.now() + IMAGE_TTL_MS, lastAccess: Date.now() };
+        const t = Date.now();
+        result = { ...out.result, expiresAt: t + IMAGE_TTL_MS, staleUntil: t + IMAGE_TTL_MS + IMAGE_STALE_MS, lastAccess: t };
         cachePut(url, result);
       }
     } catch (_) {
@@ -1276,6 +1502,8 @@ async function getImage(rawUrl) {
     }
     if (result) negatives.delete(url);
     else {
+      // A source that says the image is gone is believed, stale copy and all.
+      if (background && out && (out.status === 404 || out.status === 410)) cacheDrop(url);
       // A 429 is remembered at least as long as the host asked for.
       const ttl = out && out.status === 429 ? Math.max(out.retryAfterMs || 0, NEG_TTL_MS)
         : out && out.skipped ? NEG_TTL_SKIPPED_MS
@@ -1301,7 +1529,7 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
   const validUrl = normalizeUrl(sourceUrl);
   if (!validUrl) return null;
   // The proxy's own fallback is a generated card, so it versions too.
-  return `${baseUrl}/img?url=${encodeURIComponent(validUrl)}&text=${encodeURIComponent(text)}&color=${color}&v=${RENDER_VERSION}`;
+  return `${baseUrl}/img?url=${encodeURIComponent(validUrl)}&text=${encodeURIComponent(text)}&color=${color}&v=${artVersion()}`;
 }
 
 /**
@@ -1321,12 +1549,12 @@ function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '3
   if (!plate) q.push('plate=0');
   if (!name) q.push('notext=1');
   if (cover) q.push('cover=1');
-  q.push(`v=${RENDER_VERSION}`);
+  q.push(`v=${artVersion()}`);
   return `${baseUrl}/img/event?${q.join('&')}`;
 }
 
 function placeholderUrl(baseUrl, text, color) {
-  return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '333333'}&v=${RENDER_VERSION}`;
+  return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '333333'}&v=${artVersion()}`;
 }
 
 /**
@@ -1355,7 +1583,7 @@ function matchupUrl(baseUrl, { a, b, aLogo, bLogo, aLogos, bLogos, color = '3333
   if (fb) q.push(`fb=${encodeURIComponent(fb)}`);
   if (w) q.push(`w=${w}`);
   if (h) q.push(`h=${h}`);
-  q.push(`v=${RENDER_VERSION}`);
+  q.push(`v=${artVersion()}`);
   return `${baseUrl}/img/matchup?${q.join('&')}`;
 }
 
@@ -1371,7 +1599,9 @@ function cacheStats() {
       hits: stats.rasterHits, misses: stats.rasterMisses, hitRate: rate(stats.rasterHits, stats.rasterMisses) },
     upstream: { entries: cache.size, bytes: fetchBytes,
       hits: stats.fetchHits, misses: stats.fetchMisses, hitRate: rate(stats.fetchHits, stats.fetchMisses) },
-    finished: { entries: cardCache.size, max: CARD_CACHE_MAX,
+    generation: artGeneration.info(),
+    renderVersion: RENDER_VERSION,
+    finished: { entries: cardCache.size, max: CARD_CACHE_MAX, bytes: cardBytes,
       hits: stats.cardHits, misses: stats.cardMisses, hitRate: rate(stats.cardHits, stats.cardMisses) },
     negatives: negatives.size,
     quality: RASTER_QUALITY
@@ -1380,16 +1610,44 @@ function cacheStats() {
 
 /**
  * Empty the caches. `what` is 'cards', 'upstream' or 'all'. Returns what went.
+ *
+ * Fetched logos are not thrown away, only marked stale: the next card that
+ * needs one draws with the copy it has and fetches a new one behind it. Thrown
+ * away, the next browse started cold, and a cold burst is what draws cards
+ * around logos that missed their deadline. A host's 429 back-off is kept for
+ * the same reason -- dropping it is how a throttle gets extended.
  */
 function clearCache(what = 'all') {
   const before = { cards: rasterCache.size, finished: cardCache.size, upstream: cache.size, negatives: negatives.size };
-  if (what === 'cards' || what === 'all') { rasterCache.clear(); cardCache.clear(); }
-  if (what === 'upstream' || what === 'all') { cache.clear(); cacheBytes = 0; negatives.clear(); hostCooldown.clear(); cardCache.clear(); }
+  if (what === 'cards' || what === 'all') {
+    rasterCache.clear();
+    cardCache.clear();
+    cardBytes = 0;
+  }
+  if (what === 'upstream' || what === 'all') {
+    for (const entry of cache.values()) {
+      entry.expiresAt = 0;
+      entry.revalidate = true;
+      delete entry.png;
+    }
+    negatives.clear();
+    cardCache.clear();
+    cardBytes = 0;
+  }
   if (what === 'all') {
+    crestColor.clear();
+    try { require('./TeamLogoService').clearMemo(); } catch (_) { /* nothing memoised */ }
     stats.rasterHits = stats.rasterMisses = stats.fetchHits = stats.fetchMisses = 0;
     stats.cardHits = stats.cardMisses = 0;
   }
   return before;
+}
+
+/** Whether a fetched image is held and still fresh. Touches nothing. */
+function hasFreshImage(rawUrl) {
+  const url = normalizeUrl(rawUrl);
+  const hit = url ? cache.get(url) : null;
+  return !!hit && Date.now() < hit.expiresAt;
 }
 
 module.exports = {
@@ -1409,6 +1667,15 @@ module.exports = {
   svgMatchup,
   wrapLines,
   getImage,
+  toPng,
+  artVersion,
+  isCurrentArt,
+  CACHE_CONTROL,
+  matchupDecision,
+  hasFreshCard,
+  hasFreshImage,
+  isStaleEntry,
+  NEUTRAL_HALF,
   proxyUrl,
   placeholderUrl,
   matchupUrl,

@@ -706,7 +706,7 @@ function mapMatchToMetaPreview(match, config = {}) {
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-async function handleCatalog(type, id, extra, config) {
+async function handleCatalog(type, id, extra, config, opts = {}) {
   // Warm the home/away index before mapping. Blocks only on a cold start; once
   // an index exists a stale one is served while the refresh runs behind it, so
   // a slow or dead ESPN costs orientation rather than the catalog.
@@ -717,7 +717,9 @@ async function handleCatalog(type, id, extra, config) {
 
   // Fire-and-forget stale-while-revalidate: return the cached list now and let
   // CronService refresh it in the background once it passes the revalidate window.
-  container.resolve('cronService').ensureFresh();
+  // The card warmer reads every tab and passes revalidate: false -- a re-sync it
+  // started would ask for another warm pass, and that pass for another re-sync.
+  if (opts.revalidate !== false) container.resolve('cronService').ensureFresh();
   
   const conf = config || (extra && extra.config) || {};
 

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AIOSports — Dashboard</title>
-  <link rel="icon" type="image/png" href="/logo.png">
-  <link rel="apple-touch-icon" href="/logo.png">
+  <link rel="icon" type="image/png" href="/logo-v2.png">
+  <link rel="apple-touch-icon" href="/logo-v2.png">
 <style>
   :root {
     --bg: #0b0b0d; --panel: #151518; --line: #26262c;
@@ -87,6 +87,8 @@
       <div class="row"><span>Hit rate</span><b id="cardHit">–</b></div>
       <div class="row"><span>Size</span><b id="cardBytes">–</b></div>
       <div class="row"><span>JPEG quality</span><b id="quality">–</b></div>
+      <div class="row"><span>Finished cards</span><b id="finished">–</b></div>
+      <div class="row"><span>Artwork generation</span><b id="artGen">–</b></div>
     </div>
 
     <div class="card">
@@ -103,6 +105,8 @@
       <div class="bar"><i id="warmBar" style="width:0"></i></div>
       <div class="row"><span>Rendered</span><b id="warmDone">–</b></div>
       <div class="row"><span>Errors</span><b id="warmErrors">–</b></div>
+      <div class="row"><span>Already fresh</span><b id="warmSkipped">–</b></div>
+      <div class="row"><span>Started by</span><b id="warmReason">–</b></div>
       <div class="row"><span>Last run</span><b id="warmLast">–</b></div>
     </div>
 
@@ -213,6 +217,12 @@ async function refresh() {
   $('cardHit').textContent = c.hitRate === null ? '–' : c.hitRate + '%';
   $('cardBytes').textContent = bytes(c.bytes);
   $('quality').textContent = 'q' + d.images.quality;
+  const f = d.images.finished;
+  $('finished').textContent = f ? f.entries.toLocaleString() + ' · ' + bytes(f.bytes || 0) : '–';
+  const g = d.images.generation;
+  $('artGen').textContent = !g ? '–'
+    : g.generation + (g.persisted ? '' : ' (not saved)')
+      + (g.bumpedAt ? ' · ' + secs(Math.round((Date.now() - g.bumpedAt) / 1000)) + ' ago' : '');
 
   $('upEntries').textContent = u.entries.toLocaleString();
   $('upHit').textContent = u.hitRate === null ? '–' : u.hitRate + '%';
@@ -223,6 +233,8 @@ async function refresh() {
   $('warmBar').style.width = (w.running ? (w.percent || 0) : 0) + '%';
   $('warmDone').textContent = w.total ? w.done.toLocaleString() + ' / ' + w.total.toLocaleString() : '–';
   $('warmErrors').textContent = w.errors ? w.errors.toLocaleString() : '0';
+  $('warmSkipped').textContent = w.skipped ? w.skipped.toLocaleString() : '0';
+  $('warmReason').textContent = w.reason || '–';
   $('warmLast').textContent = w.lastRunMs ? Math.round(w.lastRunMs / 1000) + 's' : '–';
 
   $('matches').textContent = d.matches.toLocaleString();
@@ -273,7 +285,7 @@ async function act(path, label) {
   try {
     const res = await fetch(path, { method: 'POST', headers: auth() });
     const body = await res.json();
-    flash(res.ok ? label : (body.error || 'Refused'), !res.ok);
+    flash(res.ok ? (typeof label === 'function' ? label(body) : label) : (body.error || 'Refused'), !res.ok);
   } catch (err) {
     flash(err.message, true);
   }
@@ -282,10 +294,14 @@ async function act(path, label) {
 
 $('warmBtn').onclick = () => act('/api/cache/warm', 'Warming started — it runs slowly on purpose.');
 $('cancelBtn').onclick = () => act('/api/cache/warm/cancel', 'Warming stopped.');
-$('clearCards').onclick = () => act('/api/cache/clear?what=cards', 'Card cache cleared.');
+// What a clear did, from its answer: whether the cards really got new addresses.
+const clearedText = done => body => done + (body.generation && body.generation.bumped === false
+  ? ' Warming restarted. Card addresses were already renewed in the last 30 seconds, so players keep the ones they just got.'
+  : ' Every card has a new address and warming has started. Players get the new cards the next time they open a tab (on a TV, reopen the app).');
+$('clearCards').onclick = () => act('/api/cache/clear?what=cards', clearedText('Card cache cleared.'));
 $('clearAll').onclick = () => {
-  if (confirm('Clear every cache? The next browse will be slow while cards are rendered again.')) {
-    act('/api/cache/clear?what=all', 'All caches cleared.');
+  if (confirm('Clear every cache? Logos are fetched again before cards are redrawn from them.')) {
+    act('/api/cache/clear?what=all', clearedText('All caches cleared.'));
   }
 };
 

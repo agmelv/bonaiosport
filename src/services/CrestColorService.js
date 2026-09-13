@@ -205,7 +205,9 @@ function dominantColor(buffer) {
 /** Cached by crest URL — the same crests recur across an entire catalog page. */
 function paletteForCrest(url, entry) {
   if (!entry || !entry.buffer) return null;
-  const key = url || null;
+  // By size as well as URL: a crest replaced upstream under the same address
+  // gets its own palette.
+  const key = url ? `${url}|${entry.buffer.length}` : null;
   if (key && cache.has(key)) return cache.get(key);
   let colors = null;
   try {
@@ -220,4 +222,61 @@ function paletteForCrest(url, entry) {
   return colors;
 }
 
-module.exports = { palette, dominantColor, paletteForCrest, rgbToHsv };
+// Official team colours, keyed like the crests ("nfl/mia"), taken from ESPN's
+// team lists at build time (scripts/build-espn-teams.js). A crest's pixels are
+// a poor witness to a team's colours: the Raiders' silver-and-black shield has
+// no colour in it at all, and the Dolphins' aqua outweighs their orange by a
+// few percent of pixels. Without the table, palettes alone, as before.
+let BRAND = null;
+function brandTable() {
+  if (BRAND === null) {
+    try { BRAND = require('./data/espn-team-colors.json'); } catch { BRAND = {}; }
+  }
+  return BRAND;
+}
+
+// TeamLogoService's crest key, repeated rather than required so this module
+// keeps no dependencies. Rugby crests carry an extra "teams" segment
+// (teamlogos/rugby/teams/500/<id>.png), as the build script knows.
+function crestKey(url) {
+  const m = /\/teamlogos\/([^/]+)\/(?:teams\/)?\d+(?:\/scoreboard)?\/([^/?#]+?)\.(?:png|svg|jpg)/i.exec(String(url || ''));
+  return m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : '';
+}
+
+/** A team's official [primary, alternate] colours for a crest URL, or null. */
+function brandForCrest(url) {
+  const k = crestKey(url);
+  const colors = k ? brandTable()[k] : null;
+  if (!Array.isArray(colors)) return null;
+  const valid = colors.map(c => String(c || '').toLowerCase()).filter(c => /^[0-9a-f]{6}$/.test(c));
+  // Black and one shade of red is ESPN's stand-in for "no colours on file",
+  // shared by over a hundred clubs. It says nothing about any of them.
+  if (valid.length === 2 && valid[0] === '000000' && valid[1] === 'c60000') return null;
+  return valid.length ? valid : null;
+}
+
+/** A colour at all, by the same test palette() applies to crest pixels. */
+function isChromatic(hex) {
+  const n = parseInt(hex, 16);
+  const { s, v } = rgbToHsv((n >> 16) & 255, (n >> 8) & 255, n & 255);
+  return s >= 0.25 && v >= 0.15;
+}
+
+/** Everything a card's colours are chosen from, for one side. */
+function statsForCrest(url, entry) {
+  const p = paletteForCrest(url, entry);
+  return {
+    colors: p ? p.colors : [],
+    // null, not 0, when the crest could not be read (a JPEG, WebP, SVG or an
+    // unusual PNG): unknown is not "dark".
+    light: p ? p.light : null,
+    crest: !!(entry && entry.buffer),
+    brand: brandForCrest(url) || []
+  };
+}
+
+function clear() {
+  cache.clear();
+}
+
+module.exports = { palette, dominantColor, paletteForCrest, rgbToHsv, brandForCrest, isChromatic, statsForCrest, clear };

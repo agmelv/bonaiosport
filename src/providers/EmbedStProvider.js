@@ -126,7 +126,7 @@ class EmbedStProvider extends BaseProvider {
           if (m3u8Url) {
             console.log(`[${this.name}] Natively decrypted M3U8 for ${matchTitle}: ${redactUrl(m3u8Url)}`);
             const { BASE_URL } = require('../config');
-            const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
+            const proxyUrl = `${BASE_URL}${require('../manifestLink').manifestPath(m3u8Url, referer, new URL(referer).origin)}`;
             streams.push(new StreamEntity({
               name: 'EmbedSt',
               title: `[Direct] ${matchTitle}`,
@@ -147,7 +147,7 @@ class EmbedStProvider extends BaseProvider {
                 if (m3u8Url) {
                     console.log(`[${this.name}] Natively decrypted M3U8 for sportsembed: ${redactUrl(m3u8Url)}`);
                     const { BASE_URL } = require('../config');
-                    const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent('https://sportsembed.su/')}&origin=${encodeURIComponent('https://sportsembed.su')}`;
+                    const proxyUrl = `${BASE_URL}${require('../manifestLink').manifestPath(m3u8Url, 'https://sportsembed.su/', 'https://sportsembed.su')}`;
                     streams.push(new StreamEntity({
                         name: 'EmbedSt',
                         title: `[Direct] ${matchTitle}`,

@@ -10,6 +10,9 @@ class CronService {
     this.streamResolveCache = streamResolveCache;
     this.cacheService = cacheService;
     this.syncing = false;
+    // Called after every sync that produced a match list; index.js warms the
+    // new fixtures' artwork from it.
+    this.onSynced = null;
   }
 
   async runSync() {
@@ -19,6 +22,9 @@ class CronService {
       const activeMatches = await this.matchAggregator.syncMatches();
       if (activeMatches !== null) {
         this.pruneStreamCache(activeMatches);
+        try {
+          if (typeof this.onSynced === 'function') this.onSynced(activeMatches);
+        } catch (_) { /* warming is a nicety; a sync never fails because of it */ }
       }
     } finally {
       this.syncing = false;

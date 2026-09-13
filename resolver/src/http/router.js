@@ -68,6 +68,9 @@ export async function route(req, res) {
     res.writeHead(404, { 'Content-Type': 'text/plain' })
     res.end('not found')
   } catch (err) {
-    json(res, 500, { ok: false, error: String(err.message || err) })
+    // The detail goes to the log. A caller outside gets nothing that describes
+    // the network behind this process.
+    console.error('[resolver]', err)
+    json(res, 500, { ok: false, error: 'internal error' })
   }
 }

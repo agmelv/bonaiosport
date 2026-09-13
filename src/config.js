@@ -67,4 +67,10 @@ const BASE_URL = (
   `http://${getLocalIp()}:${PORT}`                              // Local dev fallback to LAN IP
 ).replace(/\/$/, '');                                           // Strip trailing slash if any
 
-module.exports = { PORT, BASE_URL, getLocalIp, getRequestBaseUrl };
+// Where saved state lives: profiles, the link-signing key, the artwork
+// generation. Defined once, here, beside index.js: ncc collapses every module
+// into dist/, and a `__dirname` path worked out in a deeper folder would point
+// somewhere else once bundled.
+const DATA_DIR = process.env.DATA_DIR || require('path').join(__dirname, '..', 'data');
+
+module.exports = { PORT, BASE_URL, DATA_DIR, getLocalIp, getRequestBaseUrl };

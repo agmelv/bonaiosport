@@ -73,10 +73,10 @@ async function runBaselineHealthScenario(baseUrl, options = {}) {
       if (statusCode !== 200) return false;
       const endpoint = endpoints[requestIndex % endpoints.length];
       if (endpoint === '/health') {
-        return body && body.status === 'ok' && body.service === 'nuvio-live-sports';
+        return body && body.status === 'ok' && body.service === 'aiosports';
       }
       if (endpoint === '/manifest.json') {
-        return body && body.id === 'community.nuvio.live-sports' && Array.isArray(body.catalogs);
+        return body && body.id === 'community.aiosports' && Array.isArray(body.catalogs);
       }
       return true;
     }
