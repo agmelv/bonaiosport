@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in the addon doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Before you file: a fixture with no working streams is almost always the source site, not the addon. Streams often appear shortly before kickoff and disappear without warning.
+
+        Please don't include your server's address, your passwords, or install URLs that contain a profile id.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - Docker Compose (built from this repo)
+        - Docker (prebuilt ghcr.io image)
+        - Node.js / PM2
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you installed, or what /api/version shows on your server.
+      placeholder: v1.0.1
+  - type: dropdown
+    id: player
+    attributes:
+      label: Player
+      options:
+        - Stremio (Windows / macOS / Linux)
+        - Stremio (Android / Android TV)
+        - Stremio (web / iOS)
+        - Nuvio
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines from `docker compose logs --tail 200` (or your terminal). Remove anything private first.
+      render: text

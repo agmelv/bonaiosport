@@ -1,6 +1,6 @@
 # Streamed.pk HLS Stream Resolver
 
-Local server that turns a [streamed.pk](https://streamed.pk) or [embed.st](https://embed.st) stream URL into a playable HLS playlist. It replays the embed.st client handshake in Node, decrypts the upstream M3U8 with `lock.wasm`, and relays HLS when the CDN rejects bare requests.
+Local server that turns a [streamed.pk](https://streamed.pk) or [embed.st](https://embed.st) stream URL into a playable HLS playlist. It replays the embed.st client handshake in Node, decodes the upstream M3U8 with `lock.wasm`, and relays HLS when the CDN rejects bare requests.
 
 Requires Node.js ≥ 22 and `curl` on PATH.
 
@@ -10,7 +10,7 @@ Requires Node.js ≥ 22 and `curl` on PATH.
 - [Quick start](#quick-start)
 - [Accepted input URLs](#accepted-input-urls)
 - [Architecture](#architecture)
-- [Embed handshake and GOAT decrypt](#embed-handshake-and-goat-decrypt)
+- [Embed handshake and GOAT decode](#embed-handshake-and-goat-decode)
 - [HLS relay](#hls-relay)
 - [Playback](#playback)
 - [Stack](#stack)
@@ -22,14 +22,14 @@ Requires Node.js ≥ 22 and `curl` on PATH.
 
 ## Overview
 
-A streamed.pk watch page is not the stream. It links to an **embed.st** player. The **HLS playlist URL never appears in the HTML** — the embed sends a protobuf `POST /fetch`, decrypts the response in WASM, and only then requests the CDN `.m3u8`.
+A streamed.pk watch page is not the stream. It links to an **embed.st** player. The **HLS playlist URL never appears in the HTML** — the embed sends a protobuf `POST /fetch`, decodes the response in WASM, and only then requests the CDN `.m3u8`.
 
 Three origins are involved:
 
 | Layer | Role |
 | --- | --- |
 | streamed.pk | Match metadata and stream link lookup (watch URLs only) |
-| embed.st | `/fetch` handshake, `goat` header, WASM decrypt |
+| embed.st | `/fetch` handshake, `goat` header, WASM decode |
 | CDN (`strmd.st`, tiktokcdn) | HLS playlists and MPEG-TS segments |
 
 This project reproduces that chain server-side and exposes it via `POST /api/stream`, `GET /api/hls`, and a browser UI.
@@ -91,8 +91,8 @@ sequenceDiagram
     Run-->>Run: embed slot from URL
   end
   Run->>EST: POST /fetch (protobuf body)
-  EST-->>Run: goat header + encrypted body
-  Run->>WASM: decrypt in worker thread
+  EST-->>Run: goat header + encoded body
+  Run->>WASM: decode in worker thread
   WASM-->>Run: m3u8 URL
   Run-->>UI: { m3u8, relay, … }
   UI->>Relay: GET relay (hls.js)
@@ -107,15 +107,15 @@ sequenceDiagram
 | Resolve | `src/resolve/run.js` | Parse → source resolve → relay link |
 | Parse | `src/resolve/parse.js`, `src/resolve/slot.js` | Watch, embed, and API URLs → embed slot |
 | Match lookup | `src/streamed/` | streamed.pk API for watch URLs |
-| GOAT source | `src/sources/goat/` | `/fetch`, protobuf, WASM decrypt |
+| GOAT source | `src/sources/goat/` | `/fetch`, protobuf, WASM decode |
 | Golf source | `src/sources/golf/` | Third-party embed chain → m3u8 |
 | Wire | `src/wire/headers.js`, `src/wire/curl.js` | Shared fetch headers; CDN pull (curl) |
 | Relay | `src/relay/link.js`, `src/relay/m3u8.js`, `src/relay/segment.js` | Relay URLs; M3U8 rewrite; PNG-wrapped TS strip |
 | UI | `public/player.js` | Resolve form, hls.js, VLC/MPV export |
 
-Handshake and WASM details: [Embed handshake and GOAT decrypt](#embed-handshake-and-goat-decrypt). Relay and playback: [HLS relay](#hls-relay), [Playback](#playback).
+Handshake and WASM details: [Embed handshake and GOAT decode](#embed-handshake-and-goat-decode). Relay and playback: [HLS relay](#hls-relay), [Playback](#playback).
 
-## Embed handshake and GOAT decrypt
+## Embed handshake and GOAT decode
 
 ### Embed slot
 
@@ -144,16 +144,16 @@ Referer: {origin}/embed/{path}
 
 | Part | Use |
 | --- | --- |
-| Body | Encrypted blob; WASM decrypts it to recover the playlist URL |
+| Body | Encoded blob; WASM decodes it to recover the playlist URL |
 | `goat` header | 32-char key material (e.g. `NOSCRPS…`) passed into WASM |
 
-### WASM decrypt
+### WASM decode
 
 `src/sources/goat/lock.js` spawns `src/sources/goat/lock-worker.js` in a **worker thread**. The worker:
 
 - Mounts a **happy-dom** window with stubbed `jwplayer` and mock `fetch`
 - Loads `src/sources/goat/vendor/lock.wasm` via `lock-esm.mjs`
-- Calls `set_stream_jw(source, id, stream)`; WASM decrypts the body and requests the `.m3u8` internally
+- Calls `set_stream_jw(source, id, stream)`; WASM decodes the body and requests the `.m3u8` internally
 - Returns the captured CDN URL, e.g. `https://lb10.strmd.st/secure/…/high/mono.m3u8`
 
 WASM runs in a worker because it patches global `fetch` — running it on the main thread breaks later API calls.
@@ -260,7 +260,7 @@ Failure:
 { "ok": false, "stage": "input", "error": "match not found: …" }
 ```
 
-Stages: `input` (bad URL / missing match) or `resolve` (fetch / decrypt / upstream failure).
+Stages: `input` (bad URL / missing match) or `resolve` (fetch / decode / upstream failure).
 
 ### `GET /api/hls`
 
@@ -300,7 +300,7 @@ src/
       fetch.js              POST embed.st/fetch
       proto.js              protobuf body
       lock.js               spawn WASM worker
-      lock-worker.js        GOAT decrypt
+      lock-worker.js        GOAT decode
       vendor/               lock.wasm, lock-esm.mjs
     golf/
       resolve.js            embedhd → exposestrat → m3u8

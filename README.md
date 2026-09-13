@@ -1,325 +1,212 @@
 <p align="center">
-  <img src="public/logo.png" width="120" height="120" alt="AIOSports Logo">
+  <img src="public/logo-v2.png" width="120" height="120" alt="AIOSports logo">
 </p>
 
-# 🔴 AIOSports
+# AIOSports
 
-[![Ko-fi](https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mlp20)
-[![GitHub](https://img.shields.io/badge/GitHub-AIOSports-181717?logo=github&logoColor=white)](https://github.com/mlp2069/aiosports)
-[![Upstream](https://img.shields.io/badge/forked_from-rajhodedara%2Flive--sport--plugin-6e7681?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-v1.0.1-brightgreen.svg)](https://github.com/mlp2069/aiosports/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Forked from](https://img.shields.io/badge/forked_from-rajhodedara%2Flive--sport--plugin-6e7681?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
+[![Ko-fi](https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mlp20)
 
-> 🍴 **THIS IS A FORK.**
-> The upstream project is [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin) and all credit for it belongs there. This fork is [mlp2069/aiosports](https://github.com/mlp2069/aiosports), self-hosted, and differs in ways the instructions below assume:
-> - **Sign-in.** The catalog and configure pages can sit behind `AUTH_KEY`, and a dashboard behind a separate `ADMIN_TOKEN`. See [Sign-in and the dashboard](#-sign-in-and-the-dashboard).
-> - **Artwork built from crests.** Cards are drawn from team crests and rendered server-side, with a competition badge worked out from the crests rather than from whatever a provider called the league.
-> - **Different tabs.** Soccer, NFL, Other Football, College, Racing and Channels, among others — see [Catalog tabs](#-catalog-tabs).
-> - **Poster cache warming**, so opening a tab does not render hundreds of cards at once.
->
-> Clone this fork rather than upstream if you want the above; the commands below already point at it.
+A self-hosted addon for [Stremio](https://www.stremio.com/) and [Nuvio](https://nuvio.tv) that gathers live sports fixtures and 24/7 channels from several public sources into one catalog.
 
-> ⚠️ **IMPORTANT HOSTING NOTICE:**
-> **Do NOT deploy this addon to free/shared PaaS clouds like Render.com, Vercel, or Railway.** Their automated Acceptable Use Policy (AUP) scanners detect web scrapers and media proxying, which will result in **immediate and permanent suspension of your account**.
-> 
-> **Recommended setup:** Self-host on a spare PC / laptop / Raspberry Pi, or use a cheap unmanaged Linux VPS (e.g., Hetzner, DigitalOcean, Oracle Cloud Free Tier) using Docker or Cloudflare Tunnels (`cloudflared`).
+- **One tile per event.** When several sources carry the same fixture or channel, their streams are merged onto a single tile.
+- **Covers for everything.** Fixtures are drawn from both teams' crests, and channels get a cover with their logo. The server renders them, so every player shows the same thing.
+- **A tidy Channels tab.** It's sorted A to Z, and channels with nothing playing are hidden until they come back.
+- **Your settings, one install link.** Save sports, sources, teams and timezone as a profile, and the install link stays the same when you change them.
 
-> 🛡️ **OFFICIAL NOTICE ON THIRD-PARTY FORKS & PAID SERVICES:**
-> - **100% Free & Open-Source:** This project is, and will always remain, completely free and open-source under the MIT license. **There are NO paid subscriptions, NO device limits, and NO license keys.**
-> - **Unauthorized Monetization:** If any third-party fork, website, or instance claims to be this addon while selling "premium access", "license keys", or monthly subscriptions (e.g., via PayPal or crypto), **they are NOT affiliated with, supported by, or endorsed by this project**.
-> - **Content Scope:** This addon exclusively indexes public live sports fixtures. The official repository does not distribute or endorse adult content, shock media, or paid pirated IPTV bundles.
-> - **Official Support:** The only official repository is [github.com/rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin). Voluntary community support is solely via [Ko-fi](https://ko-fi.com/rajodedara).
+This is a fork of [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin). Credit for the original project goes there.
 
-> ☕ **Enjoying AIOSports?** Consider [supporting this fork on Ko-fi](https://ko-fi.com/mlp20), or [the upstream project](https://ko-fi.com/rajodedara) it is built on to help cover maintenance, dedicated scrapers, and infrastructure!
+> **Streams come from third-party websites.** AIOSports hosts no video. Sources change and go offline often, so a fixture with no working stream is normal and usually not a problem with your setup.
 
-A production-grade live sports streaming add-on for [Nuvio](https://nuvio.tv) and [Stremio](https://www.stremio.com/). It serves as a powerful multi-source aggregator that provides native live sports streams (Football, Basketball, Motorsport, Cricket, and more) inside your client, utilizing an advanced internal stream resolver to bypass CORS restrictions.
+## Contents
 
----
+- [Quick start with Docker](#quick-start-with-docker)
+- [Install it in Stremio or Nuvio](#install-it-in-stremio-or-nuvio)
+- [Updating](#updating)
+- [Other ways to run it](#other-ways-to-run-it)
+- [Settings](#settings)
+- [Passwords, profiles and the dashboard](#passwords-profiles-and-the-dashboard)
+- [Catalog tabs](#catalog-tabs)
+- [Sources](#sources)
+- [FAQ and troubleshooting](#faq-and-troubleshooting)
+- [Development](#development)
+- [Getting help](#getting-help)
+- [License and disclaimer](#license-and-disclaimer)
 
-## 📱 App Preview & Screenshots
+## Quick start with Docker
 
-<p align="center">
-  <img src="docs/screenshots/nuvio-live-soccer.jpg" alt="Live Sports & Soccer Catalog" width="100%">
-</p>
-
-| 🏎️ F1 & Baseball Catalogs | ⚡ 1080p Direct Stream Picker | ⚙️ Addon Details & Luffy Logo |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/nuvio-sports-catalog.jpg" width="100%" alt="F1 & Baseball Catalogs"> | <img src="docs/screenshots/nuvio-stream-selector.jpg" width="100%" alt="Direct Stream Selector"> | <img src="docs/screenshots/nuvio-addon-details.jpg" width="100%" alt="Addon Details"> |
-
----
-
-## 🚀 Self-Hosting Guides (Recommended)
-
-### Option 1: Docker / Docker Compose (Easiest for Servers & Raspberry Pi)
-
-Run the addon container in seconds:
+You need Docker with Compose v2.24 or newer.
 
 ```bash
-# Clone the repository
 git clone https://github.com/mlp2069/aiosports.git
-cd live-sport-plugin
-
-# Start the container in background
-docker compose up -d
-```
-
-The addon is now available at `http://localhost:7000` (or `http://YOUR_SERVER_IP:7000`).
-
----
-
-### Option 2: Local Node.js (Same Wi-Fi / Local Network or Cloudflare Tunnel)
-
-1. **Install and run the addon:**
-   ```bash
-   git clone https://github.com/mlp2069/aiosports.git
-   cd live-sport-plugin
-   npm install
-   npm run build
-   npm start
-   ```
-
-2. **Access from other Devices on the Same Wi-Fi (Phone, TV, another Laptop):**
-   - Find your host computer's local IPv4 address:
-     - **Windows:** Open Command Prompt (`cmd`) and type `ipconfig` (look for `IPv4 Address`, e.g., `192.168.1.50`).
-     - **Mac / Linux:** Open Terminal and type `ifconfig` or `ip a` (e.g., `192.168.1.50`).
-   - On any phone/tablet/laptop connected to the same Wi-Fi, open your browser:
-     ```
-     http://<YOUR_IPV4_ADDRESS>:7000/configure
-     ```
-     *(Example: `http://192.168.1.50:7000/configure`)*
-   - Configure your settings, copy the link, and paste into Nuvio / Stremio!
-
-3. **(Optional) Expose Outside Home via Cloudflare Tunnel (`cloudflared`):**
-   - Download [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
-   - Run a quick tunnel:
-     ```bash
-     cloudflared tunnel --url http://127.0.0.1:7000
-     ```
-   - Open `https://your-tunnel-url.trycloudflare.com/configure` and install anywhere outside your home network!
-
-*(Alternative: You can also use [Ngrok](https://ngrok.com) by running `ngrok http 127.0.0.1:7000`).*
-
----
-
-### Option 3: Linux VPS with PM2 (Production 24/7)
-
-```bash
-# Clone and build
-git clone https://github.com/mlp2069/aiosports.git
-cd live-sport-plugin
-npm install
-npm run build
-
-# Install PM2 and start the service
-npm install -g pm2
-pm2 start dist/index.js --name "nuvio-sports"
-pm2 save
-pm2 startup
-```
-
----
-
-## 🔐 Sign-in and the Dashboard
-
-`AUTH_KEY` is optional: leave it unset and the pages stay open. `ADMIN_TOKEN` is
-not optional for the dashboard -- leave it unset and the dashboard is closed to
-everyone, including you.
-
-| Variable | Guards | Leave empty and… |
-|---|---|---|
-| `AUTH_KEY` | the catalog at `/` and `/configure` | anyone with the link can browse |
-| `ADMIN_TOKEN` | `/dashboard` and anything that changes state | the dashboard stays closed — there is no address-based fallback |
-
-Put them in a `.env` file beside `docker-compose.yml`:
-
-```bash
+cd aiosports
 cp .env.example .env
-# then edit .env and set:
-#   AUTH_KEY=something-long
-#   ADMIN_TOKEN=something-else-long
+docker compose up -d --build
 ```
 
-Both the app and Docker Compose read that file, so the same `.env` works whether
-you run `docker compose up -d` or `npm start`.
+The first build takes a few minutes. Then open `http://<your computer's IP address>:7000/configure` in a browser on the same network. On Windows, `ipconfig` shows the address; on macOS or Linux, use `ipconfig getifaddr en0` or `ip a`.
 
-**Check it took.** The startup log prints which gates are on:
+The server only needs to reach the internet, not be reachable from it. Anything that can open the address can use the addon, though, so read [Passwords, profiles and the dashboard](#passwords-profiles-and-the-dashboard) before you expose it.
 
+## Install it in Stremio or Nuvio
+
+1. Open `/configure` on your server and pick your sports, sources and teams.
+2. Press **Save** to get an install link that ends in `/manifest.json`. You can also copy the link from the install button.
+3. Add that link in your player:
+   - **Stremio:** paste it into the search box on the Addons page, then press Install.
+   - **Nuvio:** go to Settings → Addons and add the link.
+
+### Stremio needs https
+
+Stremio only loads addons over `https://`. The one exception is an addon at `http://127.0.0.1` on the same computer. A home address like `http://192.168.1.50:7000` works in Nuvio but not in Stremio. Two common ways to get https:
+
+- **Cloudflare Tunnel.** Install [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then run `cloudflared tunnel --url http://127.0.0.1:7000`. That gives you a temporary `https://….trycloudflare.com` address. A named tunnel on your own domain gives you a permanent one.
+- **A reverse proxy with a certificate**, such as Caddy, nginx or Traefik, on a domain you control.
+
+Once you have an https address, put it in `.env` as `ADDON_URL=https://your.address` and run `docker compose up -d` again. Reinstall the addon from the https address.
+
+## Updating
+
+```bash
+cd aiosports
+git pull
+docker compose up -d --build --remove-orphans
 ```
-Sign-in   : AUTH_KEY set
-Dashboard : ADMIN_TOKEN set
-Proxies   : trust proxy = loopback/private only (default)
+
+`--build` matters: without it, Compose keeps running the old image. Saved profiles live in the `aiosports-data` volume and survive updates. `--remove-orphans` clears out the container from older versions, which used a different service name.
+
+If the manifest id or the tabs changed in a release, the release notes say so. In that case, reinstall the addon in your player.
+
+## Other ways to run it
+
+### Prebuilt image
+
+Every push to `main` publishes `ghcr.io/mlp2069/aiosports:latest`. It is **linux/amd64 only**. On a Raspberry Pi or another ARM machine, build from source with the Quick start steps instead.
+
+```bash
+docker run -d --name aiosports -p 7000:7000 \
+  --env-file .env -e DATA_DIR=/data -v aiosports-data:/data \
+  --restart unless-stopped ghcr.io/mlp2069/aiosports:latest
 ```
 
-If either says `NOT SET` and the port is reachable from the internet, it is open.
-That line exists because an unset key fails *open*, and your own browser is shown
-a login page either way — so the only way to notice used to be from another
-machine.
+### Node.js
 
-> **`ADMIN_TOKEN` is required to reach the dashboard.** With no token it is simply
-> shut. There is deliberately no "but you look like you're on my network"
-> exception: under Docker every request arrives from the bridge gateway, which is
-> itself a private address, so that exception let the whole internet in.
+Node.js 22 or newer is required.
 
-Visiting the site then lands on `/login`, and signing in takes you to the
-catalog. The gear icon in the header opens the dashboard, which asks for
-`ADMIN_TOKEN` separately — being allowed to browse does not mean being allowed
-to clear a cache. `ADMIN_TOKEN` works for both, so you never type two passwords.
+```bash
+git clone https://github.com/mlp2069/aiosports.git
+cd aiosports
+cp .env.example .env
+npm install
+npm start
+```
 
-Sign-in leaves an `HttpOnly` cookie holding a signature over its own expiry,
-keyed by the password. The password itself is never in the cookie, so a stolen
-one cannot be turned back into it. Eight failed attempts from an address buys a
-five-minute pause — which applies to the correct password too, since refusing to
-check it is the point.
+`npm start` builds before it starts, so a separate build step isn't needed. To keep it running in the background with PM2, start it from the `aiosports` folder, because the internal resolver is found relative to that folder:
 
-### What is deliberately *not* behind a password
+```bash
+npm install -g pm2
+pm2 start npm --name aiosports -- start
+pm2 save
+```
 
-The addon's own endpoints — `manifest.json`, catalogs, metadata, streams and
-`/img` artwork. Nuvio and Stremio have no way to sign in, so gating those would
-simply stop the addon working. What stays reachable to somebody holding your URL
-is fixtures and pictures of crests: no settings, no state, nothing personal.
+## Settings
 
-If you need the addon itself private, that is a job for the layer in front of
-it — an IP allowlist or a VPN — not for this application.
+Settings live in `.env`. Copy `.env.example` and edit it, and restart after a change. These are the ones most people set:
 
-### Behind a reverse proxy
+| Variable | What it does |
+|---|---|
+| `ADDON_URL` | Your public address, e.g. `https://sports.example.com`. Needed for Stremio (see [https](#stremio-needs-https)). |
+| `AUTH_KEY` | Password for the catalog and `/configure` pages. |
+| `ADMIN_TOKEN` | Password for `/dashboard`. The dashboard stays closed until this is set. |
+| `TZ` | Timezone for kickoff times, for viewers who haven't picked one. |
+| `HIDE_EMPTY_CHANNELS` | `0` lists every channel, even ones with no streams right now. |
+| `TRUST_PROXY` | Only for a reverse proxy on a public address. See `.env.example`. |
+| `RATE_LIMIT` | `off` disables the per-address request limits. |
 
-If you put a proxy (Caddy, nginx, Traefik) in front, the addon must be told, or
-every visitor arrives wearing the proxy's address. It trusts `X-Forwarded-For`
-only from proxies on loopback or a private range, which is the usual arrangement
-and needs no configuration.
+`.env.example` explains the rest, including `DATA_DIR`, `LINK_SECRET` and the source-specific options.
 
-A proxy on a public address needs `TRUST_PROXY` set — a hop count (`TRUST_PROXY=1`)
-or a comma-separated list of proxy addresses/CIDRs. Set the narrowest value that
-works, and be sure the addon's own port is not reachable directly first.
+## Passwords, profiles and the dashboard
 
-Do not set it to `true`. That makes `req.ip` whatever the caller writes in a
-header, which defeats the per-address throttle on failed sign-ins.
+| | Without it | With it |
+|---|---|---|
+| `AUTH_KEY` | Anyone who can open the address can browse the catalog and `/configure`. | Visitors sign in at `/login` first. |
+| `ADMIN_TOKEN` | `/dashboard` is closed to everyone. | Open `/dashboard` and sign in with the token. |
 
----
+**Use long random values**, for example the output of `openssl rand -base64 24`. After eight wrong guesses from one address, sign-in pauses for five minutes.
 
-## 🗂️ Catalog Tabs
+**Saved profiles.** Every profile has its own install link, so two people can keep different settings on one server.
+
+- With `AUTH_KEY` set, anyone who has signed in can see and change every profile.
+- Without it, a profile can only be changed from the browser that saved it. To change it from another device, use that profile's **edit link**, shown under the install link on `/configure`. Keep the edit link private.
+
+**What stays open.** The manifest, catalogs, streams and artwork are never behind a password, because Stremio and Nuvio have no way to sign in. Someone who has your install link can therefore use the addon. To keep the addon itself private, put an IP allowlist or a VPN in front of it.
+
+**Behind a reverse proxy.** Caddy, nginx and Traefik on the same machine or network work without extra setup. If your proxy sits on a public address, set `TRUST_PROXY` as `.env.example` describes, and never set it to `true`.
+
+## Catalog tabs
 
 | Tab | Holds |
 |---|---|
-| 🔴 Live Now | fixtures in progress — channels are not mixed in |
-| ⚽ Soccer | association football |
-| 🏈 NFL | the NFL alone |
-| 🏈 Other Football | the CFL, the AFL, and gridiron whose league cannot be named |
-| 🎓 College | college fixtures of any sport, badged with the ball it is played with |
-| 🏉 Rugby | badged per competition: NRL, Premiership, URC, Top 14, Super Rugby, test rugby |
-| 🏎️ Racing | motorsport |
-| 📺 Channels | every always-on channel in one place, including scheduled ones like NFL RedZone |
-| 🏏 🏀 🏒 ⚾ 🥊 ⛳ 🎾 🎯 | cricket, basketball, hockey, baseball, MMA, golf, tennis, darts |
-| 🏅 Other Sports | anything that fits no tab above |
-| ⏱️ Upcoming · ⭐ Your Teams | everything ahead; clubs you follow in `/configure` |
+| 🔴 Live Now | Fixtures in progress. Channels are not mixed in. |
+| ⚽ Soccer | Association football |
+| 🏈 NFL | The NFL |
+| 🏈 Other Football | The CFL, the AFL, and gridiron whose league can't be named |
+| 🎓 College | College fixtures in any sport |
+| 🏉 Rugby | NRL, Premiership, URC, Top 14, Super Rugby and test rugby |
+| 🏎️ Racing | Motorsport |
+| 📺 Channels | Every 24/7 channel, A to Z, with a genre filter |
+| 🏏 🏀 🏒 ⚾ 🥊 ⛳ 🎾 🎯 | Cricket, basketball, hockey, baseball, MMA, golf, tennis, darts |
+| 🏅 Other Sports | Anything that fits no tab above |
+| ⏱️ Upcoming · ⭐ Your Teams | Everything ahead, and the teams you follow in `/configure` |
 
-A fixture's competition is derived from the crests of the two sides, so a game
-lands in the right tab even when the provider sends no league — which is the
-normal case for rugby, and common for the smaller college divisions.
+In `/configure` you can hide, rename and reorder the tabs.
 
----
+## Sources
 
-## ✨ Key Features
+StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSports99, Streamic, USA TV and iptv-org. You can turn each one on or off and set the order its streams are listed in, all in `/configure`.
 
-- **🏟️ Multi-Source Live Aggregator:** Concurrently scrapes and unifies live fixtures from 8+ scrapers (Streamed.pk, StreamFree, WatchFooty, SportyHunter, TimStreams, StreamSports99, Streamic, CDNLiveTV) into a deduplicated catalog with merged stream choices.
-- **⚡ Coalescing Zero-Lag HLS Manifest Proxy (`/api/manifest`):** High-speed HLS proxy powered by `impit` with persistent keep-alive connections. Coalesces concurrent in-flight upstream requests (`manifestInFlight`) to eliminate duplicate fetches during live player segment polls and prevent ISP/upstream throttling.
-- **🔐 Native WebAssembly (WASM) Decryption:** Executes native WebAssembly binaries (`stream-lock.wasm`, `gasm.wasm`, `gasm_india.wasm`) directly in Node.js to decrypt obfuscated tokens and unlock protected third-party stream endpoints.
-- **🌐 Universal Dynamic Host Routing:** Zero hardcoded local IPs. Automatically inspects incoming `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and `cf-visitor` headers to dynamically rewrite all manifests, streams, and asset URLs to match the client's gateway (local LAN, Cloudflare Tunnels, Ngrok, or custom domains).
-- **🛡️ Opossum Circuit Breakers & Negative Caching:** Every provider scraper is isolated via an Opossum circuit breaker to instantly trip on timeouts or failures. Dead upstreams are negatively cached for 15s so video players seamlessly fail over to alternate sources without freezing.
-- **🖼️ Resilient 100% 200 OK Image Pipeline (`/img`):** High-performance image proxy with LRU caching (`stale-while-revalidate`), protocol-relative normalization (`//`), and dynamic inline SVG fallback cards to ensure clients never encounter broken posters or missing team crests.
-- **🧠 Algorithmic Stream Scoring & Ranking:** Evaluates and sorts stream links in real time based on resolution (1080p > 720p > SD), latency, direct M3U8 vs. webview embeds, audio commentary language, and live viewer counts.
-- **🧱 Clean Architecture & Awilix IoC:** Built with Domain-Driven Design (DDD) entities (`MatchEntity`, `StreamEntity`), modular service layers, and an Awilix Inversion of Control (IoC) dependency injection container.
-- **📄 Declarative YAML Provider Engine:** Includes a dynamic `YamlProviderBuilder` allowing developers to configure and plug in new stream scrapers via declarative YAML definitions without writing boilerplate.
-- **⚙️ Responsive Glassmorphic Web UI:** A browser catalog (`/`) and a configuration interface (`/configure`) to filter sports categories, toggle active providers, order stream sources, localize match kickoffs to your timezone, and track favorite clubs.
-- **📊 Operations Dashboard (`/dashboard`):** Cache sizes and hit rates, warming progress, event count, memory and uptime, with controls to warm or clear the caches. Behind its own password.
-- **🖼️ Crest-Built Match Cards:** Posters are drawn from both teams' crests and rasterised to JPEG server-side, because clients do not render SVG posters. The corner badge is the competition, worked out from the crests themselves rather than from whatever a provider called the league — which is how rugby, the CFL and college fixtures get the right mark when the feed names no league at all.
-- **🔥 Poster Cache Warming:** Cards are rendered ahead of time, one at a time with a pause, at startup and every six hours. A tab is hundreds of cards; rendering them on demand pegged a two-core host, and rendering them slowly in advance does not.
+## FAQ and troubleshooting
 
----
+**A fixture has no streams.** The source sites haven't posted one yet, or took it down. Streams often appear shortly before kickoff. Try again closer to the start, or pick another source's tile.
 
-## 🛠️ Tech Stack
+**Stremio won't install the addon.** It needs an https address; see [Stremio needs https](#stremio-needs-https).
 
-| Layer | Technologies |
-|---|---|
-| **Runtime & Core** | [Node.js](https://nodejs.org/) (v22+ LTS), [Express.js](https://expressjs.com/) |
-| **Addon Protocol** | [stremio-addon-sdk](https://github.com/Stremio/stremio-addon-sdk) (Stremio v1 Protocol) |
-| **Architecture & IoC** | [Awilix](https://github.com/jeffijoe/awilix) (Dependency Injection / IoC Container), Domain-Driven Design (DDD) |
-| **High-Performance HTTP & TLS** | [Impit](https://github.com/impit-dev/impit) (Native HTTP client with TLS/browser fingerprint impersonation), [Undici](https://undici.nodejs.org/) |
-| **WASM Decryption Engines** | Native WebAssembly execution (`stream-lock.wasm`, `gasm.wasm`, `gasm_india.wasm`) |
-| **Scraping & DOM Extraction** | [Cheerio](https://cheerio.js.org/), [Happy DOM](https://github.com/capricorn86/happy-dom), [jsdom](https://github.com/jsdom/jsdom), [got-scraping](https://github.com/apify/got-scraping) |
-| **Resilience & Fault Tolerance** | [Opossum](https://nodeshift.dev/opossum/) (Circuit Breakers), In-Flight Request Coalescing, Negative Cache Maps |
-| **Streaming & Playlists** | [m3u8-parser](https://github.com/videojs/m3u8-parser), Dynamic M3U8 segment rewriter |
-| **Background Scheduling** | [node-cron](https://github.com/node-cron/node-cron) (Periodic match aggregator sync) |
-| **Encoding & Compression** | [lz-string](https://github.com/pieroxy/lz-string) (URL-safe base64url configuration compression) |
-| **Production Bundler** | [@vercel/ncc](https://github.com/vercel/ncc) (Single CJS distribution with native WASM asset copying) |
+**Covers show only a name for a moment.** The first time a tab opens, the server fetches logos and draws covers. They're cached afterwards, and the server warms them in the background after it starts.
 
----
+**A channel disappeared.** Channels with no streams across two checks at least 15 minutes apart are hidden, and they come back once they play again. `HIDE_EMPTY_CHANNELS=0` shows them all.
 
-## 📋 Prerequisites
+**My saved settings were lost after an update.** Profiles are stored in `DATA_DIR`. Compose keeps them on the `aiosports-data` volume. With `docker run`, add `-v aiosports-data:/data -e DATA_DIR=/data`.
 
-Before setting up the project locally:
-- **Node.js**: Version `22.0.0` or higher (LTS recommended)
-- **npm**: Version `10.0.0` or higher (bundled with Node.js)
-- **Git**: Installed and accessible from your terminal
+**Port 7000 is already in use.** Change the left side of `"7000:7000"` in `docker-compose.yml`, for example to `"7100:7000"`.
 
----
+**Can I host it on Render, Vercel or Railway?** It's not recommended. Free app hosts tend to suspend apps that scrape websites or relay media. A spare computer, a Raspberry Pi or a small VPS works better.
 
-## 🚀 Development Workflow
+**Does it work on a Raspberry Pi?** Yes. Build from source with the Quick start steps, because the prebuilt image is amd64 only.
+
+## Development
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Start development mode with native watch reload
-npm run dev
-
-# 3. Build for production (bundles with @vercel/ncc and copies WASM runtimes)
-npm run build
-
-# 4. Launch the compiled production server
-npm start
-
-# 5. Scaffold a new scraper from template
-npm run generate:provider
+npm run dev      # restarts on changes to src/
+npm test         # channel-merge tests
+npm run build    # bundles to dist/
 ```
 
----
+Built with Node.js, Express and [stremio-addon-sdk](https://github.com/Stremio/stremio-addon-sdk). HTTP goes through [impit](https://github.com/apify/impit) with an [undici](https://undici.nodejs.org/) fallback. Artwork is rendered with [sharp](https://sharp.pixelplumbing.com/).
 
-## 🎛️ Configuration Options
+## Getting help
 
-Through the interactive `/configure` UI (or via URL-safe base64 config segments), you can customize:
-- **Sports Filtering:** Select from 14+ sports categories (Soccer, Basketball, Cricket, F1 & Racing, NFL, Hockey, Baseball, MMA, Golf, Tennis, Rugby, College Sports, Darts, Other).
-- **Streaming Sources Selection:** Individually enable or disable scrapers (StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLiveTV, StreamSports99, Streamic).
-- **Localization & Timezones:** Auto-detects or manually configures your local IANA timezone to render match kick-off schedules in your local time.
-- **Priority Tracking ("⭐ Your Teams"):** Enter comma-separated favorite clubs or athletes (e.g. `Arsenal, Lakers, Ferrari`) to dynamically generate a dedicated priority catalog.
+- **Bugs and questions:** open an [issue](https://github.com/mlp2069/aiosports/issues). The template asks for what's needed.
+- **Security problems:** report them privately; see [SECURITY.md](SECURITY.md).
+- **Support the project:** [this fork on Ko-fi](https://ko-fi.com/mlp20), or [the upstream project](https://ko-fi.com/rajodedara) it's built on.
 
----
+## License and disclaimer
 
-## 🧪 Testing & Verification Suites
+AIOSports is released under the [MIT License](LICENSE). It is free, with no paid tiers, and anyone selling access to it is not connected to this project.
 
-The project features a multi-tiered test suite including unit tests, adversarial stress tests, and automated Stremio client simulations:
-
-```bash
-# Run unit & service test suites with Jest
-npm test
-
-# Run simulated Stremio client E2E test (verifies manifest, catalogs, and streams)
-npm run test:e2e-client
-
-# Run live upstream scraper health check across all providers
-npm run check-sources
-
-# Validate 24/7 channel and live TV endpoints
-npm run test:247
-```
-
----
-
-## 📄 License & Disclaimer
-
-This project is licensed under the [MIT License](LICENSE).
-
-- **Personal & Educational Use:** This software is an experimental media aggregator and protocol scraper developed solely for personal, non-commercial, and educational purposes.
-- **No Hosting of Media:** This addon does not host, broadcast, or store any video content or media streams on its own servers. It merely parses publicly reachable web manifests.
-- **Third-Party Integrity:** The authors assume no liability for unofficial third-party forks, paid reseller bundles, or modified distributions operating under independent domains.
-
+- **No hosted media.** The addon doesn't host, store or broadcast video. It lists links that third-party websites already publish and passes them to your player.
+- **Not affiliated.** It isn't affiliated with or endorsed by any league, team, broadcaster or streaming service. Their names and logos belong to their owners and appear only to identify content.
+- **Your responsibility.** You're responsible for following the laws where you live and the terms of any service you use.
+- **Removal requests.** Rights holders can open an issue asking for a source or listing to be removed.
