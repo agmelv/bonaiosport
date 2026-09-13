@@ -56,6 +56,9 @@ const REWRITES = [
   [/^sony-sports-network$/, 'sony-ten-1']
 ];
 
+// Two-letter words that end channel names without naming a country.
+const NOT_COUNTRY = new Set(['tv', 'hd', 'sd', 'fm', 'jr', 'go', 'on', 'up', 'xl', 'uhd']);
+
 const slug = (s) => String(s || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase()
@@ -127,8 +130,12 @@ function lookup(name) {
   const words = String(name).trim().split(/\s+/);
   let want = null;
   const last = (words[words.length - 1] || '').toLowerCase();
-  if (words.length > 1 && COUNTRY[last]) {
-    want = COUNTRY[last];
+  // A named country, or any other two-letter code at the end of the name --
+  // region labels use them ("Sky Sport 1 AT", "Stan Sport 2 AU") and tv-logos
+  // files by the same codes. Two-letter words that are not countries are left
+  // alone, so "Rally TV" is still looked up as rally-tv.
+  if (words.length > 1 && (COUNTRY[last] || (/^[a-z]{2}$/.test(last) && !NOT_COUNTRY.has(last)))) {
+    want = COUNTRY[last] || last;
     words.pop();
   }
   const base = slug(words.join(' '));
@@ -146,8 +153,11 @@ function lookup(name) {
   if (!candidates || !candidates.length) return null;
 
   const preferred = want || 'us';
+  const retired = (c) => /\/old\//.test(c.path);
   const best = candidates.slice().sort((a, b) =>
-    (a.cc !== preferred) - (b.cc !== preferred)
+    // A logo filed under old/ is retired branding; any current logo beats it.
+    retired(a) - retired(b)
+    || (a.cc !== preferred) - (b.cc !== preferred)
     || (!['us', 'uk'].includes(a.cc)) - (!['us', 'uk'].includes(b.cc))
     // The standard mark before the horizontal variant: the same URL is used for
     // the corner badge, which is square.

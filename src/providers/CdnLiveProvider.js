@@ -154,7 +154,10 @@ class CdnLiveProvider extends BaseProvider {
           date: '0',
           popular: '0',
           league: 'Live TV',
-          thumbnail_url: typeof c.image === 'string' ? c.image : '',
+          // No artwork from the list. Its image links answer 401 whatever is sent
+          // -- they need an account -- so every card drawn from one was a
+          // placeholder, and every attempt was another request to a host that
+          // already rate-limits this server. The logo index supplies the logo.
           sources: [{ source: 'cdnlive', id: CHANNEL_PREFIX + c.url }]
         });
       });

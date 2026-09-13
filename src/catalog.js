@@ -524,7 +524,11 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   if (bothSides && matchupPoster) {
     poster = matchupPoster;
-  } else if (matchPoster) {
+  } else if (matchPoster && !(is247Channel && channelMark)) {
+    // A 24/7 channel with a logo gets its cover even when a source also sent a
+    // poster. Streamed.pk ships promo art for its channels, and because this
+    // branch came first, NFL Network, Tennis Channel, Willow and NFL RedZone --
+    // merged under that entry -- showed the promo instead of a cover.
     poster = buildImg(matchPoster, posterText, color) || fallbackPoster;
   } else if (matchupPoster) {
     poster = matchupPoster;
