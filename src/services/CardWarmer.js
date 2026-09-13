@@ -27,9 +27,11 @@ const { PORT } = require('../config');
 // the whole point is that no one is waiting on it.
 const GAP_MS = Number(process.env.WARM_GAP_MS) || 250;
 
-// Stop rather than churn: past the cache's own capacity, warming would evict
-// what it had just made and the queue would never converge.
-const MAX_CARDS = 1000;
+// Stop rather than churn: past the card cache's own capacity (3000, in
+// ImageService), warming would evict what it had just made and the queue would
+// never converge. A thousand stopped short of the Channels tab, which alone
+// holds over seven hundred covers.
+const MAX_CARDS = 2500;
 
 const REQUEST_TIMEOUT_MS = 15000;
 

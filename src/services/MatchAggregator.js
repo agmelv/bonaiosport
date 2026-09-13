@@ -54,6 +54,11 @@ function _compoundify(t) {
     [/\bleicester(\s*city)?\b/g, 'leicestercity'],
     [/\bsheff(?:ield)?\s*(?:utd|united)\b/g, 'sheffieldunited'],
     [/\bbe(?:in\s*sport|\s*in)\b/g, 'beinsport'],
+    // Channels listed under their on-air short names. USA TV Next's FS1 and FS2
+    // were separate tiles from TimStreams' Fox Sports 1 and 2 -- one with the
+    // streams, one without.
+    [/\bfs\s*1\b|\bfox\s*sports?\s*1\b/g, 'foxsports1'],
+    [/\bfs\s*2\b|\bfox\s*sports?\s*2\b/g, 'foxsports2'],
     [/\bal[\s\-]nassr\b/g, 'alnassr'],
     [/\bal[\s\-]hilal\b/g, 'alhilal'],
     [/\bal[\s\-]ahly\b/g, 'alahly'],

@@ -32,23 +32,43 @@ const redirectAgent = new Agent().compose(interceptors.redirect({ maxRedirection
 // restyle would leave viewers looking at the old artwork until the TTL expired.
 // Bump this whenever svgMatchup() or svgPlaceholder() changes what they draw;
 // it rides along in every generated image URL and retires the stale copies.
-const RENDER_VERSION = 3;
+const RENDER_VERSION = 4;
 const crestColor = require('./CrestColorService');
 const crypto = require('crypto');
 const sharp = require('sharp');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
-const IMAGE_TTL_MS = 10 * 60 * 1000;   // 10 minutes
-const CACHE_MAX_ENTRIES = 120;
+// Logos and crests change on the scale of seasons, not minutes. Ten minutes
+// and 120 entries was sized for a few dozen fixture crests; the Channels tab
+// alone draws on 700 logos, so a player opening it evicted what the warmer had
+// just fetched and sent several hundred requests upstream at once. Wikimedia
+// answered 429, GitHub and imgur timed out, and those channels came back as
+// name-only covers.
+const IMAGE_TTL_MS = 6 * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 2000;
+const CACHE_MAX_BYTES = 160 * 1024 * 1024;
 const IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 3000;
+// One request. Three seconds cut off logo hosts that were merely busy; the
+// deadline below is what bounds the whole wait.
+const FETCH_TIMEOUT_MS = 6000;
+// The whole budget for one image, queueing and a second try included. A player
+// gives up on an image after about ten seconds, so a card that waits longer is
+// a blank tile anyway -- better to send the card without that logo in time.
+const FETCH_DEADLINE_MS = 8000;
+
+// Wikimedia asks automated clients to name themselves, and throttles a browser
+// string arriving from a server far sooner than a named one.
+const BOT_UA = 'AIOSports/1.0 (https://github.com/mlp2069/aiosports)';
 
 const cache = new Map();     // url -> { buffer, contentType, expiresAt }
 const inFlight = new Map();  // url -> Promise
 const negatives = new Map(); // url -> expiry ts (recently failed/slow sources)
 
 const NEG_TTL_MS = 60 * 1000;
+// A fetch that never started -- its host cooling down, or no slot free before
+// the deadline -- says nothing about the image, so it is asked again sooner.
+const NEG_TTL_SKIPPED_MS = 10 * 1000;
 
 function normalizeUrl(url) {
   if (!url || typeof url !== 'string') return null;
@@ -341,7 +361,7 @@ const RASTER_CACHE_MAX = 1200;
 
 // Plain counters, for the dashboard. A hit rate that is falling is the signal
 // that the cache is too small for the catalog again.
-const stats = { rasterHits: 0, rasterMisses: 0, fetchHits: 0, fetchMisses: 0 };
+const stats = { rasterHits: 0, rasterMisses: 0, fetchHits: 0, fetchMisses: 0, cardHits: 0, cardMisses: 0 };
 
 async function rasterize(svg) {
   const key = crypto.createHash('sha1').update(svg).digest('base64');
@@ -362,11 +382,44 @@ async function rasterize(svg) {
   return buf;
 }
 
+// Finished cards by the URL that asked for them. The raster cache above is
+// keyed by the drawing, and making the drawing means fetching the logo first --
+// the slow, rate-limited half. Keyed by URL, a card a player has asked for
+// before, or the warmer has made, costs a map lookup. Only cards whose art
+// arrived are kept; a card drawn around a missing logo must be drawn again.
+const cardCache = new Map();
+const CARD_CACHE_MAX = 3000;
+const CARD_TTL_MS = 12 * 60 * 60 * 1000;
+
+function cardKey(req) {
+  if (String(req.query.format || '').toLowerCase() === 'svg') return null;
+  return req.originalUrl || req.url || null;
+}
+
+/** Send the card already made for this URL. True when it did. */
+function sendCachedCard(req, res) {
+  const key = cardKey(req);
+  const hit = key ? cardCache.get(key) : null;
+  if (!hit || Date.now() > hit.expiresAt) {
+    if (hit) cardCache.delete(key);
+    stats.cardMisses++;
+    return false;
+  }
+  cardCache.delete(key);
+  cardCache.set(key, hit);
+  stats.cardHits++;
+  res.setHeader('Cache-Control', hit.cacheControl);
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.send(hit.jpeg);
+  return true;
+}
+
 /**
  * Send a generated card, rasterised unless ?format=svg was asked for. A
  * rasteriser failure falls back to the SVG rather than to no image at all.
+ * `remember` keeps the finished card for sendCachedCard.
  */
-async function sendCard(req, res, svg, cacheControl) {
+async function sendCard(req, res, svg, cacheControl, opts = {}) {
   res.setHeader('Cache-Control', cacheControl);
   if (String(req.query.format || '').toLowerCase() === 'svg') {
     res.setHeader('Content-Type', 'image/svg+xml');
@@ -375,6 +428,11 @@ async function sendCard(req, res, svg, cacheControl) {
   try {
     const jpeg = await rasterize(svg);
     res.setHeader('Content-Type', 'image/jpeg');
+    const key = opts.remember && cacheControl !== 'no-store' ? cardKey(req) : null;
+    if (key) {
+      if (cardCache.size >= CARD_CACHE_MAX) cardCache.delete(cardCache.keys().next().value);
+      cardCache.set(key, { jpeg, cacheControl, expiresAt: Date.now() + CARD_TTL_MS });
+    }
     return res.send(jpeg);
   } catch (err) {
     res.setHeader('Content-Type', 'image/svg+xml');
@@ -415,6 +473,13 @@ const KNOCKOUT_CACHE_MAX = 600;
  * like a logo on a plain backdrop: already transparent, a busy edge (a photo),
  * or a fill that clears almost nothing or almost everything.
  */
+/** Share of pixels that are fully transparent. */
+function transparentShare(data) {
+  let zero = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] === 0) zero++;
+  return zero / (data.length / 4);
+}
+
 async function knockoutBackground(buffer, opts = {}) {
   if (!buffer) return null;
   const key = crypto.createHash('sha1').update(buffer).digest('base64') + (opts.allowDark ? ':dark' : '');
@@ -427,7 +492,11 @@ async function knockoutBackground(buffer, opts = {}) {
       .raw()
       .toBuffer({ resolveWithObject: true });
     const W = info.width, H = info.height, C = info.channels;
-    if (W && H && C === 4) {
+    // A logo that already has transparent areas has drawn its own shape. The
+    // Spanish DAZN files have opaque white corners around a transparent box,
+    // and filling from those corners erased the box frame and the channel
+    // number, leaving loose DA ZN letters.
+    if (W && H && C === 4 && transparentShare(data) < 0.01) {
       const edge = [];
       for (let x = 0; x < W; x++) edge.push(x, (H - 1) * W + x);
       for (let y = 1; y < H - 1; y++) edge.push(y * W, y * W + W - 1);
@@ -439,12 +508,21 @@ async function knockoutBackground(buffer, opts = {}) {
         r += data[i]; g += data[i + 1]; b += data[i + 2];
       }
       r /= edge.length; g /= edge.length; b /= edge.length;
+      // Artwork that runs off the edge (Voice of America's V and A) pulls the
+      // edge average away from the backdrop. When the four corners agree and
+      // are opaque, their colour is the backdrop.
+      const cornerAt = [0, W - 1, (H - 1) * W, H * W - 1].map(p => p * 4);
+      const cornersAgree = cornerAt.every(i => data[i + 3] >= 250
+        && Math.abs(data[i] - data[cornerAt[0]]) + Math.abs(data[i + 1] - data[cornerAt[0] + 1])
+          + Math.abs(data[i + 2] - data[cornerAt[0] + 2]) <= 42);
+      if (cornersAgree) { r = data[cornerAt[0]]; g = data[cornerAt[0] + 1]; b = data[cornerAt[0] + 2]; }
       const dist = (i) => Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b);
       const TOL = 42;
       let uniform = 0;
       for (const p of edge) if (dist(p * 4) <= TOL) uniform++;
 
-      if (clear / edge.length < 0.2 && uniform / edge.length >= 0.9) {
+      const strictEdge = uniform / edge.length >= 0.9;
+      if (clear / edge.length < 0.2 && (strictEdge || (cornersAgree && uniform / edge.length >= 0.6))) {
         const cleared = new Uint8Array(W * H);
         const stack = edge.slice();
         let count = 0;
@@ -476,7 +554,24 @@ async function knockoutBackground(buffer, opts = {}) {
         // A caller that lifts dark marks afterwards (coverMark) asks for the
         // backdrop to go regardless.
         const legible = kept > 0 && (opts.allowDark || lum / kept >= 0.28);
-        if (legible && share >= 0.05 && share <= 0.97) {
+        // The corner rule is for a logo whose artwork runs off the edge. A
+        // letterboxed promo still also has four agreeing black corners, and
+        // clearing its bars exposed every shadow to the lift. A logo has a
+        // few hundred distinct colours at most; a photo has thousands.
+        let logoLike = true;
+        if (!strictEdge) {
+          const colours = new Uint8Array(4096);
+          let distinct = 0;
+          for (let p = 0; p < W * H && distinct <= 512; p++) {
+            if (cleared[p]) continue;
+            const i = p * 4;
+            if (data[i + 3] < 128) continue;
+            const c = (data[i] >> 4) << 8 | (data[i + 1] >> 4) << 4 | (data[i + 2] >> 4);
+            if (!colours[c]) { colours[c] = 1; distinct++; }
+          }
+          logoLike = distinct <= 512;
+        }
+        if (legible && logoLike && share >= 0.05 && share <= 0.97) {
           // Soften the boundary: a pixel touching the cleared area keeps an
           // alpha in proportion to how far its colour is from the backdrop.
           const SOFT = TOL * 3;
@@ -519,6 +614,13 @@ async function knockoutBackground(buffer, opts = {}) {
  */
 const liftCache = new Map();
 
+// sRGB channel value to linear light, for contrast; and the cover grey's own.
+const LINEAR = Array.from({ length: 256 }, (_, v) => {
+  const c = v / 255;
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+});
+const COVER_GREY_L = 0.2126 * LINEAR[0x33] + 0.7152 * LINEAR[0x34] + 0.0722 * LINEAR[0x36];
+
 async function liftDarkMark(buffer) {
   if (!buffer) return null;
   const key = crypto.createHash('sha1').update(buffer).digest('base64');
@@ -535,67 +637,128 @@ async function liftDarkMark(buffer) {
       // Brightness as the eye sees it on grey is closer to the brightest
       // channel than to luminance: pure red reads clearly, navy does not.
       const DARK = 0.42;
+      // Contrast against the cover grey, measured the way WCAG does -- for
+      // near-neutral pixels only. A mid-grey wordmark vanishes on the grey
+      // however bright its strongest channel. A saturated colour is a brand
+      // colour: judged by contrast, PBS blue, Univision's blue quarter, MASN's
+      // swoosh and Telemundo's darker red all came out white. Colour is judged
+      // by brightness alone, as it always was.
+      const MIN_CONTRAST = 1.9;
+      const SATURATED = 0.5;
       const value = (p) => Math.max(data[p * 4], data[p * 4 + 1], data[p * 4 + 2]) / 255;
+      const saturation = (p) => {
+        const i = p * 4;
+        const mx = Math.max(data[i], data[i + 1], data[i + 2]);
+        return mx ? (mx - Math.min(data[i], data[i + 1], data[i + 2])) / mx : 0;
+      };
+      const contrast = (p) => {
+        const L = 0.2126 * LINEAR[data[p * 4]] + 0.7152 * LINEAR[data[p * 4 + 1]] + 0.0722 * LINEAR[data[p * 4 + 2]];
+        return (Math.max(L, COVER_GREY_L) + 0.05) / (Math.min(L, COVER_GREY_L) + 0.05);
+      };
+      // Above zero means too dim to read; 1 and over means fully so.
+      const dimness = (p) => {
+        const byValue = (DARK - value(p)) / 0.06;
+        if (saturation(p) >= SATURATED) return byValue;
+        return Math.max(byValue, (MIN_CONTRAST - contrast(p)) / 0.25);
+      };
       const clearAt = (p) => data[p * 4 + 3] < 128;
-      const darkAt = (p) => data[p * 4 + 3] > 0 && value(p) < DARK;
+      const darkAt = (p) => data[p * 4 + 3] > 0 && dimness(p) > 0;
+      // Light detail: opaque, bright and near neutral. The half-transparent
+      // fringe a knockout leaves round a stroke does not count; it made
+      // News12+ Connecticut's lettering look boxed, so it was never lifted.
+      const lightAt = (q) => {
+        const i = q * 4;
+        if (data[i + 3] < 250) return false;
+        const mx = Math.max(data[i], data[i + 1], data[i + 2]);
+        return mx >= 178 && (mx - Math.min(data[i], data[i + 1], data[i + 2])) / mx < 0.25;
+      };
 
       let opaque = 0, dark = 0, clear = 0;
       for (let p = 0; p < N; p++) {
         if (clearAt(p)) { clear++; continue; }
         opaque++;
-        if (value(p) < DARK) dark++;
+        if (dimness(p) > 0) dark++;
       }
-      if (opaque && clear / N >= 0.05 && dark / opaque >= 0.2) {
+      if (opaque && clear / N >= 0.05 && dark / opaque >= 0.05) {
+        // Each dark shape reachable from the open background is judged on its
+        // own. One holding light detail -- the white LIVE in LiveNOW's navy box,
+        // "Plus" in AWE Plus's bar -- is a box, not a stroke, and lifting it
+        // puts white on white: it borders light pixels about as much as the
+        // open background, where a dark wordmark borders almost nothing but
+        // background. Judged over the whole logo, a large clean stroke elsewhere
+        // outvoted the box and had it lifted anyway.
+        const seen = new Uint8Array(N);
         const lift = new Uint8Array(N);
-        const stack = [];
-        for (let p = 0; p < N; p++) {
-          if (!darkAt(p)) continue;
-          const x = p % W;
-          if ((x > 0 && clearAt(p - 1)) || (x < W - 1 && clearAt(p + 1))
-            || (p >= W && clearAt(p - W)) || (p < N - W && clearAt(p + W))) stack.push(p);
-        }
         let reached = 0;
-        while (stack.length) {
-          const p = stack.pop();
-          if (lift[p] || !darkAt(p)) continue;
-          lift[p] = 1;
-          if (!clearAt(p)) reached++;
+        let skippedSolid = 0;
+        let skippedCount = 0;
+        let liftedCount = 0;
+        const touchesOpen = (p) => {
           const x = p % W;
-          if (x > 0) stack.push(p - 1);
-          if (x < W - 1) stack.push(p + 1);
-          if (p >= W) stack.push(p - W);
-          if (p < N - W) stack.push(p + W);
-        }
-        // A dark shape holding light detail -- white lettering on a navy box,
-        // as in LiveNOW from FOX -- is a box, not a stroke, and lifting it
-        // puts white on white. Such a shape borders light pixels about as much
-        // as it borders the open background; a dark wordmark borders almost
-        // nothing but open background.
-        let openEdges = 0, lightEdges = 0;
-        const edge = (q) => {
-          if (clearAt(q)) { openEdges++; return; }
-          if (lift[q]) return;
-          const i = q * 4;
-          const mx = Math.max(data[i], data[i + 1], data[i + 2]);
-          const mn = Math.min(data[i], data[i + 1], data[i + 2]);
-          if (mx >= 178 && (mx - mn) / mx < 0.25) lightEdges++;
+          return (x > 0 && clearAt(p - 1)) || (x < W - 1 && clearAt(p + 1))
+            || (p >= W && clearAt(p - W)) || (p < N - W && clearAt(p + W));
         };
-        for (let p = 0; p < N; p++) {
-          if (!lift[p] || clearAt(p)) continue;
-          const x = p % W;
-          if (x > 0) edge(p - 1);
-          if (x < W - 1) edge(p + 1);
-          if (p >= W) edge(p - W);
-          if (p < N - W) edge(p + W);
+        for (let s0 = 0; s0 < N; s0++) {
+          if (seen[s0] || !darkAt(s0) || !touchesOpen(s0)) continue;
+          const comp = [];
+          const stack = [s0];
+          seen[s0] = 1;
+          while (stack.length) {
+            const p = stack.pop();
+            comp.push(p);
+            const x = p % W;
+            if (x > 0 && !seen[p - 1] && darkAt(p - 1)) { seen[p - 1] = 1; stack.push(p - 1); }
+            if (x < W - 1 && !seen[p + 1] && darkAt(p + 1)) { seen[p + 1] = 1; stack.push(p + 1); }
+            if (p >= W && !seen[p - W] && darkAt(p - W)) { seen[p - W] = 1; stack.push(p - W); }
+            if (p < N - W && !seen[p + W] && darkAt(p + W)) { seen[p + W] = 1; stack.push(p + W); }
+          }
+          let openEdges = 0, lightEdges = 0, colourEdges = 0, solid = 0;
+          const edge = (q) => {
+            if (clearAt(q)) { openEdges++; return; }
+            // A neighbour that itself touches the open background is the
+            // shape's own soft edge, not detail held inside it.
+            if (touchesOpen(q)) return;
+            if (lightAt(q)) lightEdges++;
+            // Any readable colour next to the shape: yellow lettering on a
+            // navy box, or a red wordmark ringed by its own dark anti-aliasing.
+            if (data[q * 4 + 3] >= 250 && dimness(q) <= 0) colourEdges++;
+          };
+          for (const p of comp) {
+            if (clearAt(p)) continue;
+            solid++;
+            const x = p % W;
+            if (x > 0) edge(p - 1);
+            if (x < W - 1) edge(p + 1);
+            if (p >= W) edge(p - W);
+            if (p < N - W) edge(p + W);
+          }
+          // A box, or a ring round coloured artwork: leave it as drawn. Grey and
+          // white detail inside says box at a low ratio; coloured neighbours
+          // need a higher one, since a dark stroke crossing a coloured bar is
+          // exactly what the lift is for.
+          if (lightEdges > openEdges * 0.3 || colourEdges > openEdges * 0.75) { skippedSolid += solid; skippedCount++; continue; }
+          for (const p of comp) lift[p] = 1;
+          reached += solid;
+          liftedCount++;
         }
-        const boxed = lightEdges > openEdges * 0.3;
-        if (!boxed && reached / opaque >= 0.12) {
+        // All or nothing when a word splits. A dark wordmark taken off white
+        // had its letters judged one by one, and some came out white beside
+        // others left black on the grey. That is several shapes of about the
+        // same size on each side. One large shape kept as drawn beside lifted
+        // lettering -- Access Tuolumne's mountains, AWE Plus's bar -- is the
+        // per-shape rule working, and is left alone.
+        const avgSkipped = skippedCount ? skippedSolid / skippedCount : 0;
+        const avgLifted = liftedCount ? reached / liftedCount : 0;
+        const splitWord = skippedCount >= 2 && liftedCount >= 2
+          && skippedSolid > 0.15 * (skippedSolid + reached)
+          && avgSkipped <= 3 * avgLifted && avgLifted <= 3 * avgSkipped;
+        if (reached / opaque >= 0.04 && !splitWord) {
           for (let p = 0; p < N; p++) {
             if (!lift[p]) continue;
-            // Fully dark goes to near-white; the band just under the threshold
+            // Fully dim goes to near-white; the band just under the threshold
             // blends, so the edge between a lifted and an unlifted colour does
             // not step.
-            const t = Math.min(1, (DARK - value(p)) / 0.06);
+            const t = Math.min(1, dimness(p));
             const i = p * 4;
             for (let c = 0; c < 3; c++) data[i + c] = Math.round(data[i + c] + (240 - data[i + c]) * t);
           }
@@ -615,13 +778,94 @@ async function liftDarkMark(buffer) {
 /**
  * A logo as a channel cover draws it: its backdrop removed and its dark parts
  * lifted. A dark mark on a white box keeps the box unless the lift works,
- * because the box is the only thing making it legible.
+ * because the box is the only thing making it legible -- and so does any logo
+ * the knockout leaves unreadable, such as dark calligraphy that could only be
+ * read on its white card.
  */
 async function coverMark(entry) {
   if (!entry || !entry.buffer) return entry;
   const plain = (await knockoutBackground(entry.buffer)) || entry;
   const opened = (await knockoutBackground(entry.buffer, { allowDark: true })) || entry;
-  return (await liftDarkMark(opened.buffer)) || plain;
+  let drawn = (await liftDarkMark(opened.buffer)) || plain;
+  if (drawn !== entry && (await readableShare(drawn.buffer)) < 0.3) drawn = entry;
+  return trimPadding(drawn);
+}
+
+const readableCache = new Map();
+
+/**
+ * The share of a logo's visible pixels that can be read on the cover grey:
+ * enough contrast, or a saturated colour bright enough to carry on its own.
+ */
+async function readableShare(buffer) {
+  const key = crypto.createHash('sha1').update(buffer).digest('base64');
+  if (readableCache.has(key)) return readableCache.get(key);
+  let share = 1;
+  try {
+    const { data, info } = await sharp(buffer, { failOn: 'none' })
+      .resize({ width: 200, height: 200, fit: 'inside', withoutEnlargement: true })
+      .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let visible = 0, readable = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 128) continue;
+      visible++;
+      const mx = Math.max(data[i], data[i + 1], data[i + 2]);
+      const mn = Math.min(data[i], data[i + 1], data[i + 2]);
+      const L = 0.2126 * LINEAR[data[i]] + 0.7152 * LINEAR[data[i + 1]] + 0.0722 * LINEAR[data[i + 2]];
+      const c = (Math.max(L, COVER_GREY_L) + 0.05) / (Math.min(L, COVER_GREY_L) + 0.05);
+      if (c >= 1.9 || (mx >= 107 && mx && (mx - mn) / mx >= 0.5)) readable++;
+    }
+    share = visible ? readable / visible : 1;
+    void info;
+  } catch (e) {
+    share = 1;
+  }
+  if (readableCache.size >= KNOCKOUT_CACHE_MAX) readableCache.delete(readableCache.keys().next().value);
+  readableCache.set(key, share);
+  return share;
+}
+
+const trimCache = new Map();
+
+/**
+ * A logo cut to its visible pixels. A YouTube avatar is a wordmark in the
+ * middle of a square; fitted as the square, Lacrosse TV's name came out a
+ * third of the size of every other logo.
+ */
+async function trimPadding(entry) {
+  if (!entry || !entry.buffer) return entry;
+  const key = crypto.createHash('sha1').update(entry.buffer).digest('base64');
+  if (trimCache.has(key)) return trimCache.get(key) || entry;
+  let result = null;
+  try {
+    const { data, info } = await sharp(entry.buffer, { failOn: 'none' })
+      .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height;
+    if (W && H && info.channels === 4 && data[3] < 16) {
+      let minX = W, minY = H, maxX = -1, maxY = -1;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (data[(y * W + x) * 4 + 3] < 16) continue;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+      const w = maxX - minX + 1, h = maxY - minY + 1;
+      // Only worth a new image when a real margin comes off.
+      if (maxX >= 0 && w * h < 0.8 * W * H) {
+        const png = await sharp(entry.buffer, { failOn: 'none' }).ensureAlpha()
+          .extract({ left: minX, top: minY, width: w, height: h }).png().toBuffer();
+        result = { buffer: png, contentType: 'image/png' };
+      }
+    }
+  } catch (e) {
+    result = null;
+  }
+  if (trimCache.size >= KNOCKOUT_CACHE_MAX) trimCache.delete(trimCache.keys().next().value);
+  trimCache.set(key, result);
+  return result || entry;
 }
 
 /** An image's pixel size, or zeros when it cannot be read. */
@@ -686,7 +930,11 @@ function svgEvent(text, entry, color, opts = {}) {
     boxW = maxW;
     boxH = maxH;
     if (coverMode && nw > 0 && nh > 0) {
-      const scale = Math.min(maxW / nw, maxH / nh, 1);
+      // Never enlarged -- except a logo too small to read at its own size. A
+      // 141x42 wordmark drawn at 1:1 had letters six pixels tall. Grown until
+      // it is 260 wide or 110 tall, whichever comes first, three times at most.
+      const readable = Math.max(1, Math.min(3, 260 / nw, 110 / nh));
+      const scale = Math.min(maxW / nw, maxH / nh, readable);
       boxW = Math.max(1, Math.round(nw * scale));
       boxH = Math.max(1, Math.round(nh * scale));
     }
@@ -754,11 +1002,28 @@ function svgEvent(text, entry, color, opts = {}) {
 </svg>`;
 }
 
+// The map is kept in recency order -- a hit moves its entry to the end -- so
+// the oldest entry is always the first key and eviction never sorts.
+let cacheBytes = 0;
+
+function cachePut(url, entry) {
+  cacheDrop(url);
+  cache.set(url, entry);
+  cacheBytes += entry.buffer.length;
+  evictIfNeeded();
+}
+
+function cacheDrop(url) {
+  const old = cache.get(url);
+  if (!old) return;
+  cache.delete(url);
+  cacheBytes -= old.buffer.length;
+}
+
 function evictIfNeeded() {
-  if (cache.size <= CACHE_MAX_ENTRIES) return;
-  const byAccess = [...cache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
-  const excess = cache.size - CACHE_MAX_ENTRIES;
-  for (let i = 0; i < excess; i++) cache.delete(byAccess[i][0]);
+  while (cache.size > CACHE_MAX_ENTRIES || (cacheBytes > CACHE_MAX_BYTES && cache.size > 1)) {
+    cacheDrop(cache.keys().next().value);
+  }
 }
 
 // Where the bundled marks live. Running from source this file sits two levels
@@ -798,6 +1063,164 @@ function localMark(url) {
 }
 const markCache = new Map();
 
+// How many fetches one host gets at a time. A burst is what trips a host's rate
+// limit, so requests past this wait their turn instead of all going at once.
+const HOST_LIMITS = { 'upload.wikimedia.org': 2 };
+const HOST_LIMIT_DEFAULT = 6;
+const hostQueues = new Map();   // host -> { active, waiting }
+// A host that answered 429 is left alone, for every URL on it, until this time.
+// Retrying one URL while its neighbours kept asking is how a throttle lasts.
+const hostCooldown = new Map(); // host -> epoch ms
+
+/**
+ * Run fn in one of the host's slots. Resolves null without running it when the
+ * host is cooling down or no slot frees up before the deadline.
+ */
+function withHostSlot(host, deadline, fn) {
+  const cool = hostCooldown.get(host);
+  if (cool && Date.now() < cool) return Promise.resolve(null);
+  if (cool) hostCooldown.delete(host);
+
+  const limit = HOST_LIMITS[host] || HOST_LIMIT_DEFAULT;
+  let q = hostQueues.get(host);
+  if (!q) { q = { active: 0, waiting: [] }; hostQueues.set(host, q); }
+
+  const release = () => {
+    const next = q.waiting.shift();
+    // The slot passes straight to the next in line, so nobody arriving in
+    // between can slip past the limit.
+    if (next) { clearTimeout(next.timer); next.grant(); }
+    else if (--q.active === 0 && hostQueues.get(host) === q) hostQueues.delete(host);
+  };
+  const run = async () => {
+    try {
+      // Checked again at the moment the slot is granted: a request queued
+      // behind one that just got a 429 must not go out anyway.
+      const c = hostCooldown.get(host);
+      if (c && Date.now() < c) return null;
+      const out = await fn();
+      // Set before the slot is released, for the same reason.
+      if (out && out.status === 429) {
+        hostCooldown.set(host, Date.now() + Math.min(Math.max(out.retryAfterMs || 0, 30000), 10 * 60 * 1000));
+      }
+      return out;
+    } finally {
+      release();
+    }
+  };
+
+  if (q.active < limit) { q.active++; return run(); }
+  return new Promise(resolve => {
+    const waiter = { grant: () => resolve(run()), timer: null };
+    waiter.timer = setTimeout(() => {
+      const i = q.waiting.indexOf(waiter);
+      if (i !== -1) q.waiting.splice(i, 1);
+      resolve(null);
+    }, Math.max(0, deadline - Date.now()));
+    q.waiting.push(waiter);
+  });
+}
+
+// GitHub's raw host throttles hotlinked files; jsDelivr serves the same file
+// from a CDN built for it.
+function viaCdn(url) {
+  const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(url);
+  return m ? `https://cdn.jsdelivr.net/gh/${m[1]}/${m[2]}@${m[3]}/${m[4]}` : url;
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/** One request, bounded by what is left of the deadline. */
+async function fetchOnce(url, host, deadline) {
+  const budget = deadline - Date.now();
+  if (budget < 500) return { result: null, status: 0, skipped: true };
+  const timeout = Math.min(FETCH_TIMEOUT_MS, budget);
+  try {
+    // AbortSignal caps the TOTAL request (headers + body): a slow-loris upstream
+    // that trickles bytes can otherwise hang past headersTimeout/bodyTimeout.
+    const pending = request(url, {
+      headers: { 'User-Agent': host === 'upload.wikimedia.org' ? BOT_UA : UA, 'Accept': 'image/*,*/*;q=0.8' },
+      headersTimeout: timeout,
+      bodyTimeout: timeout,
+      dispatcher: redirectAgent,
+      signal: AbortSignal.timeout(timeout)
+    });
+    // The abort signal does not cut a connection that is still being opened:
+    // an unreachable host held a fetch for ten seconds, undici's own connect
+    // timeout, past the whole deadline. So the wait is bounded here too. A
+    // response that lands after we stopped waiting is drained, not leaked.
+    let timer;
+    const res = await Promise.race([
+      pending,
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), timeout); })
+    ]).finally(() => clearTimeout(timer));
+    if (!res) {
+      pending.then(late => late && late.body && late.body.dump().catch(() => {}), () => {});
+      return { result: null, status: 0 };
+    }
+    const contentType = String(res.headers['content-type'] || '').split(';')[0].trim();
+    // Intentional destroys below (non-image body / size cap) make the undici
+    // body emit an 'error' event; without a listener that crashes the process.
+    res.body.on('error', () => {});
+    if (res.statusCode === 200 && contentType.startsWith('image/')) {
+      // Read with a hard size cap so a huge file can never blow the heap.
+      const chunks = [];
+      let total = 0;
+      let tooBig = false;
+      for await (const chunk of res.body) {
+        total += chunk.length;
+        if (total > IMAGE_MAX_BYTES) { tooBig = true; res.body.destroy(); break; }
+        chunks.push(chunk);
+      }
+      if (!tooBig && total >= 32) return { result: { buffer: Buffer.concat(chunks), contentType }, status: 200 };
+      return { result: null, status: 200 };
+    }
+    await res.body.dump().catch(() => {});
+    const retryAfter = Number(res.headers['retry-after']);
+    return {
+      result: null,
+      status: res.statusCode,
+      retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0
+    };
+  } catch (_) {
+    return { result: null, status: 0 };
+  }
+}
+
+/**
+ * An image, fetched politely and within one deadline: a slot per host, the CDN
+ * copy of a GitHub file before the file, the whole host left alone after a 429,
+ * and a second try only for a server error with time to spare.
+ */
+async function fetchImage(url) {
+  const deadline = Date.now() + FETCH_DEADLINE_MS;
+  const attempt = async (target) => {
+    let host;
+    try { host = new URL(target).hostname; } catch { return { result: null, status: 0 }; }
+    const out = (await withHostSlot(host, deadline, () => fetchOnce(target, host, deadline)))
+      || { result: null, status: 0, skipped: true };
+    // (A 429 has already put the host on cooldown inside withHostSlot: as long
+    // as the host asked, but thirty seconds at least and ten minutes at most.)
+    return out;
+  };
+
+  const cdn = viaCdn(url);
+  let out = await attempt(cdn);
+  if (out.result) return out;
+  // Whatever went wrong with the CDN copy, the original file is next.
+  if (cdn !== url) {
+    out = await attempt(url);
+    if (out.result) return out;
+  }
+  // A timeout is not retried: it would spend the viewer's whole wait. Nor is a
+  // 429: the host is cooling down.
+  if (out.status >= 500 && deadline - Date.now() > 2000) {
+    await sleep(500);
+    out = await attempt(url);
+  }
+  return out;
+}
+
 /**
  * Fetch a remote image once, validate it, cache it. Returns
  * { buffer, contentType } or null on any failure.
@@ -822,8 +1245,15 @@ async function getImage(rawUrl) {
 
   const hit = cache.get(url);
   if (hit) {
-    if (now < hit.expiresAt) { hit.lastAccess = now; stats.fetchHits++; return hit; }
-    cache.delete(url);
+    if (now < hit.expiresAt) {
+      hit.lastAccess = now;
+      // Move to the end: the most recently used entry is the last to go.
+      cache.delete(url);
+      cache.set(url, hit);
+      stats.fetchHits++;
+      return hit;
+    }
+    cacheDrop(url);
   }
   stats.fetchMisses++;
 
@@ -832,41 +1262,12 @@ async function getImage(rawUrl) {
 
   const p = (async () => {
     let result = null;
+    let out = null;
     try {
-      // AbortSignal caps the TOTAL request (headers + body): a slow-loris upstream
-      // that trickles bytes can otherwise hang past headersTimeout/bodyTimeout.
-      const res = await request(url, {
-        headers: { 'User-Agent': UA, 'Accept': 'image/*,*/*;q=0.8' },
-        headersTimeout: FETCH_TIMEOUT_MS,
-        bodyTimeout: FETCH_TIMEOUT_MS,
-        dispatcher: redirectAgent,
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 1000)
-      });
-
-      const contentType = String(res.headers['content-type'] || '').split(';')[0].trim();
-      // Intentional destroys below (non-image body / size cap) make the undici
-      // body emit an 'error' event; without a listener that crashes the process.
-      res.body.on('error', () => {});
-      if (res.statusCode === 200 && contentType.startsWith('image/')) {
-        // Read with a hard size cap so a huge file can never blow the heap.
-        const chunks = [];
-        let total = 0;
-        let tooBig = false;
-        for await (const chunk of res.body) {
-          total += chunk.length;
-          if (total > IMAGE_MAX_BYTES) { tooBig = true; res.body.destroy(); break; }
-          chunks.push(chunk);
-        }
-        if (!tooBig && total >= 32) {
-          result = {
-            buffer: Buffer.concat(chunks),
-            contentType,
-            expiresAt: Date.now() + IMAGE_TTL_MS,
-            lastAccess: Date.now()
-          };
-          cache.set(url, result);
-          evictIfNeeded();
-        }
+      out = await fetchImage(url);
+      if (out.result) {
+        result = { ...out.result, expiresAt: Date.now() + IMAGE_TTL_MS, lastAccess: Date.now() };
+        cachePut(url, result);
       }
     } catch (_) {
       result = null;
@@ -875,8 +1276,14 @@ async function getImage(rawUrl) {
     }
     if (result) negatives.delete(url);
     else {
-      negatives.set(url, Date.now() + NEG_TTL_MS);
-      if (negatives.size > 500) negatives.clear();
+      // A 429 is remembered at least as long as the host asked for.
+      const ttl = out && out.status === 429 ? Math.max(out.retryAfterMs || 0, NEG_TTL_MS)
+        : out && out.skipped ? NEG_TTL_SKIPPED_MS
+          : NEG_TTL_MS;
+      negatives.set(url, Date.now() + ttl);
+      // Oldest out first. Clearing the lot at the cap also dropped the markers
+      // that keep a throttled host from being asked again at once.
+      if (negatives.size > 2000) negatives.delete(negatives.keys().next().value);
     }
     return result;
   })();
@@ -964,6 +1371,8 @@ function cacheStats() {
       hits: stats.rasterHits, misses: stats.rasterMisses, hitRate: rate(stats.rasterHits, stats.rasterMisses) },
     upstream: { entries: cache.size, bytes: fetchBytes,
       hits: stats.fetchHits, misses: stats.fetchMisses, hitRate: rate(stats.fetchHits, stats.fetchMisses) },
+    finished: { entries: cardCache.size, max: CARD_CACHE_MAX,
+      hits: stats.cardHits, misses: stats.cardMisses, hitRate: rate(stats.cardHits, stats.cardMisses) },
     negatives: negatives.size,
     quality: RASTER_QUALITY
   };
@@ -973,16 +1382,18 @@ function cacheStats() {
  * Empty the caches. `what` is 'cards', 'upstream' or 'all'. Returns what went.
  */
 function clearCache(what = 'all') {
-  const before = { cards: rasterCache.size, upstream: cache.size, negatives: negatives.size };
-  if (what === 'cards' || what === 'all') rasterCache.clear();
-  if (what === 'upstream' || what === 'all') { cache.clear(); negatives.clear(); }
+  const before = { cards: rasterCache.size, finished: cardCache.size, upstream: cache.size, negatives: negatives.size };
+  if (what === 'cards' || what === 'all') { rasterCache.clear(); cardCache.clear(); }
+  if (what === 'upstream' || what === 'all') { cache.clear(); cacheBytes = 0; negatives.clear(); hostCooldown.clear(); cardCache.clear(); }
   if (what === 'all') {
     stats.rasterHits = stats.rasterMisses = stats.fetchHits = stats.fetchMisses = 0;
+    stats.cardHits = stats.cardMisses = 0;
   }
   return before;
 }
 
 module.exports = {
+  sendCachedCard,
   coverMark,
   liftDarkMark,
   cacheStats,

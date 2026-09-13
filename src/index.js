@@ -554,6 +554,8 @@ app.get('/api/cache/stats', (req, res) => {
     // Whether warming is actually surviving to the click: a rising evictions
     // count against a flat hits count is the cap being too small for the board.
     streams: container.resolve('streamResolveCache').stats(),
+    // Which channels the background check found with no streams, and are hidden.
+    channels: require('./services/ChannelHealth').status(),
     warmer: cardWarmer.status(),
     matches: container.resolve('cacheService').getMatches().length,
     admin: isAdmin(req),
@@ -640,6 +642,10 @@ app.get('/img/event', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
+  // A card made before -- by a player or by the warmer -- goes straight out,
+  // without fetching its logo again.
+  if (imageService.sendCachedCard(req, res)) return;
+
   const M = await firstImage([req.query.mark, req.query.mark2].filter(Boolean));
   const coverParam = req.query.cover === '1';
   if (!M) {
@@ -652,7 +658,8 @@ app.get('/img/event', async (req, res) => {
       const asked = !!(req.query.mark || req.query.mark2);
       return imageService.sendCard(req, res,
         imageService.svgEvent(text, null, color, { kicker: req.query.kicker || '', cover: true }),
-        asked ? 'no-store' : 'public, max-age=86400, stale-while-revalidate=604800');
+        asked ? 'no-store' : 'public, max-age=86400, stale-while-revalidate=604800',
+        { remember: !asked });
     }
     return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), 'public, max-age=300');
   }
@@ -677,7 +684,11 @@ app.get('/img/event', async (req, res) => {
       markW: size.width,
       markH: size.height
     }),
-    'public, max-age=86400, stale-while-revalidate=604800'
+    'public, max-age=86400, stale-while-revalidate=604800',
+    // Kept only when the first-choice logo is the one drawn. A card made from
+    // the fallback because the preferred logo failed a moment ago should be
+    // drawn again next time, not served for twelve hours.
+    { remember: !req.query.mark || M.url === req.query.mark }
   );
 });
 

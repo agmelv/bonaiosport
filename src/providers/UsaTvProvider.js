@@ -185,14 +185,20 @@ class UsaTvProvider extends BaseProvider {
     }
   }
 
-  async resolveStream(sourceId, matchCategory, matchTitle) {
+  // `opts.strict` (the channel health check) throws when the upstream is busy or
+  // failing, so that is not mistaken for a channel with no streams.
+  async resolveStream(sourceId, matchCategory, matchTitle, opts = {}) {
     const streams = [];
     try {
       const res = await this.proxyFetch(
         `${this.base}/stream/tv/${encodeURIComponent(sourceId)}.json`,
         { signal: AbortSignal.timeout(10000) }
       );
-      if (!res.ok) return [];
+      if (!res.ok) {
+        // A 404 is an answer: this channel has nothing. A 429 or a 5xx is not.
+        if (opts.strict && (res.status === 429 || res.status >= 500)) throw new Error(`HTTP ${res.status}`);
+        return [];
+      }
       const data = await res.json();
 
       for (const s of (data && data.streams) || []) {
@@ -215,6 +221,7 @@ class UsaTvProvider extends BaseProvider {
       }
     } catch (err) {
       console.warn(`[${this.name}] stream lookup failed for ${sourceId}:`, err.message);
+      if (opts.strict) throw err;
     }
     return streams;
   }

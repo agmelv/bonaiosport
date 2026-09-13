@@ -74,7 +74,9 @@ function selectSources(matchSources, config) {
 }
 
 // Resolve a single source (extracted from handleStream, logic unchanged)
-async function resolveSource(src, match, config) {
+// `opts.strict` rethrows a provider's error instead of returning no streams;
+// only the channel health check asks for it (see countChannelStreams).
+async function resolveSource(src, match, config, opts = {}) {
   const streamScorer = container.resolve('streamScorer');
   const sourceName = src.source;
   let resStreams = [];
@@ -130,7 +132,7 @@ async function resolveSource(src, match, config) {
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
     } else if (sourceName === 'usatv') {
       const provider = container.resolve('usaTvProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title);
+      resStreams = await provider.resolveStream(src.id, match.category, match.title, { strict: !!opts.strict });
     } else if (sourceName.startsWith('yaml_')) {
       const yamlProviders = container.resolve('yamlProviders');
       const pName = sourceName.replace('yaml_', '');
@@ -149,6 +151,7 @@ async function resolveSource(src, match, config) {
     }
   } catch (e) {
     console.warn(`[streams.js] Error resolving ${sourceName} for ${src.id}:`, e.message);
+    if (opts.strict) throw e;
   }
 
   return resStreams;
@@ -188,7 +191,10 @@ async function mapLimit(items, limit, job) {
   return out;
 }
 
-async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
+// `opts.report`, when given, counts streams dropped because the check itself
+// failed -- a timeout, a network error, a 5xx -- apart from streams that are
+// plainly dead (404, 403, not a playlist).
+async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await mapLimit(streams, VERIFY_CONCURRENCY, (async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links are kept blindly.
@@ -248,6 +254,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
         bodySample = await result.text();
       } catch (fetchErr) {
         clearTimeout(timeout);
+        if (opts.report) opts.report.errors++;
         console.log(`[Filter] Dropped timeout/error stream: ${redactUrl(targetUrl)} - ${fetchErr.message}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -257,7 +264,17 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
       // Edge servers return 404 for dead streams, 403 for IP-locked/expired tokens, 502 for upstream failures
       if (res.status === 404 || res.status === 403 || res.status >= 500) {
+        if (opts.report && res.status >= 500) opts.report.errors++;
         console.log(`[Filter] Dropped dead stream (${res.status}): ${redactUrl(targetUrl)}`);
+        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        return null;
+      }
+
+      // A host that is throttling or timing out has said nothing about the stream
+      // itself: dropped for now, but counted as a failed check, not a dead one.
+      if (res.status === 429 || res.status === 408) {
+        if (opts.report) opts.report.errors++;
+        console.log(`[Filter] Dropped throttled stream (${res.status}): ${redactUrl(targetUrl)}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -281,6 +298,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
     } catch (err) {
+      if (opts.report) opts.report.errors++;
       console.log(`[Filter] Dropped timeout/error stream: ${redactUrl(targetUrl)} - ${err.message}`);
       return null;
     }
@@ -291,11 +309,11 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
 // Mint streams for a single source and health-verify them before they enter the
 // cache, so verification runs once per mint instead of on every request.
-async function mintVerifiedSources(src, match, config, cacheKey) {
+async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
-  const minted = await resolveSource(src, match, config);
-  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache);
+  const minted = await resolveSource(src, match, config, opts);
+  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, opts);
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
@@ -607,7 +625,93 @@ async function handleStream(type, id, config) {
   };
 }
 
+/**
+ * How many directly playable streams a 24/7 channel opens to, for the
+ * background check in ChannelHealth.
+ *
+ * Throws whenever the honest answer is "unknown" rather than "none", so a
+ * channel is only ever hidden on evidence:
+ *   - it is not listed right now (a provider blinked between refreshes);
+ *   - its only sources are CDNLive, which is never probed here -- decoding its
+ *     player pages in bulk is what gets this server rate-limited for an hour --
+ *     or nothing it has besides CDNLive played;
+ *   - the check ran past its cap;
+ *   - it came back with web-player rows and nothing direct, which a working
+ *     web-only channel does too.
+ * Every source is waited for, with no stream deadline, so a slow channel is
+ * counted in full and the sweep does not start the next channel early.
+ */
+const HEALTH_CHECK_CAP_MS = 60 * 1000;
+
+async function countChannelStreams(matchId) {
+  const match = container.resolve('cacheService').getMatches().find(m => m.id === matchId);
+  if (!match || !Array.isArray(match.sources) || !match.sources.length) throw new Error('not listed now');
+
+  const unprobed = match.sources.some(src => src.source === 'cdnlive');
+  const sources = selectSources(match.sources, {}).filter(src => src.source !== 'cdnlive');
+  if (!sources.length) throw new Error('no sources this check probes');
+
+  const resolveCache = container.resolve('streamResolveCache');
+  const isWeb = s => !!s.externalUrl || s.name === 'Nuvio Web Player';
+  const directIn = rows => (Array.isArray(rows) ? rows : []).filter(s => s && s.url && !isWeb(s)).length;
+
+  // Sources whose empty answer is an answer. Streamed.pk and StreamFree fetch
+  // through a circuit breaker whose fallback turns an outage or a throttle into
+  // an empty list, so from them "nothing" says nothing.
+  const EMPTY_MEANS_NONE = new Set(['iptv-org', 'usatv']);
+
+  // Each source's outcome. A source someone opened recently counts from the
+  // cache when it holds playable streams. Anything else is resolved here,
+  // outside the cache and strictly, so that a provider error, a throttle or a
+  // playlist that failed to answer comes back as a failure rather than as an
+  // empty list -- the resolver and the cache both turn failures into "none".
+  const settled = Promise.allSettled(sources.map(async (src) => {
+    const key = `${src.source}:${matchId}:${src.id}`;
+    const cached = resolveCache.get(key);
+    const cachedRows = Array.isArray(cached) ? cached : (cached && cached.streams);
+    if (directIn(cachedRows) > 0) return { direct: directIn(cachedRows), errors: 0, web: false, trusted: true };
+    const report = { errors: 0 };
+    const rows = await mintVerifiedSources(src, match, {}, null, { strict: true, report });
+    return {
+      direct: directIn(rows),
+      errors: report.errors,
+      web: rows.some(s => s && isWeb(s)),
+      trusted: EMPTY_MEANS_NONE.has(src.source)
+    };
+  }));
+
+  let timer;
+  const cap = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('check ran past its cap')), HEALTH_CHECK_CAP_MS);
+  });
+  // Past the cap the answer is unknown, but the scrapes this check started are
+  // let finish (up to another cap) before the sweep moves on, so a slow
+  // channel's work does not pile up under the next channel's.
+  const results = await Promise.race([settled, cap])
+    .catch(async (e) => { await Promise.race([settled, sleep(HEALTH_CHECK_CAP_MS)]); throw e; })
+    .finally(() => clearTimeout(timer));
+
+  const outcomes = results.map(r => (r.status === 'fulfilled' ? r.value : null));
+  const failed = o => !o || o.errors > 0;
+  const direct = outcomes.reduce((n, o) => n + (o ? o.direct : 0), 0);
+  if (direct > 0) return direct;
+  if (unprobed) throw new Error('only unprobed sources left');
+  if (outcomes.some(o => o && o.web)) throw new Error('web-player rows only');
+  if (outcomes.every(failed)) {
+    // Every source failed outright or had every playlist fail to answer.
+    // Tagged, so a channel whose hosts stay down check after check can still
+    // be hidden (see ChannelHealth), while one bad minute cannot.
+    const err = new Error('every source failed');
+    err.allFailed = true;
+    throw err;
+  }
+  if (outcomes.some(failed)) throw new Error('a source failed or timed out');
+  if (outcomes.some(o => !o.trusted)) throw new Error('empty from a source that hides its failures');
+  return 0;
+}
+
 module.exports = {
   handleStream,
-  prewarmMatch
+  prewarmMatch,
+  countChannelStreams
 };

@@ -93,6 +93,9 @@ class StreamedPkProvider extends BaseProvider {
           if (!item.id || !item.title) continue;
 
           const is247Channel = !item.date || Number(item.date) <= 0;
+          // streamed.pk lists its NFL schedule page as an always-on item. It is
+          // not a channel and opens to nothing, so it has no place in Channels.
+          if (is247Channel && /\bschedule\b/i.test(String(item.title))) continue;
           const isGenuinelyLive = is247Channel || liveVerifiedIds.has(item.id) || (item.sources || []).some(s => liveVerifiedSourceIds.has(s.id));
           const isUpcoming = !is247Channel && item.date && Number(item.date) > now;
 

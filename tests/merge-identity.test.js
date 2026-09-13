@@ -86,5 +86,15 @@ t(false, same(ch('FX'), ev('sf_fx', 'Arsenal vs Chelsea', 'football', D, [])), '
 t(true,  same({ ...rch('DAZN 1 Germany', 'DE'), baseTitle: 'DAZN 1' }, { ...rch('DAZN 1', 'DE'), baseTitle: 'DAZN 1' }), 'DAZN 1 Germany is DAZN 1 in DE')
 t(false, same({ ...rch('DAZN 1 Germany', 'DE'), baseTitle: 'DAZN 1' }, { ...rch('DAZN 1', 'ES'), baseTitle: 'DAZN 1' }), 'DAZN 1 DE is not DAZN 1 ES')
 
+console.log('--- one channel under its on-air short name')
+// USA TV Next lists FS1 and FS2; TimStreams lists Fox Sports 1 and 2. They were
+// two tiles each, and the USA TV ones had no streams.
+t(true,  same(rch('FS1', 'US'), rch('Fox Sports 1', 'US')), 'FS1 is Fox Sports 1')
+t(true,  same({ ...rch('FS2', 'US'), baseTitle: 'FS2' }, { ...rch('Fox Sports 2 US', 'US'), baseTitle: 'Fox Sports 2' }), 'FS2 is Fox Sports 2 US')
+t(false, same(rch('FS1', 'US'), rch('FS2', 'US')), 'FS1 is not FS2')
+t(false, same({ ...rch('FS2', 'US'), baseTitle: 'FS2' }, { ...rch('Fox Sports 2 AR', 'AR'), baseTitle: 'Fox Sports 2' }), 'FS2 US is not Fox Sports 2 AR')
+t(false, same(ch('Fox Sports 1'), ch('Fox Sports 501 Cricket')), 'Fox Sports 1 is not Fox Sports 501')
+t(false, same(ch('FS1'), ev('ts_fs1_game', 'Arsenal vs Chelsea', 'football', D, [])), 'a channel short name does not join a fixture')
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

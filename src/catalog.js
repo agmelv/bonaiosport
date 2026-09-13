@@ -1,6 +1,6 @@
 const container = require('./container');
 const { getChannelLogo } = require('./services/ChannelLogoService');
-const { prewarmMatch } = require('./streams');
+const { prewarmMatch, countChannelStreams } = require('./streams');
 const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const teamLogoService = require('./services/TeamLogoService');
@@ -9,7 +9,8 @@ const eventMarks = require('./services/EventMarkService');
 const leagueBadges = require('./services/LeagueBadgeService');
 const { SEARCH_TWIN_SUFFIX } = require('./manifest');
 const channelLogoIndex = require('./services/ChannelLogoIndex');
-const { inferGenre, genreOrder } = require('./channelGenres');
+const { inferGenre } = require('./channelGenres');
+const channelHealth = require('./services/ChannelHealth');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
@@ -441,20 +442,32 @@ function mapMatchToMetaPreview(match, config = {}) {
   // The artwork a source sent comes last: for too many channels it is a promo
   // still rather than a logo. Before it, the curated logo set filed by country,
   // then iptv-org's own logo for a same-named channel in the same country.
-  const indexedLogo = is247Channel && !matchLogo && !channelLogo
-    ? (channelLogoIndex.lookup(match.title) || iptvLogoFor(match.title))
+  // A channel found to have no usable logo anywhere is drawn by its name.
+  const logoless = is247Channel && channelLogoIndex.isLogoless(match.title);
+  // The curated set's logo for exactly this channel, in its own country, beats
+  // both what a source sent and the forgiving name table. That table answers
+  // "Fox Sports 503" with the Argentine Fox Sports mark and TSN 3 with plain
+  // TSN: an audit of every cover found forty-odd channels wearing a sibling's
+  // logo that way, and tv-logos had the right file for each.
+  const exactLogo = is247Channel && !logoless
+    ? channelLogoIndex.lookup(match.title, match.region, { strict: true })
+    : null;
+  const indexedLogo = is247Channel && !logoless && !exactLogo && !matchLogo && !channelLogo
+    ? (channelLogoIndex.lookup(match.title, match.region) || iptvLogoFor(match.title))
     : null;
   // A team's own channel ("New York Yankees") is that team's crest. Looked up in
   // MLB only, the one league that runs team channels here, so a name shared
   // with a club elsewhere cannot borrow its badge. The A's are "Athletics" now.
   // ESPN's dark-background variant: the standard Yankees crest is navy, and
   // navy on the cover's grey all but disappears.
-  const teamCrest = is247Channel && !matchLogo && !channelLogo && !indexedLogo
+  const teamCrest = is247Channel && !logoless && !exactLogo && !matchLogo && !channelLogo && !indexedLogo
     ? ((teamLogoService.lookupTeam(match.title, null, ['mlb'])
       || teamLogoService.lookupTeam(String(match.title).replace(/^Oakland\s+/i, ''), null, ['mlb']))
       || '').replace('/teamlogos/mlb/500/', '/teamlogos/mlb/500-dark/') || null
     : null;
-  const channelMark = is247Channel ? (matchLogo || channelLogo || indexedLogo || teamCrest || matchThumb) : null;
+  const channelMark = is247Channel && !logoless
+    ? (exactLogo || matchLogo || channelLogo || indexedLogo || teamCrest || matchThumb)
+    : null;
 
   // The competition's crest is what belongs in the card's logo slot. Before
   // this it was the home side's own crest or, far more often, a dead URL whose
@@ -534,9 +547,8 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   if (bothSides && matchupPoster) {
     poster = matchupPoster;
-  } else if (matchPoster && !(is247Channel && channelMark)) {
-    // A 24/7 channel with a logo gets its cover even when a source also sent a
-    // poster. Streamed.pk ships promo art for its channels, and because this
+  } else if (matchPoster && !is247Channel) {
+    // A 24/7 channel gets its cover even when a source also sent a poster. Streamed.pk ships promo art for its channels, and because this
     // branch came first, NFL Network, Tennis Channel, Willow and NFL RedZone --
     // merged under that entry -- showed the promo instead of a cover.
     poster = buildImg(matchPoster, posterText, color) || fallbackPoster;
@@ -563,6 +575,7 @@ function mapMatchToMetaPreview(match, config = {}) {
     poster = imageService.eventUrl(BASE_URL, {
       text: prettifyName(match.title), kicker: '24/7', color, cover: true
     }) || fallbackPoster;
+    if (logoless) logo = null;
   } else if (channelLogo) {
     poster = buildImg(channelLogo, match.title, '161616') || fallbackPoster;
     logo = channelLogo;
@@ -738,7 +751,15 @@ async function handleCatalog(type, id, extra, config) {
   } else if (categoryMatch === 'channels') {
     // Always-on channels, gathered in one place. A channel has no kickoff, which
     // is what separates it from a fixture.
-    filteredMatches = matches.filter(m => isChannel(m));
+    const allChannels = matches.filter(m => isChannel(m));
+    // Check, in the background, which channels actually open to a stream. The
+    // viewer's own source choices are left out: whether a channel is dead is a
+    // fact about the channel, and one viewer turning a source off should not
+    // hide it for everyone else.
+    channelHealth.sweep(allChannels, (m) => countChannelStreams(m.id));
+    // A channel the last check found with no streams at all stays out of the
+    // tab until a later check finds it playing. Unchecked channels are shown.
+    filteredMatches = allChannels.filter(m => !channelHealth.isDead(m.id));
     // The genre picker. "All" is what a player sends when the genre is required
     // only to keep the tab off the home board, so it means no filter.
     const wantedGenre = extra && typeof extra.genre === 'string' && extra.genre !== 'All' ? extra.genre : null;
@@ -790,12 +811,13 @@ async function handleCatalog(type, id, extra, config) {
   });
 
   // Several hundred channels read as a wall in the order the sources sent them.
-  // Grouped by genre, then alphabetical inside each group. Before the per-tab
-  // shuffle and reverse below, which still have the last word.
+  // A to Z, with numbers read as numbers so Stan Sport 2 comes before Stan
+  // Sport 10. Grouping by genre made "All" jump from sports to news partway
+  // down; the genre picker is how to see one group. Before the per-tab shuffle
+  // and reverse below, which still have the last word.
   if (categoryMatch === 'channels') {
     filteredMatches.sort((a, b) =>
-      genreOrder(channelGenre(a)) - genreOrder(channelGenre(b))
-      || String(a.title).localeCompare(String(b.title), 'en', { sensitivity: 'base' }));
+      String(a.title).localeCompare(String(b.title), 'en', { sensitivity: 'base', numeric: true }));
   }
 
   // Fire-and-forget, before the mapping work, so the warming has the longest
