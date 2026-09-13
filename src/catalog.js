@@ -547,6 +547,12 @@ function mapMatchToMetaPreview(match, config = {}) {
       cover: true
     }) || buildImg(channelMark, posterText, color) || fallbackPoster;
     logo = channelMark;
+  } else if (is247Channel) {
+    // A channel no source has a logo for still gets a cover, its name alone on
+    // the grey, instead of the old gradient card -- one look across the tab.
+    poster = imageService.eventUrl(BASE_URL, {
+      text: prettifyName(match.title), kicker: '24/7', color, cover: true
+    }) || fallbackPoster;
   } else if (channelLogo) {
     poster = buildImg(channelLogo, match.title, '161616') || fallbackPoster;
     logo = channelLogo;

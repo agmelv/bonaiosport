@@ -643,12 +643,18 @@ app.get('/img/event', async (req, res) => {
   const M = await firstImage([req.query.mark, req.query.mark2].filter(Boolean));
   const coverParam = req.query.cover === '1';
   if (!M) {
-    // A channel whose logo did not arrive in time still gets a card, but not a
-    // cacheable one. A player loading a whole tab at once can miss logos under
-    // the burst, and a placeholder it keeps -- players keep images far past any
-    // max-age -- is a logo that never shows up.
-    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color),
-      coverParam ? 'no-store' : 'public, max-age=300');
+    if (coverParam) {
+      // A channel with no logo still gets its cover -- the name alone on the
+      // grey -- so the tab reads as one set rather than covers and gradient
+      // cards. When a logo was asked for and missed, the card is not
+      // cacheable: a player loading a whole tab at once can miss logos under
+      // the burst, and players keep images far past any max-age.
+      const asked = !!(req.query.mark || req.query.mark2);
+      return imageService.sendCard(req, res,
+        imageService.svgEvent(text, null, color, { kicker: req.query.kicker || '', cover: true }),
+        asked ? 'no-store' : 'public, max-age=86400, stale-while-revalidate=604800');
+    }
+    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), 'public, max-age=300');
   }
   // A channel cover sits its logo straight on flat grey, so a logo that ships
   // on its own solid rectangle has that rectangle taken out first.

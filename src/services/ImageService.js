@@ -579,9 +579,16 @@ function svgEvent(text, entry, color, opts = {}) {
 
   // A cover's name: one clean line under the logo, two at most, no shadow.
   // It is what tells ESPN US from ESPN NZ, whose logos are the same.
+  // With no logo the name is the whole card, so it moves to the middle and
+  // grows; with one it sits under the logo.
+  const hasMark = !!(entry && entry.buffer);
   const coverLines = wrapLines(text, 24, 2);
-  const cfs = coverLines.length === 2 ? 34 : (String(text).length > 18 ? 38 : 44);
-  const coverTop = coverLines.length === 2 ? 322 : 344;
+  const cfs = hasMark
+    ? (coverLines.length === 2 ? 34 : (String(text).length > 18 ? 38 : 44))
+    : (coverLines.length === 2 ? 46 : (String(text).length > 18 ? 50 : 58));
+  const coverTop = hasMark
+    ? (coverLines.length === 2 ? 322 : 344)
+    : (coverLines.length === 2 ? 234 - (cfs + 10) / 2 : 234);
   const coverTextEls = coverLines.map((line, i) =>
     `<text x="50%" y="${(coverTop + i * (cfs + 10)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${cfs}" font-weight="700" letter-spacing="0.5" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
   ).join('\n  ');
@@ -771,12 +778,13 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
  * to load still leaves the card its sport icon.
  */
 function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333', plate = true, name = true, cover = false }) {
-  if (!mark) return null;
+  // A channel cover can be drawn with no logo at all: the name alone on grey.
+  if (!mark && !cover) return null;
   const q = [
     `text=${encodeURIComponent(text || '')}`,
-    `color=${color}`,
-    `mark=${encodeURIComponent(mark)}`
+    `color=${color}`
   ];
+  if (mark) q.push(`mark=${encodeURIComponent(mark)}`);
   if (mark2) q.push(`mark2=${encodeURIComponent(mark2)}`);
   if (kicker) q.push(`kicker=${encodeURIComponent(kicker)}`);
   if (!plate) q.push('plate=0');
