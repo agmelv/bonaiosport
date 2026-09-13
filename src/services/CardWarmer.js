@@ -21,24 +21,31 @@
  *     backgrounds Nuvio on a TV shows in its rows, which were never warmed;
  *   - skip what is already made, so a second pass over an unchanged catalog
  *     costs lookups, not renders;
- *   - back off when the event loop lags or a player is loading artwork;
+ *   - hold to a CPU budget -- a quarter of one core by default, WARM_CPU_SHARE --
+ *     and step aside while a player is loading artwork;
  *   - run straight after the cache is cleared, after each catalog re-sync, and
  *     on a cycle anchored on the last run.
  * It stays strictly serial: this host has two cores and a card is real CPU.
  */
 
 const { request } = require('undici');
-const { monitorEventLoopDelay } = require('perf_hooks');
 const { PORT } = require('../config');
 const imageService = require('./ImageService');
 
 // One card at a time, with a gap. Measured at a 120 ms gap this held the host
 // at 45% of a core and touched 76%, because a cold pass also downloads the
 // crests each card is drawn from, not just the drawing. 250 ms roughly halves
-// that. The gap doubles, up to two seconds, while the event loop lags.
+// that. GAP_MS is now the shortest pause; the real one comes from the budget.
 const GAP_MS = Number(process.env.WARM_GAP_MS) || 250;
-const MAX_GAP_MS = 2000;
-const TARGET_LAG_MS = 20;
+
+// The share of one core warming may use, on average. Measured, not guessed: the
+// process's own CPU time is read around every card, and the pause after it
+// stretches until the average is back under this. An event-loop lag target was
+// tried first and let warming run flat out, because the drawing happens on
+// sharp's worker threads where the event loop never feels it -- a deploy then
+// held a two-core host near 90% for a quarter of an hour.
+const CPU_SHARE = Math.min(1, Math.max(0.05, Number(process.env.WARM_CPU_SHARE) || 0.25));
+const MAX_GAP_MS = 10000;
 
 // Stop rather than churn: past the card cache's own capacity (4500, in
 // ImageService), warming would evict what it had just made and the queue would
@@ -68,7 +75,7 @@ const state = {
   cancelled: false,
   reason: null,
   gapMs: GAP_MS,
-  lagP95Ms: null,
+  cpuPercent: null,
   rerun: false
 };
 
@@ -96,8 +103,10 @@ function noteClient() {
 }
 
 /**
- * The queue: the top of every tab before the bottom of any, posters with their
- * backgrounds, corner logos last. Deduplicated and capped.
+ * The queue: the top of every tab before the bottom of any, every tab's posters
+ * before any wide background (a poster is what a row shows everywhere; a
+ * background is the same card drawn larger), corner logos last. Deduplicated
+ * and capped.
  */
 function buildQueue(collected) {
   const perCatalog = (collected && collected.perCatalog) || [];
@@ -110,8 +119,10 @@ function buildQueue(collected) {
     }
   };
   const longest = perCatalog.reduce((n, p) => Math.max(n, p.cards.length), 0);
-  for (let i = 0; i < longest; i++) {
-    for (const p of perCatalog) (p.cards[i] || []).forEach(push);
+  for (const which of [0, 1]) {
+    for (let i = 0; i < longest; i++) {
+      for (const p of perCatalog) push((p.cards[i] || [])[which]);
+    }
   }
   for (const p of perCatalog) p.logos.forEach(push);
   return queue;
@@ -131,10 +142,8 @@ function alreadyFresh(u) {
 async function run(collectUrls, reason) {
   Object.assign(state, {
     running: true, cancelled: false, rerun: false, done: 0, skipped: 0, total: 0, errors: 0,
-    lastError: null, startedAt: Date.now(), finishedAt: null, reason, gapMs: GAP_MS, lagP95Ms: null
+    lastError: null, startedAt: Date.now(), finishedAt: null, reason, gapMs: GAP_MS, cpuPercent: null
   });
-  const lag = monitorEventLoopDelay({ resolution: 10 });
-  lag.enable();
   let gap = GAP_MS;
 
   try {
@@ -150,6 +159,8 @@ async function run(collectUrls, reason) {
       }
       // A player loading a tab right now comes first.
       if (Date.now() - lastClientAt < CLIENT_BUSY_WINDOW_MS) await sleep(MAX_GAP_MS);
+      const cpuBefore = process.cpuUsage();
+      const wallBefore = Date.now();
       try {
         // Loopback, so the route's own cache is the one that fills.
         const res = await request(u, {
@@ -163,18 +174,21 @@ async function run(collectUrls, reason) {
         state.errors++;
         state.lastError = err.message;
       }
-      const p95 = (lag.percentile(95) || 0) / 1e6;
-      lag.reset();
-      state.lagP95Ms = Math.round(p95);
-      gap = p95 > TARGET_LAG_MS ? Math.min(gap * 2, MAX_GAP_MS) : Math.max(GAP_MS, Math.round(gap / 2));
+      // CPU the whole process spent while this card was made -- its drawing
+      // threads included, and anything else it did meanwhile, which only errs
+      // gentle -- and the pause that brings the average back under the budget.
+      const used = process.cpuUsage(cpuBefore);
+      const cpuMs = (used.user + used.system) / 1000;
+      const wallMs = Math.max(1, Date.now() - wallBefore);
+      gap = Math.min(MAX_GAP_MS, Math.max(GAP_MS, Math.round(cpuMs / CPU_SHARE - wallMs)));
       state.gapMs = gap;
+      state.cpuPercent = Math.round((100 * cpuMs) / (wallMs + gap));
       await sleep(gap);
     }
   } catch (err) {
     state.lastError = err.message;
     state.errors++;
   } finally {
-    lag.disable();
     state.running = false;
     state.finishedAt = Date.now();
     state.lastRunMs = state.finishedAt - state.startedAt;
