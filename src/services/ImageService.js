@@ -1081,8 +1081,8 @@ function svgEvent(text, entry, color, opts = {}) {
   // Where the logo goes. On a channel cover it is drawn at no more than its own
   // size: a 512px ESPN wordmark stretched to 720px was visibly softer than the
   // 500px crests on the sports cards beside it, so a logo is only ever scaled
-  // down. It sits above centre, leaving the lower part of the card for the
-  // channel's name.
+  // down. It is centred in the card; the channel's name is a quiet line along
+  // the top, so nothing sits under the logo.
   let boxW = mark;
   let boxH = mark;
   let boxX = plateX + (plate - mark) / 2;
@@ -1104,7 +1104,7 @@ function svgEvent(text, entry, color, opts = {}) {
       boxH = Math.max(1, Math.round(nh * scale));
     }
     boxX = Math.round((w - boxW) / 2);
-    boxY = Math.round((coverMode ? 180 : h / 2) - boxH / 2);
+    boxY = Math.round(h / 2 - boxH / 2);
   }
 
   const lines = wrapLines(text, 26, 3);
@@ -1114,21 +1114,23 @@ function svgEvent(text, entry, color, opts = {}) {
     `<text x="50%" y="${(startY + i * (fs + 8)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${fs}" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#pdrop)">${escapeXml(line)}</text>`
   ).join('\n  ');
 
-  // A cover's name: one clean line under the logo, two at most, no shadow.
-  // It is what tells ESPN US from ESPN NZ, whose logos are the same.
-  // With no logo the name is the whole card, so it moves to the middle and
-  // grows; with one it sits under the logo.
+  // A cover's name. With a logo it is one quiet line along the top -- where a
+  // "24/7" used to say the same thing about every channel -- and the logo has
+  // the rest of the card to itself. It is what tells ESPN US from ESPN NZ,
+  // whose logos are the same. With no logo the name is the whole card, so it
+  // sits in the middle and grows.
   const hasMark = !!(entry && entry.buffer);
+  const titleText = String(text || '').trim().toUpperCase();
+  const titleLine = titleText.length > 40 ? `${titleText.slice(0, 39).trimEnd()}…` : titleText;
+  const coverTitleEl = `<text x="50%" y="34" font-family="Segoe UI, Arial, sans-serif" font-size="${titleLine.length > 28 ? 19 : 22}" font-weight="700" letter-spacing="2.5" fill="rgba(255,255,255,0.78)" text-anchor="middle" dominant-baseline="middle">${escapeXml(titleLine)}</text>`;
   const coverLines = wrapLines(text, 24, 2);
-  const cfs = hasMark
-    ? (coverLines.length === 2 ? 34 : (String(text).length > 18 ? 38 : 44))
-    : (coverLines.length === 2 ? 46 : (String(text).length > 18 ? 50 : 58));
-  const coverTop = hasMark
-    ? (coverLines.length === 2 ? 322 : 344)
-    : (coverLines.length === 2 ? 234 - (cfs + 10) / 2 : 234);
-  const coverTextEls = coverLines.map((line, i) =>
-    `<text x="50%" y="${(coverTop + i * (cfs + 10)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${cfs}" font-weight="700" letter-spacing="0.5" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
-  ).join('\n  ');
+  const cfs = coverLines.length === 2 ? 46 : (String(text).length > 18 ? 50 : 58);
+  const coverTop = coverLines.length === 2 ? 234 - (cfs + 10) / 2 : 234;
+  const coverTextEls = hasMark
+    ? coverTitleEl
+    : coverLines.map((line, i) =>
+      `<text x="50%" y="${(coverTop + i * (cfs + 10)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${cfs}" font-weight="700" letter-spacing="0.5" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
+    ).join('\n  ');
 
   const uri = entry && entry.buffer
     ? `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`
@@ -1160,7 +1162,7 @@ function svgEvent(text, entry, color, opts = {}) {
     ? `<rect width="${w}" height="${h}" fill="#${COVER_GREY}"/>`
     : `<rect width="${w}" height="${h}" fill="url(#pbg)"/>
   <rect width="${w}" height="${h}" fill="url(#pglow)"/>`}
-  ${kickerEl}
+  ${coverMode ? '' : kickerEl}
   ${uri ? `${showPlate ? `<rect x="${plateX.toFixed(1)}" y="${plateY}" width="${plate}" height="${plate}" rx="30" fill="#ffffff" fill-opacity="0.95" filter="url(#pdrop)"/>` : ''}
   <image x="${boxX.toFixed(1)}" y="${boxY.toFixed(1)}" width="${boxW}" height="${boxH}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"${showPlate || cover ? '' : ' filter="url(#pdrop)"'}/>` : ''}
   ${coverMode ? coverTextEls : (showName ? textEls : '')}

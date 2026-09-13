@@ -276,6 +276,8 @@ function isChannel(m) {
 function prettifyName(name) {
   return String(name || '')
     .replace(/\b([A-Z]) and ([A-Z])\b/g, '$1&$2')
+    // "ESPN2 US" beside "ESPN 2 BR" reads as two different channels.
+    .replace(/\bESPN(\d)\b/g, 'ESPN $1')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -571,11 +573,12 @@ function mapMatchToMetaPreview(match, config = {}) {
     // the house card instead, which is 16:9 by construction, and keep the logo
     // itself for the corner rather than repeating the whole poster there.
     poster = imageService.eventUrl(BASE_URL, {
-      text: prettifyName(match.title), mark: channelMark, kicker: '24/7', color,
+      text: prettifyName(match.title), mark: channelMark, color,
       // A channel logo is drawn to stand on its own; the white tile a sport
       // badge needs reads as a sticker over the card.
-      // A channel cover: the logo on flat grey with the channel's name under it.
-      // ESPN US and ESPN NZ share a logo, so the name is what tells them apart.
+      // A channel cover: the logo centred on flat grey, the channel's name in a
+      // quiet line along the top. ESPN US and ESPN NZ share a logo, so the name
+      // is still what tells them apart.
       cover: true
     }) || buildImg(channelMark, posterText, color) || fallbackPoster;
     logo = channelMark;
@@ -583,7 +586,7 @@ function mapMatchToMetaPreview(match, config = {}) {
     // A channel no source has a logo for still gets a cover, its name alone on
     // the grey, instead of the old gradient card -- one look across the tab.
     poster = imageService.eventUrl(BASE_URL, {
-      text: prettifyName(match.title), kicker: '24/7', color, cover: true
+      text: prettifyName(match.title), color, cover: true
     }) || fallbackPoster;
     if (logoless) logo = null;
   } else if (channelLogo) {
@@ -626,7 +629,7 @@ function mapMatchToMetaPreview(match, config = {}) {
   let background = wideMatchup
     || (matchBackground ? (buildImg(matchBackground, posterText, color) || poster) : poster);
 
-  let timeString = match.category === 'networks' ? '24/7 Stream' : 'Live Now';
+  let timeString = match.category === 'networks' ? 'Live channel' : 'Live Now';
   let relativeTimeStr = '';
   let releasedIso = null;
   
@@ -673,7 +676,7 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   const leagueStr = match.league ? `🏆 League: ${match.league}\n` : '';
   const statusStr = is247 
-    ? '24/7 Live Network' 
+    ? 'Live channel' 
     : (isLive ? '🔴 LIVE NOW' : `Kickoff at ${timeString}${relativeTimeStr}`);
   const desc = `${leagueStr}📅 Category: ${categoryLabel(match.category, match._competition)}\n⏰ Status: ${statusStr}`;
 
@@ -686,7 +689,9 @@ function mapMatchToMetaPreview(match, config = {}) {
     posterShape: 'landscape',
     background: background,
     logo: logo,
-    releaseInfo: isLive ? (is247 ? '24/7' : 'LIVE') : timeString,
+    // Nothing under a channel's tile: the "24/7" that sat there said the same
+    // thing about every one of six hundred channels.
+    releaseInfo: isLive ? (is247 ? undefined : 'LIVE') : timeString,
     // Kept for the catalog's repeat-fixture pass below; not part of the
     // Stremio meta contract, and stripped before the response.
     _relative: relativeTimeStr.trim(),

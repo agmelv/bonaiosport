@@ -556,7 +556,7 @@ async function handleStream(type, id, config) {
     
     // Add extra info if present
     if (providerName === 'Direct IPTV' && s.url) {
-      s.title = `📺 ${channelName || '24/7 Live Network'}\n⚙️ Quality: ${quality}`;
+      s.title = `📺 ${channelName || 'Live channel'}\n⚙️ Quality: ${quality}`;
     }
   });
 
