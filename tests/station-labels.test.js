@@ -25,6 +25,11 @@ t('New York, NY · WNYW', L('Fox.us', 'Fox', 'WNYW-DT1', 'WNYW'), '"New York Cit
 t('Seattle, WA · KCPQ', L('Fox.us', 'Fox', 'FOX 13 Seattle WA (KCPQ)', 'KCPQ'), 'the market in the title beats the city of licence');
 t('Biloxi, MS · WXXV', L('Fox.us', 'Fox', 'WXXV-TV News (Biloxi MS)', 'NOT-IN-TABLE'), 'a "(City ST)" title names the city, the call sign comes from the title');
 
+// Live on the ABC and CBS tiles: the title's state was wrong, the filed one right.
+const feedOf = (channel, call) => (Object.keys(table).find(k => k.startsWith(`${channel}/`) && table[k][1] === call) || '').split('/')[1];
+t('Austin, MN · KAAL', L('ABC.us', 'ABC', 'ABC 6 Austin TX (KAAL)', feedOf('ABC.us', 'KAAL')), 'a wrong state in the title gives way to the filed one');
+t('Myrtle Beach, SC · WPDE', L('ABC.us', 'ABC', 'WPDE News (Myrtle Beach FL)', feedOf('ABC.us', 'WPDE')), 'the title keeps its market, the state comes from the file');
+
 console.log('--- the other shapes');
 t('National · East', L('NBC.us', 'NBC', 'NBC', 'East'), 'a national feed');
 t('Portland, OR · KATU (ABC)', L('CW.us', 'CW', 'ABC 2 Portland OR (KATU)', 'NOT-IN-TABLE'), 'another network\'s station on this tile says so');

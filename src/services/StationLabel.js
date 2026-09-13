@@ -59,7 +59,13 @@ function stationLabel({ channelId, channelName, streamTitle, feed }) {
   const filed = STATIONS[`${channelId}/${feedId}`] || [];
   // A market in the title ("FOX 13 Seattle WA") beats the city of licence on
   // file ("Tacoma, WA"): it is the name a viewer knows the station by.
-  const city = (parsed.city || filed[0] || '').replace(/^New York City,/, 'New York,');
+  let city = parsed.city || filed[0] || '';
+  // Titles are typed by hand, and their states are wrong often enough to show:
+  // "ABC 6 Austin TX" is KAAL in Austin, MN. The state on file comes from the
+  // city's own record, so the title keeps its city and takes the filed state.
+  const filedState = (String(filed[0] || '').match(/, ([A-Z]{2})$/) || [])[1];
+  if (parsed.city && filedState) city = city.replace(/, [A-Z]{2}$/, `, ${filedState}`);
+  city = city.replace(/^New York City,/, 'New York,');
   let call = parsed.call || filed[1] || '';
   if (!call) {
     const m = title.match(/\b([KW][A-Z]{2,3})(?:-(?:TV|DT|CD|LD)\d*)?\b/);
