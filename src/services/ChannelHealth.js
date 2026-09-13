@@ -15,6 +15,10 @@
  * on this, and a restart does not empty it.
  */
 
+const fs = require('fs');
+const path = require('path');
+const { DATA_DIR } = require('../config');
+
 // Long enough for a sweep of the whole tab, one channel at a time with a gap,
 // to finish inside it; short enough that a channel that comes back returns
 // within a couple of hours.
@@ -41,13 +45,66 @@ const GAP_MS = Number(process.env.HEALTH_GAP_MS) || 1000;
 const ENABLED = process.env.HIDE_EMPTY_CHANNELS !== '0';
 
 const results = new Map(); // match id -> { count, at, zeroStreak, failStreak, firstFailAt, lastFailAt }
-const state = { running: false, lastSweepAt: 0, lastConfirmAt: 0, lastRunMs: null, checked: 0, unknown: 0 };
+// lastSweepAt is when the last full sweep began (what gates the next one);
+// lastSweepDoneAt when one last finished, which is the one worth keeping: a
+// sweep cut short by a restart has not checked everything, so the next start
+// must not think it did.
+const state = { running: false, lastSweepAt: 0, lastSweepDoneAt: 0, lastConfirmAt: 0, lastRunMs: null, checked: 0, unknown: 0 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// What the checks found, kept across restarts. A deploy restarts the process,
+// and with the results in memory alone every dead tile came back until a new
+// sweep found it again -- Marquee Sports Network, whose one host no longer
+// resolves, reappeared after each of a day's deploys -- while the sweep itself,
+// six hundred channels one second apart, started over on every restart.
+const STATE_FILE = path.join(DATA_DIR, 'channel-health.json');
+const SAVE_AFTER_MS = 5000;
+let saveTimer = null;
+
+function load() {
+  let saved;
+  try { saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) { return; }   // first run
+  if (!saved || !Array.isArray(saved.results)) return;
+  const now = Date.now();
+  const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  for (const entry of saved.results) {
+    if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !entry[1] || typeof entry[1] !== 'object') continue;
+    const r = entry[1];
+    // A result older than it would be trusted for says nothing any more.
+    if (Math.max(num(r.at), num(r.lastFailAt)) < now - DEAD_FOR_MS) continue;
+    results.set(entry[0], {
+      count: r.count === null ? null : num(r.count), at: num(r.at), zeroStreak: num(r.zeroStreak),
+      failStreak: num(r.failStreak), firstFailAt: num(r.firstFailAt), lastFailAt: num(r.lastFailAt)
+    });
+  }
+  // A clock that went backwards must not postpone the next sweep for years.
+  state.lastSweepAt = Math.min(num(saved.lastSweepAt), now);
+  state.lastSweepDoneAt = state.lastSweepAt;
+}
+
+/** Written a few seconds after the last change, so a sweep is not a thousand writes. */
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+      const tmp = STATE_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ lastSweepAt: state.lastSweepDoneAt, results: [...results] }));
+      fs.renameSync(tmp, STATE_FILE);
+    } catch (e) {
+      // A data directory that cannot be written costs the memory across restarts, nothing else.
+    }
+  }, SAVE_AFTER_MS);
+  if (saveTimer.unref) saveTimer.unref();
+}
+
+if (ENABLED) load();
 
 function record(id, count) {
   const prev = results.get(id);
   const zeroStreak = count === 0 ? ((prev && prev.zeroStreak) || 0) + 1 : 0;
   results.set(id, { count, at: Date.now(), zeroStreak, failStreak: 0, firstFailAt: 0, lastFailAt: 0 });
+  save();
 }
 
 /** A check on which every source failed. Keeps what the last real count said. */
@@ -63,6 +120,7 @@ function recordFailure(id) {
     firstFailAt: prev && prev.failStreak ? prev.firstFailAt : now,
     lastFailAt: now
   });
+  save();
 }
 
 /**
@@ -138,7 +196,9 @@ function sweep(channels, countStreams) {
     if (full) {
       const listed = new Set(queue.map(m => m.id));
       for (const id of results.keys()) if (!listed.has(id)) results.delete(id);
+      state.lastSweepDoneAt = Date.now();
     }
+    save();
   });
 }
 
