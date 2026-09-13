@@ -168,10 +168,10 @@ In `/configure` you can hide, rename and reorder the tabs.
 
 The ABC, CBS, NBC and FOX tiles carry streams from local stations all over the country, each labelled with its city and call sign. Name your own cities under **Local Channels** in `/configure` -- `Chicago, Knoxville TN, Phoenix` -- and:
 
-- each of those cities' stations that iptv-org has a stream for becomes a tile of its own ("FOX 32 Chicago", "ABC 15 Phoenix"), in the Channels tab under the Local genre and in the 📍 Local tab, together with channels whose names say the city (CBS News Chicago, Chicago Sports Network);
+- each of those cities' stations that iptv-org has a stream for becomes a tile of its own ("FOX 32 Chicago News", "ABC 15 Phoenix News"), in the Channels tab under the Local genre and in the 📍 Local tab, together with channels whose names say the city (CBS News Chicago, Chicago Sports Network);
 - your cities' stations are listed first on the network tiles.
 
-A city shared by several states goes to the one with the TV market; add the state to say otherwise. Only stations somebody has contributed a stream for can be listed, so a small market may have none. `LOCAL_MARKETS` in `.env` adds cities whose stations are listed as tiles for everyone on the server; the 📍 Local tab and the first-place ordering follow each profile's own cities.
+What a network station streams free is its 24/7 **news** channel (FOX LOCAL, NBC Chicago News), not its broadcast signal: nobody may stream that, so the network's schedule and the games are never on these tiles. A game is on its own tile in its sport's tab, where the FOX or CBS stream is that game's broadcast. A city shared by several states goes to the one with the TV market; add the state to say otherwise. Only stations somebody has contributed a stream for can be listed, so a small market may have none. `LOCAL_MARKETS` in `.env` adds cities whose stations are listed as tiles for everyone on the server; the 📍 Local tab and the first-place ordering follow each profile's own cities.
 
 ## Sources
 

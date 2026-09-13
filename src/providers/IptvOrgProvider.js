@@ -6,7 +6,7 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { stationLabel, callSign } = require('../services/StationLabel');
 const {
-  wantedMarkets, resolveMarkets, stationName, networkOfTitles, networkHome, NETWORK_CHANNEL, NETWORK_NAME
+  wantedMarkets, resolveMarkets, stationName, isNewsStream, networkOfTitles, networkHome, NETWORK_CHANNEL, NETWORK_NAME
 } = require('../services/LocalMarkets');
 
 /**
@@ -380,6 +380,9 @@ class IptvOrgProvider extends BaseProvider {
           genre: 'Local',
           market: market.label,
           station: call,
+          // A network station's free stream is its news channel, and the
+          // tile's description says so (catalog.js).
+          newsStream: isNewsStream({ channelId: feed.channel, titles }),
           logoName: networkId ? LOGO_NAME[networkId] : '',
           thumbnail_url: logo,
           logo,

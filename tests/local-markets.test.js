@@ -11,7 +11,7 @@ const path = require('path');
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aiosports-markets-'));
 const {
-  parseMarkets, marketsSetting, resolveMarkets, stationName, networkHome, isLocalTo, wantedMarkets, stateCode, MAX_MARKETS
+  parseMarkets, marketsSetting, resolveMarkets, stationName, isNewsStream, networkHome, isLocalTo, wantedMarkets, stateCode, MAX_MARKETS
 } = require('../src/services/LocalMarkets');
 const { stationOrder } = require('../src/services/StationLabel');
 
@@ -63,11 +63,17 @@ t(['USNYC=New York, NY'], R('New York'), '"New York" finds New York City and rea
 t([], R('Springfield, Toronto'), 'an unknown city, or one outside the US, is left out');
 
 console.log('--- what a station\'s tile is called');
-t('FOX 32 Chicago', stationName({ channelName: 'MNT', channelId: 'MNT.us', titles: ['WFLD-DT1', 'FOX 32 Chicago IL (WFLD)'], city: 'Chicago' }), 'the streams say which network and channel number');
-t('ABC 15 Phoenix', stationName({ channelName: 'KNXV-TV 61.1', channelId: 'KNXVTV611.us', titles: ['ABC 15 Phoenix AZ (KNXV)'], city: 'Phoenix' }), 'a station filed as its own channel');
-t('NBC 5 Chicago', stationName({ channelName: 'NBC', channelId: 'NBC.us', titles: ['NBC 5 Chicago Live News'], city: 'Chicago' }), 'the number and city, not the stream\'s own wording');
-t('FOX Phoenix', stationName({ channelName: 'Fox', channelId: 'Fox.us', titles: ['KSAZ-DT1'], city: 'Phoenix' }), 'a network feed whose streams say nothing more');
+// A network station's free stream is its news channel (FOX LOCAL, "NBC 5
+// Chicago Live News"), never the broadcast with the games on it. The name
+// says so: the owner opened "FOX 32 Chicago" during the game and got the news.
+t('FOX 32 Chicago News', stationName({ channelName: 'MNT', channelId: 'MNT.us', titles: ['WFLD-DT1', 'FOX 32 Chicago IL (WFLD)'], city: 'Chicago' }), 'the streams say which network and channel number');
+t('ABC 15 Phoenix News', stationName({ channelName: 'KNXV-TV 61.1', channelId: 'KNXVTV611.us', titles: ['ABC 15 Phoenix AZ (KNXV)'], city: 'Phoenix' }), 'a station filed as its own channel');
+t('NBC 5 Chicago News', stationName({ channelName: 'NBC', channelId: 'NBC.us', titles: ['NBC 5 Chicago Live News'], city: 'Chicago' }), 'the number and city, not the stream\'s own wording');
+t('FOX Phoenix News', stationName({ channelName: 'Fox', channelId: 'Fox.us', titles: ['KSAZ-DT1'], city: 'Phoenix' }), 'a network feed whose streams say nothing more');
+t('PBS Phoenix', stationName({ channelName: 'PBS', channelId: 'PBS.us', titles: ['KAET-DT1'], city: 'Phoenix' }), 'a public station streams its broadcast, so no "News"');
 t('PHXTV', stationName({ channelName: 'PHXTV', channelId: 'PHXTV.us', titles: ['PHXTV'], city: 'Phoenix' }), 'anything else keeps its own name');
+t(true, isNewsStream({ channelId: 'MNT.us', titles: ['FOX 32 Chicago IL (WFLD)'] }), 'a network station\'s stream is its news stream');
+t(false, isNewsStream({ channelId: 'PHXTV.us', titles: ['PHXTV'] }), 'a city channel is what it says');
 
 console.log('--- a feed filed under the wrong network');
 t('Fox.us', networkHome(['WFLD-DT1', 'FOX 32 Chicago IL (WFLD)'], 'MNT.us'), 'FOX 32 under MNT belongs on the FOX tile');
@@ -77,7 +83,7 @@ t(null, networkHome(['ABC 2 Portland OR (KATU)'], 'ESPN.us'), 'only the network 
 
 console.log('--- the 📍 Local tab');
 const markets = parseMarkets('Chicago, Knoxville TN, Phoenix');
-t(true, isLocalTo({ title: 'FOX 32 Chicago', market: 'Chicago, IL', region: 'US' }, markets), 'a station of one of the cities');
+t(true, isLocalTo({ title: 'FOX 32 Chicago News', market: 'Chicago, IL', region: 'US' }, markets), 'a station of one of the cities');
 t(false, isLocalTo({ title: 'FOX 11 Los Angeles', market: 'Los Angeles, CA', region: 'US' }, markets), 'a station of another city');
 t(true, isLocalTo({ title: 'CBS News Chicago', region: 'US' }, markets), 'a channel whose name says the city');
 t(true, isLocalTo({ title: 'Chicago Sports Network', region: 'US' }, markets), 'so does a regional sports network');

@@ -10,7 +10,7 @@ function toMillis(value) {
 }
 
 class MatchEntity {
-  constructor({ id, title, category, date, timestamp, status, popular, sources, league, team1, team2, thumbnail_url, poster, logo, background, genre, region, baseTitle, market, station, logoName }) {
+  constructor({ id, title, category, date, timestamp, status, popular, sources, league, team1, team2, thumbnail_url, poster, logo, background, genre, region, baseTitle, market, station, logoName, newsStream }) {
     this.id = id || '';
     this.title = title || 'Unknown Match';
     this.category = category || 'other';
@@ -41,8 +41,10 @@ class MatchEntity {
     this.market = market || '';
     this.station = station || '';
     // The name to find this channel's logo under when its own is not it:
-    // "FOX 32 Chicago" wears the FOX mark.
+    // "FOX 32 Chicago News" wears the FOX mark.
     this.logoName = logoName || '';
+    // A local station's stream that is its news channel, not its broadcast.
+    this.newsStream = !!newsStream;
   }
 }
 

@@ -157,16 +157,30 @@ function networkHome(titles, channelId) {
   return net && net.channelId !== channelId ? net.channelId : null;
 }
 
+// The commercial networks' stations. What any of them streams free is its
+// 24/7 news channel -- FOX LOCAL, "NBC 5 Chicago Live News" -- never the
+// broadcast signal with the network's schedule and games, which nobody may
+// stream. The tile says so, or a viewer opens "FOX 32 Chicago" during the
+// game and finds the noon news.
+const NEWS_NETWORKS = new Set(['Fox.us', 'ABC.us', 'CBS.us', 'NBC.us', 'CW.us', 'MNT.us']);
+
 /**
- * What a local station's tile is called. "FOX 32 Chicago" when the streams say
- * so, "NBC Chicago" for a network feed that does not, and the channel's own
- * name for everything else -- PHXTV, CAN TV19.
+ * What a local station's tile is called. "FOX 32 Chicago News" when the
+ * streams say which station, "NBC Chicago News" for a network feed that does
+ * not, and the channel's own name for everything else -- PHXTV, CAN TV19.
  */
 function stationName({ channelName, channelId, titles, city }) {
   const net = networkOfTitles(titles);
-  if (net) return `${NETWORK_NAME[net.channelId]} ${net.number} ${city}`;
-  if (NETWORK_NAME[channelId]) return `${NETWORK_NAME[channelId]} ${city}`;
+  const suffix = (id) => (NEWS_NETWORKS.has(id) ? ' News' : '');
+  if (net) return `${NETWORK_NAME[net.channelId]} ${net.number} ${city}${suffix(net.channelId)}`;
+  if (NETWORK_NAME[channelId]) return `${NETWORK_NAME[channelId]} ${city}${suffix(channelId)}`;
   return String(channelName || '').trim();
+}
+
+/** Whether a local tile is a network station's news stream rather than a broadcast. */
+function isNewsStream({ channelId, titles }) {
+  const net = networkOfTitles(titles);
+  return NEWS_NETWORKS.has(net ? net.channelId : channelId);
 }
 
 // Regional sports networks whose names do not say where they are.
@@ -248,6 +262,6 @@ function wantedMarkets() {
 }
 
 module.exports = {
-  parseMarkets, marketsSetting, resolveMarkets, stationName, networkOfTitles, networkHome, isLocalTo, wantedMarkets,
+  parseMarkets, marketsSetting, resolveMarkets, stationName, isNewsStream, networkOfTitles, networkHome, isLocalTo, wantedMarkets,
   NETWORK_CHANNEL, NETWORK_NAME, stateCode, norm, MAX_MARKETS_CHARS, MAX_MARKETS
 };

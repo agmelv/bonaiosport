@@ -680,8 +680,12 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   const leagueStr = match.league ? `🏆 League: ${match.league}\n` : '';
   // A local station says where it is and what it is called, which is also
-  // what lets a search for the city find it.
-  const marketStr = match.market ? `📍 ${match.market}${match.station ? ' · ' + match.station : ''}\n` : '';
+  // what lets a search for the city find it -- and, for a network station,
+  // that this is its news stream: the game is on the game's own tile.
+  const marketStr = match.market
+    ? `📍 ${match.market}${match.station ? ' · ' + match.station : ''}\n`
+      + (match.newsStream ? '📡 The station\'s free news stream, not its broadcast. Games are on their own tiles.\n' : '')
+    : '';
   const statusStr = is247
     ? 'Live channel'
     : (isLive ? '🔴 LIVE NOW' : `Kickoff at ${timeString}${relativeTimeStr}`);
