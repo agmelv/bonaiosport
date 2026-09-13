@@ -171,6 +171,9 @@ function sweep(channels, countStreams) {
 
   state.running = true;
   const startedAt = Date.now();
+  // Said in the log: a sweep is minutes of opening channels, and the owner
+  // reading the CPU should be able to see what is doing it.
+  console.log(`[ChannelHealth] ${full ? 'checking' : 'rechecking'} ${queue.length} channels, one a second`);
   (async () => {
     let checked = 0;
     let unknown = 0;
@@ -191,6 +194,7 @@ function sweep(channels, countStreams) {
   })().catch(() => {}).finally(() => {
     state.running = false;
     state.lastRunMs = Date.now() - startedAt;
+    console.log(`[ChannelHealth] done in ${Math.round(state.lastRunMs / 1000)} s: ${state.checked} answered, ${state.unknown} unknown, ${status().hidden} hidden`);
     // Forget channels no longer listed, so the map does not grow without end.
     // Only after a full sweep: a confirmation pass sees a handful of channels.
     if (full) {
