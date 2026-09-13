@@ -98,7 +98,7 @@ async function resolveSource(src, match, config, opts = {}) {
       resStreams = await provider.resolveStream(src.id, match.category, match.title);
     } else if (sourceName === 'cdnlive') {
       const provider = container.resolve('cdnLiveProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title);
+      resStreams = await provider.resolveStream(src.id, match.category, match.title, { strict: !!opts.strict });
     } else if (sourceName === 'streamsports99') {
       const provider = container.resolve('streamSports99Provider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title);
@@ -632,9 +632,9 @@ async function handleStream(type, id, config) {
  * Throws whenever the honest answer is "unknown" rather than "none", so a
  * channel is only ever hidden on evidence:
  *   - it is not listed right now (a provider blinked between refreshes);
- *   - its only sources are CDNLive, which is never probed here -- decoding its
- *     player pages in bulk is what gets this server rate-limited for an hour --
- *     or nothing it has besides CDNLive played;
+ *   - its only sources are CDNLive and CDNLive was not probed this time -- it is
+ *     probed a little at a time (see takeCdnHealthBudget) and never while it
+ *     has this server paused -- or nothing it has besides CDNLive played;
  *   - the check ran past its cap;
  *   - it came back with web-player rows and nothing direct, which a working
  *     web-only channel does too.
@@ -643,12 +643,34 @@ async function handleStream(type, id, config) {
  */
 const HEALTH_CHECK_CAP_MS = 60 * 1000;
 
+// CDNLive is checked a little at a time. Decoding its player pages in bulk is
+// what got this server rate-limited for an hour, but never checking them left
+// every dead CDNLive channel listed for good: its playlists answered 503 a
+// hundred and forty times in one hour. Forty an hour covers the lot over a few
+// sweeps without a burst.
+const CDNLIVE_HEALTH_PER_HOUR = Number(process.env.CDNLIVE_HEALTH_PER_HOUR) || 40;
+const cdnHealthTimes = [];
+function takeCdnHealthBudget() {
+  const now = Date.now();
+  while (cdnHealthTimes.length && now - cdnHealthTimes[0] > 60 * 60 * 1000) cdnHealthTimes.shift();
+  if (cdnHealthTimes.length >= CDNLIVE_HEALTH_PER_HOUR) return false;
+  cdnHealthTimes.push(now);
+  return true;
+}
+
 async function countChannelStreams(matchId) {
   const match = container.resolve('cacheService').getMatches().find(m => m.id === matchId);
   if (!match || !Array.isArray(match.sources) || !match.sources.length) throw new Error('not listed now');
 
-  const unprobed = match.sources.some(src => src.source === 'cdnlive');
-  const sources = selectSources(match.sources, {}).filter(src => src.source !== 'cdnlive');
+  const hasCdn = match.sources.some(src => src.source === 'cdnlive');
+  let probeCdn = false;
+  if (hasCdn) {
+    let benched = false;
+    try { benched = container.resolve('cdnLiveProvider').isBenched(); } catch (e) { benched = true; }
+    probeCdn = !benched && takeCdnHealthBudget();
+  }
+  const unprobed = hasCdn && !probeCdn;
+  const sources = selectSources(match.sources, {}).filter(src => probeCdn || src.source !== 'cdnlive');
   if (!sources.length) throw new Error('no sources this check probes');
 
   const resolveCache = container.resolve('streamResolveCache');
@@ -657,8 +679,9 @@ async function countChannelStreams(matchId) {
 
   // Sources whose empty answer is an answer. Streamed.pk and StreamFree fetch
   // through a circuit breaker whose fallback turns an outage or a throttle into
-  // an empty list, so from them "nothing" says nothing.
-  const EMPTY_MEANS_NONE = new Set(['iptv-org', 'usatv']);
+  // an empty list, so from them "nothing" says nothing. CDNLive under strict
+  // throws for everything that is not a real answer.
+  const EMPTY_MEANS_NONE = new Set(['iptv-org', 'usatv', 'cdnlive']);
 
   // Each source's outcome. A source someone opened recently counts from the
   // cache when it holds playable streams. Anything else is resolved here,

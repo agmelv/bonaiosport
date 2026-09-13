@@ -34,13 +34,16 @@ class IptvOrgProvider extends BaseProvider {
     // per channel with dimensions and an in-use flag.
     this.logosUrl = 'https://iptv-org.github.io/api/logos.json';
 
-    // Which of iptv-org's categories are worth carrying. Sports is the point;
-    // news and general are what bring back the broadcast networks that are
-    // listed elsewhere and cannot play. The rest of its catalogue -- religious,
-    // series, shopping and so on -- is not what anyone installed a sports addon
-    // for. Set IPTV_CATEGORIES to change it without a rebuild.
+    // Which of iptv-org's categories are worth carrying. Sports is the point,
+    // and news is what people turn to between games. "general" was carried for
+    // the broadcast networks, but those come from TimStreams and USA TV Next;
+    // what it actually added was 155 city public-access, government and
+    // community channels -- Akaku 53, CAN TV27, SF Commons 76 -- which nobody
+    // installs a sports addon to find. The rest of its catalogue (religious,
+    // shopping and so on) was never carried. Set IPTV_CATEGORIES to change it
+    // without a rebuild.
     this.categories = new Set(
-      (process.env.IPTV_CATEGORIES || 'sports,news,general')
+      (process.env.IPTV_CATEGORIES || 'sports,news')
         .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     );
     this.country = (process.env.IPTV_COUNTRY || 'US').toUpperCase();

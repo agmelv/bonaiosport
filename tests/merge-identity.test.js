@@ -96,5 +96,38 @@ t(false, same({ ...rch('FS2', 'US'), baseTitle: 'FS2' }, { ...rch('Fox Sports 2 
 t(false, same(ch('Fox Sports 1'), ch('Fox Sports 501 Cricket')), 'Fox Sports 1 is not Fox Sports 501')
 t(false, same(ch('FS1'), ev('ts_fs1_game', 'Arsenal vs Chelsea', 'football', D, [])), 'a channel short name does not join a fixture')
 
+console.log('--- one Streamed.pk feed split into the channels its streams name')
+// admin-espn carries ESPN, ESPN2, ESPN Deportes and ABC. The split channels all
+// share the feed's source id, which must not fuse them back into one tile.
+const spkSrc = (channel) => [{ source: 'streamedpk', id: 'admin-espn', streamSource: 'admin', streamId: 'admin-espn', channel }]
+const spk = (title, channel) => ({ id: 'spk_ch_admin-espn' + (channel === 'ESPN' ? '' : '__' + channel.toLowerCase().replace(/[^a-z0-9]/g, '')), title, category: 'networks', date: 0, sources: spkSrc(channel) })
+t(false, same(spk('ESPN', 'ESPN'), spk('ESPN2', 'ESPN2')), 'split ESPN is not split ESPN2')
+t(false, same(spk('ESPN', 'ESPN'), spk('ESPN Deportes', 'ESPN Deportes')), 'split ESPN is not split ESPN Deportes')
+t(false, same(spk('ESPN2', 'ESPN2'), spk('ABC', 'ABC')), 'split ESPN2 is not split ABC')
+t(true,  same(spk('ESPN2', 'ESPN2'), { ...rch('ESPN2 US', 'US'), baseTitle: 'ESPN2' }), 'split ESPN2 joins the ESPN2 US tile')
+t(true,  same(spk('ESPN', 'ESPN'), { ...rch('ESPN US', 'US'), baseTitle: 'ESPN' }), 'split ESPN joins the ESPN US tile')
+const { channelFromLanguage } = require('../src/providers/StreamedPkProvider')
+t('ESPN Deportes', channelFromLanguage('Spanish - ESPN Deportes'), 'language label names the channel')
+t(null, channelFromLanguage('English'), 'a plain language names no channel')
+t(null, channelFromLanguage('English - Stream 2'), 'a stream number is not a channel')
+
+console.log('--- one channel spelled with and without a space')
+t(true,  same({ ...rch('ESPN 2 US', 'US'), baseTitle: 'ESPN 2' }, { ...rch('ESPN2 US', 'US'), baseTitle: 'ESPN2' }), 'ESPN 2 US is ESPN2 US')
+t(true,  same({ ...rch('ESPN U', 'US') }, { ...rch('ESPNU', 'US') }), 'ESPN U is ESPNU')
+t(true,  same({ ...rch('ESPN News', 'US') }, { ...rch('ESPNEWS', 'US') }), 'ESPN News is ESPNEWS')
+t(true,  same(ch('TSN 1'), ch('TSN1')), 'TSN 1 is TSN1')
+t(false, same(ch('TSN 1'), ch('TSN 2')), 'TSN 1 is not TSN 2')
+t(true,  same(ch('Sport TV 1'), ch('Sport TV1')), 'Sport TV 1 is Sport TV1')
+t(false, same(ch('Sport TV 1'), ch('Sport TV 2')), 'Sport TV 1 is not Sport TV 2')
+t(true,  same(ch('FX Movie Channel'), ch('FXM')), 'FX Movie Channel is FXM')
+t(false, same(ch('FXM'), ch('FX')), 'FXM is not FX')
+t(true,  same(ch('Hallmark Channel'), ch('Hallmark')), 'Hallmark Channel is Hallmark')
+t(false, same(ch('Hallmark'), ch('Hallmark Family')), 'Hallmark is not Hallmark Family')
+t(false, same(ch('Hallmark Channel'), ch('Hallmark Mystery')), 'Hallmark Channel is not Hallmark Mystery')
+t(true,  same(ch('Fox News Channel'), ch('FOX News')), 'Fox News Channel is FOX News')
+t(false, same(ch('FOX News'), ch('Fox Business')), 'FOX News is not Fox Business')
+t(false, same(ch('ESPN 2 US'), ch('ESPN Deportes')), 'ESPN 2 is not ESPN Deportes')
+t(false, same(ch('ESPNU'), ch('ESPN')), 'ESPNU is not ESPN')
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

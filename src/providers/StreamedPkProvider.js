@@ -13,6 +13,18 @@ function channelNameFromSlug(slug) {
     .join(' ');
 }
 
+// A stream's language label names its channel after the dash: "Spanish - ESPN
+// Deportes". A plain language ("English") names none.
+function channelFromLanguage(language) {
+  const m = /^\s*[A-Za-z]+\s+-\s+(.+?)\s*$/.exec(String(language || ''));
+  if (!m) return null;
+  const name = m[1].trim();
+  if (!/[a-z]/i.test(name) || /^(stream|feed|backup|link|server|hd|sd)\b/i.test(name)) return null;
+  return name;
+}
+
+const normChannel = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 class StreamedPkProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -138,28 +150,46 @@ class StreamedPkProvider extends BaseProvider {
           // under its real name. resolveStream reads each source's own
           // streamSource/streamId, so the split feed plays exactly as before.
           if (is247Channel) {
-            const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             for (let i = sources.length - 1; i >= 0; i--) {
               const src = sources[i];
               const slug = /^admin-(.+)$/.exec(String(src.streamId || ''));
               if (!slug || src.streamSource !== 'admin') continue;
-              const channelName = channelNameFromSlug(slug[1]);
-              if (norm(channelName) === norm(item.title)) continue;
+              const feedChannel = channelNameFromSlug(slug[1]);
+              // One feed can carry several channels. admin-espn holds ESPN,
+              // ESPN2, ESPN Deportes and ABC, each stream naming its channel in
+              // its language label. Listed as one channel, every one of those
+              // streams landed on the ESPN tile and the ESPN2, Deportes and ABC
+              // tiles got none. So the feed is split by the channel each stream
+              // names, and each part plays only its own streams (src.channel in
+              // resolveStream). If the list cannot be read, the feed stays one
+              // channel, as before.
+              let channels = [feedChannel];
+              try {
+                const list = await this.fetchStreams.fire('admin', src.streamId);
+                if (Array.isArray(list) && list.length) {
+                  channels = [...new Set(list.map(st => channelFromLanguage(st.language) || feedChannel))];
+                }
+              } catch (e) { /* one channel */ }
+              const byChannel = channels.length > 1 || normChannel(channels[0]) !== normChannel(feedChannel);
+              if (!byChannel && normChannel(feedChannel) === normChannel(item.title)) continue;
               sources.splice(i, 1);
-              matches.push(new MatchEntity({
-                // Its own prefix: the parent item's id can be the very same
-                // slug ("US Open" is item admin-espn), and the stream lookup
-                // takes the first match by id.
-                id: `spk_ch_${src.streamId}`,
-                title: channelName,
-                region: splitRegion(channelName).region,
-                baseTitle: splitRegion(channelName).base,
-                category: 'networks',
-                status: '',
-                date: '',
-                popular: '1',
-                sources: [src]
-              }));
+              for (const channelName of channels) {
+                const own = normChannel(channelName) === normChannel(feedChannel);
+                matches.push(new MatchEntity({
+                  // Its own prefix: the parent item's id can be the very same
+                  // slug ("US Open" is item admin-espn), and the stream lookup
+                  // takes the first match by id.
+                  id: own ? `spk_ch_${src.streamId}` : `spk_ch_${src.streamId}__${normChannel(channelName)}`,
+                  title: channelName,
+                  region: splitRegion(channelName).region,
+                  baseTitle: splitRegion(channelName).base,
+                  category: 'networks',
+                  status: '',
+                  date: '',
+                  popular: '1',
+                  sources: [byChannel ? { ...src, channel: channelName } : src]
+                }));
+              }
             }
             if (sources.length === 0) continue;
           }
@@ -198,6 +228,17 @@ class StreamedPkProvider extends BaseProvider {
       if (Array.isArray(streamList)) {
         // Sort streams by viewer count (descending)
         streamList.sort((a, b) => (b.viewers || 0) - (a.viewers || 0));
+
+        // A feed split by channel plays only the streams that name this one;
+        // a stream naming no channel belongs to the feed's own channel.
+        if (src.channel) {
+          const slug = /^admin-(.+)$/.exec(String(streamId));
+          const feedChannel = slug ? channelNameFromSlug(slug[1]) : '';
+          const wanted = normChannel(src.channel);
+          const mine = streamList.filter(st => normChannel(channelFromLanguage(st.language) || feedChannel) === wanted);
+          streamList.length = 0;
+          streamList.push(...mine);
+        }
 
         // Chunk the stream list to prevent memory spiking on Render (512MB RAM limit).
         // Executing max 3 WASM child processes at a time keeps RAM usage very safe.
@@ -251,3 +292,4 @@ class StreamedPkProvider extends BaseProvider {
 }
 
 module.exports = StreamedPkProvider;
+module.exports.channelFromLanguage = channelFromLanguage;

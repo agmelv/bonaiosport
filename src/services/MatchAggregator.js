@@ -59,6 +59,17 @@ function _compoundify(t) {
     // streams, one without.
     [/\bfs\s*1\b|\bfox\s*sports?\s*1\b/g, 'foxsports1'],
     [/\bfs\s*2\b|\bfox\s*sports?\s*2\b/g, 'foxsports2'],
+    // The same channels spelled with and without a space, or by a short name.
+    // Each pair was two tiles, CDNLive's and TimStreams' or USA TV Next's, with
+    // the streams split between them.
+    [/\bespn\s+2\b/g, 'espn2'],
+    [/\bespn\s+u\b/g, 'espnu'],
+    [/\bespn\s+news\b/g, 'espnews'],
+    [/\btsn\s+(\d)\b/g, 'tsn$1'],
+    [/\bsport\s*tv\s*(\d)\b/g, 'sporttv$1'],
+    [/\bfx\s*movie\s*channel\b|\bfxm\b/g, 'fxm'],
+    [/\bhallmark\s+channel\b/g, 'hallmark'],
+    [/\bfox\s*news(?:\s*channel)?\b/g, 'foxnews'],
     [/\bal[\s\-]nassr\b/g, 'alnassr'],
     [/\bal[\s\-]hilal\b/g, 'alhilal'],
     [/\bal[\s\-]ahly\b/g, 'alahly'],

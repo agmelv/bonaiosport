@@ -210,10 +210,16 @@ class CdnLiveProvider extends BaseProvider {
    * called with is decoded and concatenated. Shared by events and channels,
    * which use the same player.
    */
-  async decodePlayer(playerUrl) {
+  // `opts.strict` (the channel health check) throws where a viewer would just
+  // get the web player: paused after a 429, rate-limited, or a page that did not
+  // decode. None of those says the channel is dead.
+  async decodePlayer(playerUrl, opts = {}) {
     const cached = this._decoded.get(playerUrl);
     if (cached && cached.expiresAt > Date.now()) return cached.url;
-    if (Date.now() < this._benchedUntil) return '';
+    if (Date.now() < this._benchedUntil) {
+      if (opts.strict) throw new Error('player lookups paused after a 429');
+      return '';
+    }
 
     const { safeFetch } = require('../impitClient');
     const playerRes = await safeFetch(playerUrl, {
@@ -226,9 +232,13 @@ class CdnLiveProvider extends BaseProvider {
       // to the web player, which the viewer opens from their own address.
       this._benchedUntil = Date.now() + BENCH_AFTER_429_MS;
       console.warn(`[${this.name}] player pages are rate-limiting this server; pausing lookups for ${BENCH_AFTER_429_MS / 60000} min`);
+      if (opts.strict) throw new Error('player page rate-limited');
       return '';
     }
-    if (!(playerRes.status >= 200 && playerRes.status < 300)) return '';
+    if (!(playerRes.status >= 200 && playerRes.status < 300)) {
+      if (opts.strict) throw new Error(`player page responded ${playerRes.status}`);
+      return '';
+    }
 
     const html = await playerRes.text();
     const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
@@ -267,9 +277,14 @@ class CdnLiveProvider extends BaseProvider {
    * channel name fell through to the Streamed.pk default -- wrong label, and
    * the wrong Referer for playback.
    */
-  async resolvePlayer(playerUrl, name) {
+  /** True while player lookups are paused after a 429. */
+  isBenched() {
+    return Date.now() < this._benchedUntil;
+  }
+
+  async resolvePlayer(playerUrl, name, opts = {}) {
     try {
-      const m3u8Url = await this.decodePlayer(playerUrl);
+      const m3u8Url = await this.decodePlayer(playerUrl, opts);
       if (m3u8Url) {
         return [new StreamEntity({
           name: 'CDNLiveTV',
@@ -284,7 +299,10 @@ class CdnLiveProvider extends BaseProvider {
           resolution: 'HD'
         })];
       }
+      // Strict: no direct stream is not the same as no channel.
+      if (opts.strict) throw new Error('player did not decode');
     } catch (e) {
+      if (opts.strict) throw e;
       console.warn(`[${this.name}] Failed to extract m3u8 for ${playerUrl}:`, e.message);
     }
     return [new StreamEntity({
@@ -295,9 +313,9 @@ class CdnLiveProvider extends BaseProvider {
     })];
   }
 
-  async resolveStream(sourceId, matchCategory, matchTitle) {
+  async resolveStream(sourceId, matchCategory, matchTitle, opts = {}) {
     if (typeof sourceId === 'string' && sourceId.startsWith(CHANNEL_PREFIX)) {
-      return this.resolvePlayer(sourceId.slice(CHANNEL_PREFIX.length), matchTitle || 'Channel');
+      return this.resolvePlayer(sourceId.slice(CHANNEL_PREFIX.length), matchTitle || 'Channel', opts);
     }
 
     const streams = [];

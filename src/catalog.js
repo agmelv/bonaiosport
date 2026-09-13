@@ -11,6 +11,7 @@ const { SEARCH_TWIN_SUFFIX } = require('./manifest');
 const channelLogoIndex = require('./services/ChannelLogoIndex');
 const { inferGenre } = require('./channelGenres');
 const channelHealth = require('./services/ChannelHealth');
+const { exclusionReason } = require('./channelExclusions');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
@@ -238,6 +239,25 @@ function channelGenre(m) {
   return (m && m.genre) || inferGenre(m && m.title);
 }
 
+/**
+ * A single club's own channel: CDNLive lists all thirty MLB teams as 24/7
+ * channels ("New York Yankees"). They show that club's broadcasts when it has
+ * a game and nothing otherwise, which in a tab of networks is thirty tiles of
+ * noise. Matched on the exact team name, so "NBC Sports Boston" or "Texas
+ * Rangers Classics" are not caught by a club name inside them.
+ */
+function isTeamChannel(m) {
+  if (!m || !m.title) return false;
+  const name = String(m.baseTitle || m.title).trim();
+  const variants = [name, name.replace(/^Oakland\s+/i, '')];
+  for (const v of variants) {
+    const crest = teamLogoService.lookupTeam(v, null, ['mlb']);
+    const canon = crest && teamLogoService.canonicalName(crest);
+    if (canon && teamLogoService.normalize(canon) === teamLogoService.normalize(v)) return true;
+  }
+  return false;
+}
+
 function isChannel(m) {
   if (!m) return false;
   if (m.category === 'networks' || !m.date) return true;
@@ -455,18 +475,8 @@ function mapMatchToMetaPreview(match, config = {}) {
   const indexedLogo = is247Channel && !logoless && !exactLogo && !matchLogo && !channelLogo
     ? (channelLogoIndex.lookup(match.title, match.region) || iptvLogoFor(match.title))
     : null;
-  // A team's own channel ("New York Yankees") is that team's crest. Looked up in
-  // MLB only, the one league that runs team channels here, so a name shared
-  // with a club elsewhere cannot borrow its badge. The A's are "Athletics" now.
-  // ESPN's dark-background variant: the standard Yankees crest is navy, and
-  // navy on the cover's grey all but disappears.
-  const teamCrest = is247Channel && !logoless && !exactLogo && !matchLogo && !channelLogo && !indexedLogo
-    ? ((teamLogoService.lookupTeam(match.title, null, ['mlb'])
-      || teamLogoService.lookupTeam(String(match.title).replace(/^Oakland\s+/i, ''), null, ['mlb']))
-      || '').replace('/teamlogos/mlb/500/', '/teamlogos/mlb/500-dark/') || null
-    : null;
   const channelMark = is247Channel && !logoless
-    ? (exactLogo || matchLogo || channelLogo || indexedLogo || teamCrest || matchThumb)
+    ? (exactLogo || matchLogo || channelLogo || indexedLogo || matchThumb)
     : null;
 
   // The competition's crest is what belongs in the card's logo slot. Before
@@ -751,7 +761,10 @@ async function handleCatalog(type, id, extra, config) {
   } else if (categoryMatch === 'channels') {
     // Always-on channels, gathered in one place. A channel has no kickoff, which
     // is what separates it from a fixture.
-    const allChannels = matches.filter(m => isChannel(m));
+    // Team channels and the listings in channelExclusions are not channels for
+    // this tab; everything else is listed, and the health check below decides
+    // what plays.
+    const allChannels = matches.filter(m => isChannel(m) && !isTeamChannel(m) && !exclusionReason(m));
     // Check, in the background, which channels actually open to a stream. The
     // viewer's own source choices are left out: whether a channel is dead is a
     // fact about the channel, and one viewer turning a source off should not
