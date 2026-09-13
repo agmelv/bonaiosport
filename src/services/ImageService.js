@@ -38,7 +38,7 @@ const redirectAgent = new Agent({ connect: guardedConnect() })
 // restyle would leave viewers looking at the old artwork until the TTL expired.
 // Bump this whenever svgMatchup() or svgPlaceholder() changes what they draw;
 // it rides along in every generated image URL and retires the stale copies.
-const RENDER_VERSION = 5;
+const RENDER_VERSION = 6;
 const crestColor = require('./CrestColorService');
 const artGeneration = require('./ArtGeneration');
 
@@ -377,25 +377,13 @@ function cardColors(aStats, bStats, fallback) {
     }
     a = ca ? seat(ca, A) : neutral(A);
     b = cb ? seat(cb, B) : neutral(B);
-    A.used = ca ? ca.c : null;
-    B.used = cb ? cb.c : null;
   }
 
   // Still colliding (one crest, or a crest with a single colour): nudge rather
   // than leave a card that looks like one flat panel.
   if (spread(a, b) < 90) b = luminance(b) > 0.35 ? shade(b, -0.28) : shade(b, 0.24);
 
-  // The stripe along a half: that team's other official colour, when it stands
-  // well apart from the half it sits on. Official colours only, so a club known
-  // just by its crest's pixels keeps the plain card it had -- and only one the
-  // crest shows, unless the crest shows no colour at all (the Raiders' silver).
-  // ESPN files hundreds of clubs under stand-in colours (one red for 223 of
-  // them), and a stripe in a colour the badge never wears is worse than none.
-  const accentFor = (S, half) => S.brand.find(c =>
-    c !== S.used && spread(c, half) >= 160
-    && (!S.colors.length || S.colors.some(p => spread(p, c) < SAME_COLOUR))) || null;
-
-  return { a, b, accentA: accentFor(A, a), accentB: accentFor(B, b) };
+  return { a, b };
 }
 
 /**
@@ -413,17 +401,11 @@ function cardColors(aStats, bStats, fallback) {
  */
 function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
   const { w = 800, h = 450, aUrl = null, bUrl = null } = opts;
-  const { a: colA, b: colB, accentA, accentB } = cardColors(
+  const { a: colA, b: colB } = cardColors(
     crestColor.statsForCrest(aUrl, aEntry),
     crestColor.statsForCrest(bUrl, bEntry),
     color
   );
-  // A team's second colour, as a stripe along the foot of its half: the
-  // Dolphins read as aqua and orange, not aqua alone.
-  const band = Math.max(6, Math.round(h * 0.022));
-  const stripe = (hex, x0, x1) => (hex
-    ? `<rect x="${x0.toFixed(1)}" y="${h - band}" width="${(x1 - x0).toFixed(1)}" height="${band}" fill="#${hex}" fill-opacity="0.95"/>`
-    : '');
 
   const cx = [w * 0.27, w * 0.73];
   const crest = 250;
@@ -470,8 +452,6 @@ function svgMatchup(aName, bName, aEntry, bEntry, color, opts = {}) {
   <rect width="${w}" height="${h}" fill="url(#bg)"/>
   <rect width="${w}" height="${h}" fill="url(#glowA)"/>
   <rect width="${w}" height="${h}" fill="url(#glowB)"/>
-  ${stripe(accentA, 0, w * 0.46)}
-  ${stripe(accentB, w * 0.54, w)}
   ${half(aName, aEntry, 0)}
   ${half(bName, bEntry, 1)}
   <text x="50%" y="${crestMid.toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="52" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#drop)">VS</text>

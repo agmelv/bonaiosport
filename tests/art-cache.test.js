@@ -25,7 +25,7 @@ const t = (ok, label, detail = '') => {
 
 console.log('--- every generated URL carries the render version and the generation');
 const gen = art.get();
-const v = `v=5.${gen}`;
+const v = `v=6.${gen}`;
 t(img.matchupUrl('http://h', { a: 'A', b: 'B', aLogo: 'http://x/a.png', bLogo: 'http://x/b.png' }).endsWith(v), 'matchupUrl', v);
 t(img.eventUrl('http://h', { text: 'T', mark: 'http://x/m.png' }).endsWith(v), 'eventUrl');
 t(img.proxyUrl('http://h', 'http://x/p.png').endsWith(v), 'proxyUrl');
@@ -41,7 +41,7 @@ t(!second.bumped && second.generation === first.generation, 'the same clear agai
 t(JSON.parse(fs.readFileSync(path.join(tmp, 'art-generation.json'), 'utf8')).generation === first.generation, 'the new token is persisted');
 art._setDirForTest(tmp);
 t(art.get() === first.generation, 'a restart reads the same token back');
-t(img.matchupUrl('http://h', { a: 'A', b: 'B', aLogo: 'http://x/a.png' }).endsWith(`v=5.${first.generation}`), 'URLs follow the new token');
+t(img.matchupUrl('http://h', { a: 'A', b: 'B', aLogo: 'http://x/a.png' }).endsWith(`v=6.${first.generation}`), 'URLs follow the new token');
 const third = art.bump('clear:all');
 t(third.bumped && third.generation !== first.generation, 'a different, wider clear inside 30 s still mints');
 
