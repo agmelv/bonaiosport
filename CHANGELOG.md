@@ -2,16 +2,18 @@
 
 ## v1.0.2 (2026-09-13)
 
-Hardened for a public launch, then two things for local viewers: the channels of your own cities, and Streamed's streams playing in Nuvio the way they play in a browser. **The manifest id changed to `community.aiosports`: reinstall the addon in your player.**
+A local release. Hardened for a public launch, then the channels of your own cities, and streamed's streams playing in nuvio the way they play in a browser. The manifest id changed to community.aiosports: reinstall the addon in your player.
 
 ### Features
 
-* **channels:** local channels. Name your cities under Local Channels in `/configure` (or `LOCAL_MARKETS` in `.env`) and each of their stations that iptv-org has a stream for becomes a tile of its own, such as FOX 32 Chicago, listed in a new 📍 Local tab beside the channels named after the city, and first on the ABC, CBS, NBC and FOX tiles ([c256be4](https://github.com/mlp2069/aiosports/commit/c256be4))
-* **streams:** label every stream on the ABC, CBS, NBC and FOX tiles with its station's city and call sign, such as Los Angeles, CA · KTTV, with the state taken from the station's own record rather than the stream's title ([a420ece](https://github.com/mlp2069/aiosports/commit/a420ece), [24faf34](https://github.com/mlp2069/aiosports/commit/24faf34))
-* **streams:** relay the video chunks of hosts that refuse a player's own client, as Streamed's CDN does, so its streams play in Nuvio instead of stalling. A host is tried once and relayed only if it needs it (`PROXY_SEGMENT_HOSTS`) ([6567759](https://github.com/mlp2069/aiosports/commit/6567759))
-* **artwork:** channel covers carry the channel's name in a line along the top with the logo centred, and ESPN2 reads ESPN 2 ([0e24773](https://github.com/mlp2069/aiosports/commit/0e24773))
-* **artwork:** every card carries an art generation, so clearing the cache reaches players; matchup cards use the leagues' official team colours; a fallback card is never cached ([0e1c2bc](https://github.com/mlp2069/aiosports/commit/0e1c2bc))
-* **security:** signed stream links, a private-address guard on everything the server fetches, edit keys for profiles saved without `AUTH_KEY`, sign-in lockouts and per-address request limits, and the addon's own manifest id ([0e1c2bc](https://github.com/mlp2069/aiosports/commit/0e1c2bc))
+* **channels:** name your cities under local channels in /configure, or in local_markets, and each of their stations that iptv-org has a stream for becomes a tile of its own, such as fox 32 chicago, listed in a new 📍 local tab beside the channels named after the city ([c256be4](https://github.com/mlp2069/aiosports/commit/c256be4))
+* **channels:** put your own cities' stations first on the abc, cbs, nbc and fox tiles ([c256be4](https://github.com/mlp2069/aiosports/commit/c256be4))
+* **streams:** label every stream on the abc, cbs, nbc and fox tiles with its station's city and call sign, such as los angeles, ca · kttv, taking the state from the station's own record rather than the stream's title ([a420ece](https://github.com/mlp2069/aiosports/commit/a420ece), [24faf34](https://github.com/mlp2069/aiosports/commit/24faf34))
+* **streams:** relay the video chunks of hosts that refuse a player's own client, as streamed's cdn does, so its streams play in nuvio instead of stalling, and try each host once so only the ones that need it are relayed (proxy_segment_hosts) ([6567759](https://github.com/mlp2069/aiosports/commit/6567759))
+* **artwork:** put the channel's name in a line along the top of its cover with the logo centred, and read espn2 as espn 2 ([0e24773](https://github.com/mlp2069/aiosports/commit/0e24773))
+* **artwork:** stamp every card with an art generation so clearing the cache reaches players, draw matchup cards in the leagues' official team colours, and never cache a fallback card ([0e1c2bc](https://github.com/mlp2069/aiosports/commit/0e1c2bc))
+* **security:** sign stream links, guard everything the server fetches against private addresses, give profiles saved without auth_key an edit key, lock out repeated failed sign-ins, and limit requests per address ([0e1c2bc](https://github.com/mlp2069/aiosports/commit/0e1c2bc))
+* **security:** give the addon its own manifest id, community.aiosports, instead of sharing upstream's ([0e1c2bc](https://github.com/mlp2069/aiosports/commit/0e1c2bc))
 
 ### Bug Fixes
 
@@ -20,7 +22,7 @@ Hardened for a public launch, then two things for local viewers: the channels of
 
 ### Performance Improvements
 
-* **cache:** keep card warming to a quarter of a core (`WARM_CPU_SHARE`) ([30e5a0b](https://github.com/mlp2069/aiosports/commit/30e5a0b))
+* **cache:** keep card warming to a quarter of a core (warm_cpu_share) ([30e5a0b](https://github.com/mlp2069/aiosports/commit/30e5a0b))
 
 ## v1.0.1 (2026-09-12)
 
