@@ -8,9 +8,9 @@ then
     exit 1
 fi
 
-echo "[Nuvio] Installing dependencies if needed..."
+echo "[AIOSports] Installing dependencies if needed..."
 npm install
 
 echo ""
-echo "[Nuvio] Starting the server..."
+echo "[AIOSports] Starting the server..."
 npm start

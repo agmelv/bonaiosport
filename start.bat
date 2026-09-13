@@ -1,5 +1,5 @@
 @echo off
-title Nuvio Live Sports Plugin
+title AIOSports
 
 :: Check if Node.js is installed
 where node >nul 2>nul
@@ -10,11 +10,11 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-echo [Nuvio] Installing dependencies if needed...
+echo [AIOSports] Installing dependencies if needed...
 call npm install
 
 echo.
-echo [Nuvio] Starting the server...
+echo [AIOSports] Starting the server...
 call npm start
 
 pause
