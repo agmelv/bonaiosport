@@ -10,7 +10,7 @@ const { GENRES } = require('./channelGenres');
 
 const manifest = {
   id: 'community.nuvio.live-sports',
-  version: '1.0.0',
+  version: '1.0.1',
   name: 'AIOSports',
   description:
     'The ultimate live sports aggregator. Stream live Football, NBA, NFL, NHL, F1, and more. ' +

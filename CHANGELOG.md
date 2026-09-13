@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.0.1 (2026-09-12)
+
+A channels release. New channel sources, a cover for every channel with its real logo, and a Channels tab that lists one tile per channel and hides the ones that do not play.
+
+### Features
+
+* **artwork:** draw every 24/7 channel as a wide cover: its logo on flat grey with the channel's name underneath ([e90de33](https://github.com/mlp2069/aiosports/commit/e90de33), [0028a99](https://github.com/mlp2069/aiosports/commit/0028a99), [c830587](https://github.com/mlp2069/aiosports/commit/c830587))
+* **artwork:** find each channel's logo in a curated logo set for its own country, add 70 hand-checked logos, and give channels with no usable logo a clean name-only cover ([0028a99](https://github.com/mlp2069/aiosports/commit/0028a99), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **artwork:** lighten dark and navy logos so they read on the grey, without changing brand colours ([fff631c](https://github.com/mlp2069/aiosports/commit/fff631c), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **cache:** show in the cache stats how many channels the health check has hidden and how many are waiting on a second check ([94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **channels:** add sec network, which plays but is missing from timstreams' own channel list ([0028a99](https://github.com/mlp2069/aiosports/commit/0028a99))
+* **channels:** add usa tv next, cdnlive and timstreams' 24/7 channels as channel sources, and bring back iptv-org for us sports and news channels ([cf8dcad](https://github.com/mlp2069/aiosports/commit/cf8dcad), [ef4f6c6](https://github.com/mlp2069/aiosports/commit/ef4f6c6), [1e03f2a](https://github.com/mlp2069/aiosports/commit/1e03f2a), [598ffc8](https://github.com/mlp2069/aiosports/commit/598ffc8))
+* **channels:** hide channels that open to nothing, after two empty checks at least 15 minutes apart or three failed checks over half an hour, and bring them back once they play (hide_empty_channels=0 turns it off) ([94dc563](https://github.com/mlp2069/aiosports/commit/94dc563), [de61838](https://github.com/mlp2069/aiosports/commit/de61838))
+* **channels:** label a channel that exists in several countries with its region, such as espn us and espn nz, and never merge two countries' feeds ([491edb9](https://github.com/mlp2069/aiosports/commit/491edb9))
+* **channels:** list a channel once when several sources carry it, with all of their streams on the one tile ([598ffc8](https://github.com/mlp2069/aiosports/commit/598ffc8), [c830587](https://github.com/mlp2069/aiosports/commit/c830587), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563), [de61838](https://github.com/mlp2069/aiosports/commit/de61838))
+* **channels:** sort the channels tab a to z with numbers in order, and add a genre picker ([0028a99](https://github.com/mlp2069/aiosports/commit/0028a99), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **configure:** list usa tv and iptv-org among the sources so they can be switched off or reordered ([cf8dcad](https://github.com/mlp2069/aiosports/commit/cf8dcad), [598ffc8](https://github.com/mlp2069/aiosports/commit/598ffc8))
+* **providers:** add usatv_base, iptv_categories, iptv_country, cdnlive_countries and cdnlive_health_per_hour for self-hosters ([cf8dcad](https://github.com/mlp2069/aiosports/commit/cf8dcad), [598ffc8](https://github.com/mlp2069/aiosports/commit/598ffc8), [491edb9](https://github.com/mlp2069/aiosports/commit/491edb9), [de61838](https://github.com/mlp2069/aiosports/commit/de61838))
+
+### Bug Fixes
+
+* **aggregator:** merge one channel listed under different names, such as fs1 and fox sports 1, espn 2 and espn2, tsn 1 and tsn1, fox news channel and fox news, and dazn 1 germany and dazn 1 ([c830587](https://github.com/mlp2069/aiosports/commit/c830587), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563), [de61838](https://github.com/mlp2069/aiosports/commit/de61838))
+* **aggregator:** stop different channels that share a logo from merging, such as espn and espn deportes, two nbc sports regionals, or spectrum sportsnet and spectrum sportsnet la ([cf8dcad](https://github.com/mlp2069/aiosports/commit/cf8dcad), [aa6dcc1](https://github.com/mlp2069/aiosports/commit/aa6dcc1))
+* **artwork:** fetch logos a few at a time per host and back off a host that rate-limits, so covers still load when a whole tab opens at once ([94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **artwork:** give channels their cover instead of promo art, and keep logos sharp with their frames and lettering intact ([c830587](https://github.com/mlp2069/aiosports/commit/c830587), [d58d277](https://github.com/mlp2069/aiosports/commit/d58d277), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **artwork:** show each channel's own logo instead of a sibling's or another country's, as on fox sports 503, tsn, sportsnet, tnt sports and espn 4 ([491edb9](https://github.com/mlp2069/aiosports/commit/491edb9), [d58d277](https://github.com/mlp2069/aiosports/commit/d58d277), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **cache:** stop players keeping a placeholder for good when a channel's logo is slow while a whole tab loads ([c830587](https://github.com/mlp2069/aiosports/commit/c830587), [94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **channels:** keep iptv-org's abc, cbs, nbc, fox, cw, mnt, galavision and telemundo streams on those networks' tiles while its public-access channels stay out ([b1977fa](https://github.com/mlp2069/aiosports/commit/b1977fa))
+* **channels:** leave out listings that are not channels: mlb club channels, city public-access and government channels, a radio studio webcam, abc news overflow feeds, qvc and streamed.pk's nfl schedule page ([94dc563](https://github.com/mlp2069/aiosports/commit/94dc563), [de61838](https://github.com/mlp2069/aiosports/commit/de61838))
+* **providers:** leave out usa tv next channels whose stream hosts are gone, rechecking every six hours ([e2c137e](https://github.com/mlp2069/aiosports/commit/e2c137e))
+* **providers:** list espn from streamed.pk as its own channel, and split that feed so espn2, espn deportes and abc get their own streams instead of piling onto espn us ([1e03f2a](https://github.com/mlp2069/aiosports/commit/1e03f2a), [de61838](https://github.com/mlp2069/aiosports/commit/de61838))
+* **providers:** pause cdnlive player lookups for ten minutes after a rate limit, read its channel list from its second domain when the first fails, and stop fetching its channel images that never load ([1e03f2a](https://github.com/mlp2069/aiosports/commit/1e03f2a), [d58d277](https://github.com/mlp2069/aiosports/commit/d58d277))
+* **streams:** label cdnlive streams as cdnlive and play them with its own referer ([1e03f2a](https://github.com/mlp2069/aiosports/commit/1e03f2a))
+
+### Performance Improvements
+
+* **cache:** keep finished covers and enough logos for the whole channels tab, and warm up to 2500 cards, so opening it does not refetch every logo ([94dc563](https://github.com/mlp2069/aiosports/commit/94dc563))
+* **cache:** warm popular channels alongside live fixtures so busy channels like espn return every stream on the first open ([17a1653](https://github.com/mlp2069/aiosports/commit/17a1653))
+* **providers:** reuse a cdnlive stream link until shortly before it expires instead of reloading its player page on every open ([1e03f2a](https://github.com/mlp2069/aiosports/commit/1e03f2a))
+
 ## 1.0.0 (2026-09-12)
 
 First release under the AIOSports name. The project is a fork of [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin), and the version resets to 1.0.0 to start its own line.
