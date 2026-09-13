@@ -3,6 +3,7 @@ const { normalizeGenre } = require('../channelGenres');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const { cbsNewsLabel } = require('../services/StationLabel');
 
 /**
  * USA TV Next — https://github.com/yowmamasita/usa-tv-next
@@ -216,6 +217,8 @@ class UsaTvProvider extends BaseProvider {
           title: tag ? `USA TV (${tag})` : 'USA TV',
           url: s.url,
           resolution: quality,
+          // CBS News' local streams name their city in the tag ("HV:CBSN-BOS").
+          station: cbsNewsLabel(tag) || undefined,
           behaviorHints: { notWebReady: true }
         }));
       }

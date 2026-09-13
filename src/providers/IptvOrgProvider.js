@@ -4,6 +4,7 @@ const { regionFromCode } = require('../channelRegions');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const { stationLabel } = require('../services/StationLabel');
 
 /**
  * iptv-org — https://iptv-org.github.io/api/
@@ -152,6 +153,8 @@ class IptvOrgProvider extends BaseProvider {
         const bestLogo = logoFor.get(c.id);
         let logo = bestLogo && typeof bestLogo.url === 'string' ? bestLogo.url : '';
         if (logo.startsWith('//')) logo = `https:${logo}`;
+        // A national network's iptv-org entry is dozens of local stations.
+        const isNetwork = GENERAL_NETWORKS.test(String(c.name).trim());
 
         matches.push(new MatchEntity({
           id: `iptv_${c.id}`,
@@ -167,14 +170,22 @@ class IptvOrgProvider extends BaseProvider {
             .map(normalizeGenre).filter(Boolean).reduce(moreSpecific, null) || '',
           thumbnail_url: logo,
           logo,
-          sources: usable.map(s => ({
-            source: 'iptv-org',
-            id: s.url,
-            url: s.url,
-            quality: s.quality || 'Auto',
-            user_agent: s.user_agent,
-            referrer: s.referrer
-          }))
+          // On a network tile each stream is a different local station, so it
+          // says which one -- "Los Angeles, CA · KTTV" -- for the stream list.
+          sources: usable.map(s => {
+            const st = isNetwork
+              ? stationLabel({ channelId: c.id, channelName: String(c.name).trim(), streamTitle: s.title, feed: s.feed })
+              : null;
+            return {
+              source: 'iptv-org',
+              id: s.url,
+              url: s.url,
+              quality: s.quality || 'Auto',
+              user_agent: s.user_agent,
+              referrer: s.referrer,
+              ...(st ? { station: st.label, stationSort: st.sort } : {})
+            };
+          })
         }));
       }
 

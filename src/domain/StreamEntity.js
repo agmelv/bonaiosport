@@ -1,5 +1,7 @@
 class StreamEntity {
-  constructor({ name, title, url, externalUrl, resolution, bitrate, score, behaviorHints }) {
+  constructor({ name, title, url, externalUrl, resolution, bitrate, score, behaviorHints, station }) {
+    // Which local station a stream is, for its label in the stream list.
+    if (station) this.station = station;
     this.name = name || 'Unknown Proxy';
     this.title = title || 'Unknown Stream';
     

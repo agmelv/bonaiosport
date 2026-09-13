@@ -115,6 +115,10 @@ async function resolveSource(src, match, config, opts = {}) {
         title: `24/7 TV (${src.quality || 'Auto'})`,
         url: src.url,
         resolution: src.quality,
+        // Which local station this is, when the source knows. Kept apart from
+        // the title above, which the scorer and provider detection read.
+        station: src.station,
+        stationSort: src.stationSort,
         behaviorHints: {
           proxyHeaders: {
             request: proxyHeaders
@@ -521,7 +525,8 @@ async function handleStream(type, id, config) {
       channelName = channelName.trim();
     }
     
-    const channelDisplay = channelName ? ` | 📺 ${channelName}` : '';
+    const shown = s.station || channelName;
+    const channelDisplay = shown ? ` | 📺 ${shown}` : '';
     s.title = `${icon} ${providerName}${channelDisplay}\n📺 Quality: ${quality}${viewersText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
@@ -556,7 +561,7 @@ async function handleStream(type, id, config) {
     
     // Add extra info if present
     if (providerName === 'Direct IPTV' && s.url) {
-      s.title = `📺 ${channelName || 'Live channel'}\n⚙️ Quality: ${quality}`;
+      s.title = `📺 ${s.station || channelName || 'Live channel'}\n⚙️ Quality: ${quality}`;
     }
   });
 
@@ -595,6 +600,14 @@ async function handleStream(type, id, config) {
   // not want either kind promoted, so the list falls back to pure quality
   // order. Only the grouping goes -- score still decides, because unranked is
   // not what "no preference between direct and web" asks for.
+  // Within one score -- on a network tile, one quality -- local stations read A
+  // to Z by city. Rows without a station keep their order: the sort is stable.
+  const byStation = (a, b) => {
+    if (!a.stationSort && !b.stationSort) return 0;
+    if (!a.stationSort) return 1;
+    if (!b.stationSort) return -1;
+    return a.stationSort < b.stationSort ? -1 : a.stationSort > b.stationSort ? 1 : 0;
+  };
   const order = config && config.streamOrder;
   const webFirst = order === 'web';
   const groupByKind = order !== 'none';
@@ -604,8 +617,9 @@ async function handleStream(type, id, config) {
       const bDirect = b.url ? 1 : 0;
       if (aDirect !== bDirect) return webFirst ? aDirect - bDirect : bDirect - aDirect;
     }
-    return b.score - a.score;
+    return (b.score - a.score) || byStation(a, b);
   });
+  for (const s of streams) { delete s.station; delete s.stationSort; }
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
   // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
