@@ -44,6 +44,13 @@ const LOGO_NAME = {
 // How long the feed and city lists are kept. Stations move house rarely.
 const PLACES_TTL_MS = 24 * 60 * 60 * 1000;
 
+// A channel name as the logo index is keyed: "Fox Sports 1" and "FOX SPORTS1" meet.
+const nameKey = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/\+/g, 'plus').replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+
+const LOGO_INDEX_FILE = require('path').join(require('../config').DATA_DIR, 'iptv-logos.json');
+const LOGO_INDEX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** The call sign a set of stream titles mention, or ''. */
 function callFromTitles(titles) {
   for (const t of titles || []) {
@@ -70,6 +77,11 @@ class IptvOrgProvider extends BaseProvider {
     this.feedsUrl = 'https://iptv-org.github.io/api/feeds.json';
     this.citiesUrl = 'https://iptv-org.github.io/api/cities.json';
     this._places = null;
+    // The name index the covers borrow logos from (logoForName), kept between
+    // runs: a restart that serves its saved catalog does not run a sync for
+    // minutes, and the covers drawn in between would otherwise go without.
+    this._nameKey = nameKey;
+    this._logoByName = this._loadLogoIndex();
 
     // Which of iptv-org's categories are worth carrying. Sports is the point,
     // and news is what people turn to between games. "general" was carried for
@@ -176,8 +188,6 @@ class IptvOrgProvider extends BaseProvider {
       // is how "US Open" came to match a local TV station's call sign. Each
       // entry remembers its country so the caller can insist on the right one.
       const byName = new Map();
-      const nameKey = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .toLowerCase().replace(/\+/g, 'plus').replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
       const chanById = new Map();
       for (const c of data.channels) {
         if (!c || !c.id) continue;
@@ -188,7 +198,7 @@ class IptvOrgProvider extends BaseProvider {
         byName.get(k).push({ country: c.country, url: logoFor.get(c.id).url });
       }
       this._logoByName = byName;
-      this._nameKey = nameKey;
+      this._saveLogoIndex();
 
       const streamsFor = new Map();
       for (const s of data.streams) {
@@ -403,6 +413,27 @@ class IptvOrgProvider extends BaseProvider {
       console.error(`[${this.name}] Error fetching channels:`, error.message);
       return [];
     }
+  }
+
+  _loadLogoIndex() {
+    try {
+      const fs = require('fs');
+      const saved = JSON.parse(fs.readFileSync(LOGO_INDEX_FILE, 'utf8'));
+      if (!saved || !Array.isArray(saved.index) || Date.now() - Number(saved.at) > LOGO_INDEX_MAX_AGE_MS) return null;
+      return new Map(saved.index);
+    } catch (e) {
+      return null;   // first run, or unreadable
+    }
+  }
+
+  _saveLogoIndex() {
+    try {
+      const fs = require('fs');
+      fs.mkdirSync(require('path').dirname(LOGO_INDEX_FILE), { recursive: true });
+      const tmp = LOGO_INDEX_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ at: Date.now(), index: [...this._logoByName] }));
+      fs.renameSync(tmp, LOGO_INDEX_FILE);
+    } catch (e) { /* memory only, as before */ }
   }
 
   /**

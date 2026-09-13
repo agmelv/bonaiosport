@@ -55,6 +55,31 @@ let fetchedAt = 0;
 let inFlight = null;
 let lastStats = null;
 
+// Kept between runs, so the first catalog request after a restart is not the
+// one that waits on ESPN. Served stale and refreshed behind it, as always.
+const INDEX_FILE = require('path').join(require('../config').DATA_DIR, 'homeaway.json');
+
+function restore() {
+  try {
+    const saved = JSON.parse(require('fs').readFileSync(INDEX_FILE, 'utf8'));
+    if (!saved || !Array.isArray(saved.index) || !(Number(saved.fetchedAt) > 0)) return;
+    if (Date.now() - Number(saved.fetchedAt) > STALE_SERVE_MS) return;
+    index = new Map(saved.index);
+    fetchedAt = Math.min(Number(saved.fetchedAt), Date.now());
+    lastStats = saved.stats || null;
+  } catch (e) { /* first run, or unreadable */ }
+}
+
+function persist() {
+  try {
+    const fs = require('fs');
+    fs.mkdirSync(require('path').dirname(INDEX_FILE), { recursive: true });
+    const tmp = INDEX_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ fetchedAt, stats: lastStats, index: [...index] }));
+    fs.renameSync(tmp, INDEX_FILE);
+  } catch (e) { /* memory only, as before */ }
+}
+
 // Shared with TeamLogoService rather than copied: provider names and ESPN names
 // only meet if both sides normalize identically, and two copies would drift.
 const { normalize } = require('./TeamLogoService');
@@ -279,6 +304,7 @@ async function rebuild() {
   index = next;
   fetchedAt = Date.now();
   lastStats = stats;
+  persist();
   return stats;
 }
 
@@ -367,5 +393,7 @@ function orient(a, b, aLogo = null, bLogo = null, category = null, dateMs = null
 function stats() {
   return { size: index.size, ageMs: fetchedAt ? Date.now() - fetchedAt : null, last: lastStats };
 }
+
+restore();
 
 module.exports = { ensureFresh, orient, stats, normalize, _rebuild: rebuild };

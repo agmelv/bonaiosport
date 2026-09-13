@@ -183,7 +183,9 @@ StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSp
 
 **Stremio won't install the addon.** It needs an https address; see [Stremio needs https](#stremio-needs-https).
 
-**Covers show only a name for a moment.** The first time a tab opens, the server fetches logos and draws covers. They're cached afterwards, and the server warms them in the background after it starts.
+**Covers show only a name for a moment.** The first time a tab opens, the server fetches logos and draws covers. They're cached afterwards -- on the data volume too, so a restart does not draw them again; only an update that changes how cards look draws them once more -- and the server warms them in the background after it starts.
+
+**The server is busy for a few minutes after an update.** Only when the data volume is missing: without it, every restart re-reads every source, refetches every logo and redraws every cover. With `DATA_DIR` on a volume, the catalog, the cards, the logos and the channel checks are all kept, and a restart serves them at once.
 
 **A channel disappeared.** Channels with no streams across two checks at least 15 minutes apart are hidden, and they come back once they play again. `HIDE_EMPTY_CHANNELS=0` shows them all.
 

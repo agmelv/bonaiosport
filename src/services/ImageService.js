@@ -41,6 +41,7 @@ const redirectAgent = new Agent({ connect: guardedConnect() })
 const RENDER_VERSION = 6;
 const crestColor = require('./CrestColorService');
 const artGeneration = require('./ArtGeneration');
+const DiskCache = require('./DiskCache');
 
 // The version in every generated URL: how cards are drawn, plus the cache
 // generation that clearing the cache bumps (see ArtGeneration.js).
@@ -129,6 +130,13 @@ const BOT_UA = 'AIOSports/1.0 (https://github.com/mlp2069/aiosports)';
 const cache = new Map();     // url -> { buffer, contentType, expiresAt }
 const inFlight = new Map();  // url -> Promise
 const negatives = new Map(); // url -> expiry ts (recently failed/slow sources)
+// Fetched images on disk as well (IMAGE_DISK_MB), for as long as one may be
+// served: a restart used to refetch six hundred logos, and redraw an SVG
+// among them as PNG, before the first card was made.
+const diskImages = new DiskCache('images', {
+  maxBytes: (Number(process.env.IMAGE_DISK_MB) || 256) * 1024 * 1024,
+  ttlMs: IMAGE_TTL_MS + IMAGE_STALE_MS
+});
 
 const NEG_TTL_MS = 60 * 1000;
 // A fetch that never started -- its host cooling down, or no slot free before
@@ -524,6 +532,19 @@ const CARD_CACHE_MAX = 4500;
 const CARD_CACHE_MAX_BYTES = 192 * 1024 * 1024;
 const CARD_TTL_MS = 12 * 60 * 60 * 1000;
 let cardBytes = 0;
+// The finished cards on disk as well (CARD_DISK_MB): a restart threw every one
+// away and the warmer drew the lot again, which was most of a deploy's CPU.
+// Every tab's cards come to about 60 MB. A card is written when it is made
+// and read back the first time it is asked for after a start.
+const diskCards = new DiskCache('cards', {
+  maxBytes: (Number(process.env.CARD_DISK_MB) || 512) * 1024 * 1024,
+  ttlMs: CARD_TTL_MS
+});
+
+/** The art version a card key names: what the file is filed under. */
+function versionOf(key) {
+  try { return new URLSearchParams(String(key).split('?')[1] || '').get('v') || ''; } catch (e) { return ''; }
+}
 
 function cardDrop(key) {
   const old = cardCache.get(key);
@@ -532,19 +553,21 @@ function cardDrop(key) {
   cardBytes -= old.jpeg.length;
 }
 
-function cardPut(key, entry) {
+function cardPut(key, entry, { persist = true } = {}) {
   cardDrop(key);
   cardCache.set(key, entry);
   cardBytes += entry.jpeg.length;
   while (cardCache.size > CARD_CACHE_MAX || (cardBytes > CARD_CACHE_MAX_BYTES && cardCache.size > 1)) {
     cardDrop(cardCache.keys().next().value);
   }
+  if (persist) diskCards.put(key, { cacheControl: entry.cacheControl, v: versionOf(key) }, entry.jpeg);
 }
 
-/** Whether a finished card is held for this path and query. Touches nothing. */
+/** Whether a finished card is held for this path and query, in memory or on disk. Touches nothing. */
 function hasFreshCard(key) {
   const hit = cardCache.get(key);
-  return !!hit && Date.now() <= hit.expiresAt;
+  if (hit && Date.now() <= hit.expiresAt) return true;
+  return diskCards.has(key);
 }
 
 function cardKey(req) {
@@ -555,9 +578,20 @@ function cardKey(req) {
 /** Send the card already made for this URL. True when it did. */
 function sendCachedCard(req, res) {
   const key = cardKey(req);
-  const hit = key ? cardCache.get(key) : null;
-  if (!hit || Date.now() > hit.expiresAt) {
-    if (hit) cardDrop(key);
+  let hit = key ? cardCache.get(key) : null;
+  if (hit && Date.now() > hit.expiresAt) {
+    cardDrop(key);
+    hit = null;
+  }
+  if (!hit && key) {
+    // Made before the last restart: read back, and held in memory from here.
+    const kept = diskCards.get(key);
+    if (kept) {
+      hit = { jpeg: kept.buffer, cacheControl: (kept.meta && kept.meta.cacheControl) || CACHE_CONTROL.FULL, expiresAt: kept.mtimeMs + CARD_TTL_MS };
+      cardPut(key, hit, { persist: false });
+    }
+  }
+  if (!hit) {
     stats.cardMisses++;
     return false;
   }
@@ -1173,11 +1207,12 @@ function svgEvent(text, entry, color, opts = {}) {
 // the oldest entry is always the first key and eviction never sorts.
 let cacheBytes = 0;
 
-function cachePut(url, entry) {
+function cachePut(url, entry, { persist = true } = {}) {
   cacheDrop(url);
   cache.set(url, entry);
   cacheBytes += entry.buffer.length;
   evictIfNeeded();
+  if (persist) diskImages.put(url, { contentType: entry.contentType, expiresAt: entry.expiresAt }, entry.buffer);
 }
 
 function cacheDrop(url) {
@@ -1423,6 +1458,15 @@ async function getImage(rawUrl) {
 
   let now = Date.now();
   let hit = cache.get(url);
+  if (!hit) {
+    // Fetched before the last restart: read back, with the freshness it had.
+    const kept = diskImages.get(url);
+    if (kept && kept.meta && kept.meta.contentType && kept.buffer.length) {
+      const expiresAt = Number(kept.meta.expiresAt) || 0;
+      hit = { buffer: kept.buffer, contentType: kept.meta.contentType, expiresAt, staleUntil: expiresAt + IMAGE_STALE_MS, lastAccess: now };
+      cachePut(url, hit, { persist: false });
+    }
+  }
   // Just cleared: the copy held may be the very thing the owner cleared to be
   // rid of. A new copy gets a few seconds to arrive before a card is drawn from
   // the old one -- which, if it comes to that, is stale and kept by nobody.
@@ -1485,7 +1529,7 @@ function startFetch(url, { background = false } = {}) {
     if (result) negatives.delete(url);
     else {
       // A source that says the image is gone is believed, stale copy and all.
-      if (background && out && (out.status === 404 || out.status === 410)) cacheDrop(url);
+      if (background && out && (out.status === 404 || out.status === 410)) { cacheDrop(url); diskImages.delete(url); }
       // A 429 is remembered at least as long as the host asked for.
       const ttl = out && out.status === 429 ? Math.max(out.retryAfterMs || 0, NEG_TTL_MS)
         : out && out.skipped ? NEG_TTL_SKIPPED_MS
@@ -1586,7 +1630,8 @@ function cacheStats() {
     finished: { entries: cardCache.size, max: CARD_CACHE_MAX, bytes: cardBytes,
       hits: stats.cardHits, misses: stats.cardMisses, hitRate: rate(stats.cardHits, stats.cardMisses) },
     negatives: negatives.size,
-    quality: RASTER_QUALITY
+    quality: RASTER_QUALITY,
+    disk: { cards: diskCards.stats(), images: diskImages.stats() }
   };
 }
 
@@ -1605,6 +1650,7 @@ function clearCache(what = 'all') {
     rasterCache.clear();
     cardCache.clear();
     cardBytes = 0;
+    diskCards.clear();
   }
   if (what === 'upstream' || what === 'all') {
     for (const entry of cache.values()) {
@@ -1615,6 +1661,10 @@ function clearCache(what = 'all') {
     negatives.clear();
     cardCache.clear();
     cardBytes = 0;
+    // The copies on disk would come back fresh after a restart; the ones in
+    // memory are kept, stale, for the reason above.
+    diskCards.clear();
+    diskImages.clear();
   }
   if (what === 'all') {
     crestColor.clear();
@@ -1625,11 +1675,31 @@ function clearCache(what = 'all') {
   return before;
 }
 
-/** Whether a fetched image is held and still fresh. Touches nothing. */
+/**
+ * Whether a fetched image is held and still fresh -- or on disk and still
+ * servable, which the warmer treats the same: one that is past its freshness
+ * is refetched behind the first card that asks. Touches nothing.
+ */
 function hasFreshImage(rawUrl) {
   const url = normalizeUrl(rawUrl);
-  const hit = url ? cache.get(url) : null;
-  return !!hit && Date.now() < hit.expiresAt;
+  if (!url) return false;
+  const hit = cache.get(url);
+  if (hit && Date.now() < hit.expiresAt) return true;
+  return diskImages.has(url);
+}
+
+/** For tests: forget everything held in memory, as a restart would, keeping the disk. */
+function _forgetMemory() {
+  rasterCache.clear();
+  cardCache.clear();
+  cardBytes = 0;
+  cache.clear();
+  cacheBytes = 0;
+}
+
+/** Cards drawn for an earlier art generation: no player will ask for them again. */
+function pruneOldCards() {
+  diskCards.clear(meta => !!meta && meta.v === artVersion());
 }
 
 module.exports = {
@@ -1661,5 +1731,11 @@ module.exports = {
   proxyUrl,
   placeholderUrl,
   matchupUrl,
-  normalizeUrl
+  normalizeUrl,
+  pruneOldCards,
+  _forgetMemory,
+  _disk: { cards: diskCards, images: diskImages }
 };
+
+// Once, at the start: the cards of an earlier generation go, the current ones stay.
+pruneOldCards();

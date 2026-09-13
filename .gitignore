@@ -4,6 +4,10 @@ node_modules/
 .DS_Store
 scratch/
 
+# The data directory of a run from source: profiles, and now the saved
+# catalog, cards and logos -- hundreds of megabytes of them.
+data/
+
 # Build output. Was committed once and went stale, shipping a bundle that
 # predated the whole login system to anyone running it without Docker.
 dist/

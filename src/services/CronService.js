@@ -83,9 +83,21 @@ class CronService {
       });
     }
 
-    // Run first sync immediately on boot
+    // Run first sync immediately on boot -- unless the catalog the last run
+    // saved is still within its revalidation window. Then it is served as it
+    // is, and the first request past the window re-syncs, as any would. Every
+    // provider re-read on every restart was the deploy's first minute of CPU,
+    // for a list the process had a fresh copy of.
     setTimeout(async () => {
       try {
+        // No warm pass either: the cards for a saved catalog were made before
+        // the restart and are on disk, and a pass this early would draw the
+        // few that are not before the providers' own state exists. The next
+        // sync's pass, or the scheduled one, covers them.
+        if (this.cacheService && this.cacheService.loadedFromDisk && !this.cacheService.isStale(REVALIDATE_AFTER_MS)) {
+          console.log('[CronService] Saved catalog is fresh; skipping the boot sync');
+          return;
+        }
         console.log('[CronService] Running initial match sync...');
         await this.runSync();
       } catch(e) {

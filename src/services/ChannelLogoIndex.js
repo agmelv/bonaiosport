@@ -208,6 +208,32 @@ let index = null;         // base slug -> [{ cc, hz, hd, path }]
 let loadedAt = 0;
 let loading = null;
 
+// Kept between runs. GitHub allows sixty unsigned API calls an hour from one
+// address, and a day of deploys spent them fetching the same tree -- past the
+// limit the index was empty and every cover went out without its logo.
+const INDEX_FILE = require('path').join(require('../config').DATA_DIR, 'logo-index.json');
+
+function restore() {
+  try {
+    const saved = JSON.parse(require('fs').readFileSync(INDEX_FILE, 'utf8'));
+    if (!saved || !Array.isArray(saved.index) || !(Number(saved.loadedAt) > 0)) return;
+    if (Date.now() - Number(saved.loadedAt) > REFRESH_MS) return;
+    index = new Map(saved.index);
+    loadedAt = Math.min(Number(saved.loadedAt), Date.now());
+    console.log(`[ChannelLogoIndex] ${index.size} channel logos, from the last run`);
+  } catch (e) { /* first run, or unreadable */ }
+}
+
+function persist() {
+  try {
+    const fs = require('fs');
+    fs.mkdirSync(require('path').dirname(INDEX_FILE), { recursive: true });
+    const tmp = INDEX_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ loadedAt, index: [...index] }));
+    fs.renameSync(tmp, INDEX_FILE);
+  } catch (e) { /* memory only, as before */ }
+}
+
 async function load() {
   if (loading) return loading;
   loading = (async () => {
@@ -242,6 +268,7 @@ async function load() {
         index = next;
         loadedAt = Date.now();
         console.log(`[ChannelLogoIndex] ${next.size} channel logos indexed`);
+        persist();
       }
     } catch (err) {
       console.warn('[ChannelLogoIndex] could not load the logo list:', err.message);
@@ -346,6 +373,7 @@ function lookup(name, region, opts = {}) {
   return FILE_BASE + best.path;
 }
 
+restore();
 warm();
 
 module.exports = { lookup, warm, isLogoless, _slug: slug };
