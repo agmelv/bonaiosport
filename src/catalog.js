@@ -447,9 +447,12 @@ function mapMatchToMetaPreview(match, config = {}) {
   // A team's own channel ("New York Yankees") is that team's crest. Looked up in
   // MLB only, the one league that runs team channels here, so a name shared
   // with a club elsewhere cannot borrow its badge. The A's are "Athletics" now.
+  // ESPN's dark-background variant: the standard Yankees crest is navy, and
+  // navy on the cover's grey all but disappears.
   const teamCrest = is247Channel && !matchLogo && !channelLogo && !indexedLogo
-    ? (teamLogoService.lookupTeam(match.title, null, ['mlb'])
+    ? ((teamLogoService.lookupTeam(match.title, null, ['mlb'])
       || teamLogoService.lookupTeam(String(match.title).replace(/^Oakland\s+/i, ''), null, ['mlb']))
+      || '').replace('/teamlogos/mlb/500/', '/teamlogos/mlb/500-dark/') || null
     : null;
   const channelMark = is247Channel ? (matchLogo || channelLogo || indexedLogo || teamCrest || matchThumb) : null;
 

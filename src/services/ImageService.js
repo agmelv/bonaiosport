@@ -415,9 +415,9 @@ const KNOCKOUT_CACHE_MAX = 600;
  * like a logo on a plain backdrop: already transparent, a busy edge (a photo),
  * or a fill that clears almost nothing or almost everything.
  */
-async function knockoutBackground(buffer) {
+async function knockoutBackground(buffer, opts = {}) {
   if (!buffer) return null;
-  const key = crypto.createHash('sha1').update(buffer).digest('base64');
+  const key = crypto.createHash('sha1').update(buffer).digest('base64') + (opts.allowDark ? ':dark' : '');
   if (knockoutCache.has(key)) return knockoutCache.get(key);
   let result = null;
   try {
@@ -473,7 +473,9 @@ async function knockoutBackground(buffer) {
           lum += (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
           kept++;
         }
-        const legible = kept > 0 && lum / kept >= 0.28;
+        // A caller that lifts dark marks afterwards (coverMark) asks for the
+        // backdrop to go regardless.
+        const legible = kept > 0 && (opts.allowDark || lum / kept >= 0.28);
         if (legible && share >= 0.05 && share <= 0.97) {
           // Soften the boundary: a pixel touching the cleared area keeps an
           // alpha in proportion to how far its colour is from the backdrop.
@@ -498,6 +500,128 @@ async function knockoutBackground(buffer) {
   if (knockoutCache.size >= KNOCKOUT_CACHE_MAX) knockoutCache.delete(knockoutCache.keys().next().value);
   knockoutCache.set(key, result);
   return result;
+}
+
+/**
+ * Make a dark logo readable on the cover's grey.
+ *
+ * A navy or black mark is drawn for a white page, and on dark grey it all but
+ * disappears: the Stadium wordmark, Willow's lettering, the Yankees' NY. The
+ * dark parts that sit on the open background -- reached from a transparent
+ * pixel through dark pixels only -- are lightened to near-white, the way the
+ * leagues draw their own dark-mode logos, and colour that already reads
+ * (Willow's red W, Showtime) is left alone. Dark detail enclosed by a lighter
+ * shape, like black lettering inside a white box, cannot be reached from
+ * outside and keeps its colour.
+ *
+ * Returns null -- draw the logo as it is -- when little of it is dark, or when
+ * it has no transparency to judge "outside" by (a photo, a filled box).
+ */
+const liftCache = new Map();
+
+async function liftDarkMark(buffer) {
+  if (!buffer) return null;
+  const key = crypto.createHash('sha1').update(buffer).digest('base64');
+  if (liftCache.has(key)) return liftCache.get(key);
+  let result = null;
+  try {
+    const { data, info } = await sharp(buffer, { failOn: 'none' })
+      .resize({ width: 900, height: 900, fit: 'inside', withoutEnlargement: true })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height, N = W * H;
+    if (W && H && info.channels === 4) {
+      // Brightness as the eye sees it on grey is closer to the brightest
+      // channel than to luminance: pure red reads clearly, navy does not.
+      const DARK = 0.42;
+      const value = (p) => Math.max(data[p * 4], data[p * 4 + 1], data[p * 4 + 2]) / 255;
+      const clearAt = (p) => data[p * 4 + 3] < 128;
+      const darkAt = (p) => data[p * 4 + 3] > 0 && value(p) < DARK;
+
+      let opaque = 0, dark = 0, clear = 0;
+      for (let p = 0; p < N; p++) {
+        if (clearAt(p)) { clear++; continue; }
+        opaque++;
+        if (value(p) < DARK) dark++;
+      }
+      if (opaque && clear / N >= 0.05 && dark / opaque >= 0.2) {
+        const lift = new Uint8Array(N);
+        const stack = [];
+        for (let p = 0; p < N; p++) {
+          if (!darkAt(p)) continue;
+          const x = p % W;
+          if ((x > 0 && clearAt(p - 1)) || (x < W - 1 && clearAt(p + 1))
+            || (p >= W && clearAt(p - W)) || (p < N - W && clearAt(p + W))) stack.push(p);
+        }
+        let reached = 0;
+        while (stack.length) {
+          const p = stack.pop();
+          if (lift[p] || !darkAt(p)) continue;
+          lift[p] = 1;
+          if (!clearAt(p)) reached++;
+          const x = p % W;
+          if (x > 0) stack.push(p - 1);
+          if (x < W - 1) stack.push(p + 1);
+          if (p >= W) stack.push(p - W);
+          if (p < N - W) stack.push(p + W);
+        }
+        // A dark shape holding light detail -- white lettering on a navy box,
+        // as in LiveNOW from FOX -- is a box, not a stroke, and lifting it
+        // puts white on white. Such a shape borders light pixels about as much
+        // as it borders the open background; a dark wordmark borders almost
+        // nothing but open background.
+        let openEdges = 0, lightEdges = 0;
+        const edge = (q) => {
+          if (clearAt(q)) { openEdges++; return; }
+          if (lift[q]) return;
+          const i = q * 4;
+          const mx = Math.max(data[i], data[i + 1], data[i + 2]);
+          const mn = Math.min(data[i], data[i + 1], data[i + 2]);
+          if (mx >= 178 && (mx - mn) / mx < 0.25) lightEdges++;
+        };
+        for (let p = 0; p < N; p++) {
+          if (!lift[p] || clearAt(p)) continue;
+          const x = p % W;
+          if (x > 0) edge(p - 1);
+          if (x < W - 1) edge(p + 1);
+          if (p >= W) edge(p - W);
+          if (p < N - W) edge(p + W);
+        }
+        const boxed = lightEdges > openEdges * 0.3;
+        if (!boxed && reached / opaque >= 0.12) {
+          for (let p = 0; p < N; p++) {
+            if (!lift[p]) continue;
+            // Fully dark goes to near-white; the band just under the threshold
+            // blends, so the edge between a lifted and an unlifted colour does
+            // not step.
+            const t = Math.min(1, (DARK - value(p)) / 0.06);
+            const i = p * 4;
+            for (let c = 0; c < 3; c++) data[i + c] = Math.round(data[i + c] + (240 - data[i + c]) * t);
+          }
+          const png = await sharp(data, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
+          result = { buffer: png, contentType: 'image/png' };
+        }
+      }
+    }
+  } catch (e) {
+    result = null;
+  }
+  if (liftCache.size >= KNOCKOUT_CACHE_MAX) liftCache.delete(liftCache.keys().next().value);
+  liftCache.set(key, result);
+  return result;
+}
+
+/**
+ * A logo as a channel cover draws it: its backdrop removed and its dark parts
+ * lifted. A dark mark on a white box keeps the box unless the lift works,
+ * because the box is the only thing making it legible.
+ */
+async function coverMark(entry) {
+  if (!entry || !entry.buffer) return entry;
+  const plain = (await knockoutBackground(entry.buffer)) || entry;
+  const opened = (await knockoutBackground(entry.buffer, { allowDark: true })) || entry;
+  return (await liftDarkMark(opened.buffer)) || plain;
 }
 
 /** An image's pixel size, or zeros when it cannot be read. */
@@ -859,6 +983,8 @@ function clearCache(what = 'all') {
 }
 
 module.exports = {
+  coverMark,
+  liftDarkMark,
   cacheStats,
   clearCache,
   svgPlaceholder,

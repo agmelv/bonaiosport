@@ -658,10 +658,13 @@ app.get('/img/event', async (req, res) => {
   }
   // A channel cover sits its logo straight on flat grey, so a logo that ships
   // on its own solid rectangle has that rectangle taken out first.
+  // A dark logo also has its dark parts lifted, or navy on grey disappears.
   const cover = coverParam || (req.query.plate === '0' && req.query.notext === '1');
-  const entry = cover
-    ? ((await imageService.knockoutBackground(M.entry.buffer)) || M.entry)
-    : M.entry;
+  const entry = coverParam
+    ? await imageService.coverMark(M.entry)
+    : cover
+      ? ((await imageService.knockoutBackground(M.entry.buffer)) || M.entry)
+      : M.entry;
   // The logo's own size, so the cover never draws it larger than it is.
   const size = coverParam ? await imageService.imageSize(entry.buffer) : { width: 0, height: 0 };
   return imageService.sendCard(
