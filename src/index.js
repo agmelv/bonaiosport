@@ -1335,6 +1335,21 @@ async function relaySegment(req, res) {
       dropBody(upstream.body);
       return res.status(502).send('Segment too large');
     }
+    // A chunk is video. A body of a few bytes under a 200, or a page where a
+    // chunk should be, is an edge saying the chunk is gone without saying so --
+    // Streamed's answered a rolled-off chunk with nine bytes. Said as a 404, a
+    // player skips it; passed on, it chokes. Keys, init sections and subtitle
+    // pieces are small or text by nature, and the link's name says which they
+    // are (manifestLink.js); a chunk served as text/plain is still a chunk.
+    const declared = upstream.header('content-length');
+    const upType = String(upstream.header('content-type') || '').toLowerCase();
+    const small = /\.(key|bin|mp4|m4s|vtt|webvtt)$/i.test(String(req.params.name || ''));
+    const tiny = upstream.status === 200 && declared !== '' && Number(declared) < 128;
+    const page = /html|json|xml/.test(upType);
+    if (!small && (tiny || page)) {
+      dropBody(upstream.body);
+      return res.status(404).send('Segment unavailable');
+    }
 
     res.status(upstream.status === 206 ? 206 : 200);
     const type = String(upstream.header('content-type') || 'video/mp2t').split(';')[0].trim();

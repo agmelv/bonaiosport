@@ -69,6 +69,11 @@ t(true, /^#EXT-X-KEY:METHOD=AES-128,URI="\/api\/segment\/key\.bin\?/.test(out3[1
 t(true, /^#EXT-X-MAP:URI="\/api\/segment\/init\.mp4\?/.test(out3[2]), 'so is an init section');
 t(true, /^#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",URI="\/api\/manifest\?/.test(out3[3]), 'an alternate rendition is a playlist, so the proxy');
 t(true, out3[5].startsWith('/api/segment/a.m4s?'), 'an fMP4 segment keeps its extension');
+const unnamed = ['#EXTM3U', '#EXT-X-KEY:METHOD=AES-128,URI="https://cdn7.strmd.st/key.php?id=1"', '#EXT-X-MAP:URI="https://cdn7.strmd.st/init?x=1"', '#EXTINF:4,', 'https://cdn7.strmd.st/m/chunk'].join('\n');
+const out7 = lines(rewritePlaylist(unnamed, { targetUrl: target, finalUrl: target }));
+t(true, /URI="\/api\/segment\/seg\.key\?/.test(out7[1]), 'a key with no telling name is relayed as a key all the same');
+t(true, /URI="\/api\/segment\/init\.mp4\?/.test(out7[2]), 'and an init section as one');
+t(true, out7[4].startsWith('/api/segment/seg.ts?'), 'a chunk with no telling name is a chunk');
 const out4 = lines(rewritePlaylist(keyed, { targetUrl: other, finalUrl: other }));
 t('#EXT-X-KEY:METHOD=AES-128,URI="https://edge.hundxvision.co.uk/live/abc/key.bin?tok=1",IV=0x1', out4[1], 'elsewhere a relative key is made absolute for the player');
 const inline = '#EXT-X-KEY:METHOD=AES-128,URI="data:text/plain;base64,QUJDREVGR0hJSktMTU5PUA==",IV=0x1';

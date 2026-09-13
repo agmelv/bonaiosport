@@ -98,8 +98,12 @@ function manifestPath(url, referer = '', origin = '') {
 // with AUTH_KEY) is handed over as seg.ts, which is what it is.
 const MEDIA_EXT = /\.(ts|m4s|mp4|m4a|m4v|aac|mp3|ac3|ec3|vtt|webvtt|key|bin)$/i;
 
-function segmentPath(url, referer = '', origin = '') {
-  let name = 'seg.ts';
+// A file the playlist names by its tag rather than its address: a key from
+// "/key.php?id=…" is a key, whatever it is called, and the relay must know.
+const KIND_NAME = { key: 'seg.key', map: 'init.mp4' };
+
+function segmentPath(url, referer = '', origin = '', kind = '') {
+  let name = KIND_NAME[kind] || 'seg.ts';
   try {
     const last = new URL(url).pathname.split('/').pop() || '';
     const clean = last.replace(/[^A-Za-z0-9._-]/g, '').replace(/^\.+/, '').slice(-48);

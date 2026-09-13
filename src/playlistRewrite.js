@@ -85,23 +85,26 @@ function rewritePlaylist(body, { targetUrl, finalUrl, referer = '', origin = '',
   const exact = hosts ? new Set(hosts.map(h => String(h).toLowerCase())) : null;
   const relayed = (host) => (exact ? exact.has(host.toLowerCase()) : needsSegmentProxy(host));
   const absolute = (raw) => absoluteEntry(raw, targetUrl, finalUrl);
-  const route = (abs) => {
+  const route = (abs, kind = '') => {
     if (abs.includes('.m3u8')) return manifestPath(abs, referer, origin);
     let host = '';
     try { host = new URL(abs).hostname; } catch (err) { return abs; }
-    if (relayed(host)) return segmentPath(abs, referer, origin);
+    if (relayed(host)) return segmentPath(abs, referer, origin, kind);
     // A segment named .image or .js is a segment all the same; the fragment
     // tells a player that reads the extension so.
     if ((abs.includes('.image') || abs.includes('.js')) && !abs.includes('.ts')) return abs + '#.ts';
     return abs;
   };
-  const rewrite = (raw) => (OPAQUE.test(raw.trim()) ? raw : route(absolute(raw)));
+  const rewrite = (raw, kind = '') => (OPAQUE.test(raw.trim()) ? raw : route(absolute(raw), kind));
   return String(body).split('\n').map(line => {
     const l = line.trim();
     if (!l) return line;
     if (l.startsWith('#')) {
       if (!TAG_WITH_URI.test(l)) return line;
-      return line.replace(URI_ATTR, (m, uri) => `URI="${rewrite(uri)}"`);
+      // What the tag says the file is, for the relay: a key is bytes long,
+      // an init section small, and neither is a chunk that failed.
+      const kind = /^#EXT-X-(KEY|SESSION-KEY)\b/.test(l) ? 'key' : (/^#EXT-X-MAP\b/.test(l) ? 'map' : '');
+      return line.replace(URI_ATTR, (m, uri) => `URI="${rewrite(uri, kind)}"`);
     }
     return rewrite(l);
   }).join('\n');
