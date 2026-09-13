@@ -96,50 +96,65 @@ async function safeFetch(url, opts = {}) {
   const remaining = () => Math.max(1000, deadline - Date.now());
 
   // -- Path A: impit ---------------------------------------------------------
+  // Tried twice when the first try was cut off rather than answered: a
+  // connection Cloudflare drops mid-handshake comes back on the next one, and
+  // the undici fallback behind is refused by the same hosts that needed impit.
+  // Never a second try for a timeout -- that budget is spent -- and only when
+  // enough of it is left for the retry to mean anything.
   if (impit) {
-    const control = new AbortController();
-    let timer = null;
-    try {
-      const res = await Promise.race([
-        impit.fetch(url, redirect
-          ? { method, headers, body, signal: control.signal, redirect }
-          : { method, headers, body, signal: control.signal }),
-        new Promise((_, rej) => {
-          timer = setTimeout(() => {
-            // Tear the request down as well as giving up on it. Losing the race
-            // used to leave the socket open and the timer pending.
-            control.abort();
-            rej(new Error(`impit timeout ${timeoutMs}ms`));
-          }, remaining());
-        }),
-      ]);
-      const textData = maxBytes
-        ? await readCapped(res.body, maxBytes, res.headers.get('content-length'))
-        : await res.text();
-      return {
-        ok: res.status >= 200 && res.status < 300,
-        status: res.status,
-        location: res.headers.get('location') || '',
-        text: async () => textData,
-        json: async () => JSON.parse(textData),
-      };
-    } catch (impitErr) {
-      // Too big is an answer about the file, not a fault in impit.
-      if (impitErr && impitErr.code === 'E_TOO_LARGE') throw impitErr;
-      // The fallback is for impit being broken, not for impit having already
-      // spent the budget. Retrying a host that just failed to answer in the
-      // time allowed only spends it twice -- which is how a 4 s budget became
-      // 9.6 s against an address that accepts nothing.
-      if (Date.now() >= deadline) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const control = new AbortController();
+      let timer = null;
+      try {
+        const res = await Promise.race([
+          impit.fetch(url, redirect
+            ? { method, headers, body, signal: control.signal, redirect }
+            : { method, headers, body, signal: control.signal }),
+          new Promise((_, rej) => {
+            timer = setTimeout(() => {
+              // Tear the request down as well as giving up on it. Losing the race
+              // used to leave the socket open and the timer pending.
+              control.abort();
+              const err = new Error(`impit timeout ${timeoutMs}ms`);
+              err.code = 'E_TIMEOUT';
+              rej(err);
+            }, remaining());
+          }),
+        ]);
+        const textData = maxBytes
+          ? await readCapped(res.body, maxBytes, res.headers.get('content-length'))
+          : await res.text();
+        return {
+          ok: res.status >= 200 && res.status < 300,
+          status: res.status,
+          location: res.headers.get('location') || '',
+          text: async () => textData,
+          json: async () => JSON.parse(textData),
+        };
+      } catch (impitErr) {
+        // Too big is an answer about the file, not a fault in impit.
+        if (impitErr && impitErr.code === 'E_TOO_LARGE') throw impitErr;
+        // The fallback is for impit being broken, not for impit having already
+        // spent the budget. Retrying a host that just failed to answer in the
+        // time allowed only spends it twice -- which is how a 4 s budget became
+        // 9.6 s against an address that accepts nothing.
+        if (Date.now() >= deadline) {
+          if (timer) clearTimeout(timer);
+          throw impitErr;
+        }
+        const cutOff = !(impitErr && impitErr.code === 'E_TIMEOUT');
+        if (attempt === 1 && cutOff && deadline - Date.now() > 2000) {
+          if (timer) clearTimeout(timer);
+          await new Promise(r => setTimeout(r, 300));
+          continue;
+        }
+        // Transient error - fall through to undici without marking impit broken
+        // Redacted: this logs whatever URL was being fetched, and on the stream
+        // path that is a signed playlist.
+        console.warn(`[impitClient] impit fetch failed (${impitErr.message}), falling back to undici for: ${redactUrl(url)}`);
+      } finally {
         if (timer) clearTimeout(timer);
-        throw impitErr;
       }
-      // Transient error - fall through to undici without marking impit broken
-      // Redacted: this logs whatever URL was being fetched, and on the stream
-      // path that is a signed playlist.
-      console.warn(`[impitClient] impit fetch failed (${impitErr.message}), falling back to undici for: ${redactUrl(url)}`);
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
