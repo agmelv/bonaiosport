@@ -1,13 +1,15 @@
 /**
- * manifestLink.js — signed links to the manifest proxy.
+ * manifestLink.js — signed links to the manifest proxy and the segment relay.
  *
- * /api/manifest fetches the playlist named in its query string. Left open, any
- * URL anyone liked could be fed to it, and the server would fetch it from the
- * owner's own connection. Every link a provider hands out is minted here
- * instead, with an HMAC over the url, referer and origin it carries, and the
- * route refuses a link whose signature does not match. A player follows the
- * links it was given, so nothing it does changes; someone typing their own URL
- * into the query string gets a 403.
+ * /api/manifest fetches the playlist named in its query string, and
+ * /api/segment the media chunk named in its. Left open, any URL anyone liked
+ * could be fed to either, and the server would fetch it from the owner's own
+ * connection. Every link a provider hands out is minted here instead, with an
+ * HMAC over the url, referer and origin it carries, and each route refuses a
+ * link whose signature does not match. A player follows the links it was
+ * given, so nothing it does changes; someone typing their own URL into the
+ * query string gets a 403. The two routes sign differently, so a playlist link
+ * cannot be replayed as a segment link or the other way round.
  *
  * The key is LINK_SECRET when set. Otherwise one is made once and kept in the
  * data directory, so links handed out before a restart still play after it.
@@ -64,32 +66,62 @@ function linkSecret() {
   return (secret = made);
 }
 
-function signature(url, referer, origin) {
+// `kind` separates the two routes' signatures. The playlist route's is the
+// original, unprefixed form, so links minted before the relay existed still
+// verify after a deploy: a player mid-stream re-reads its playlist by the link
+// it was given.
+function signature(url, referer, origin, kind = '') {
   return crypto.createHmac('sha256', linkSecret())
-    .update(`${url}\n${referer}\n${origin}`)
+    .update(`${kind ? kind + '\n' : ''}${url}\n${referer}\n${origin}`)
     .digest('base64url')
     .slice(0, 32);
 }
 
+const query = (url, referer, origin, kind) =>
+  `?url=${encodeURIComponent(url)}`
+  + `&referer=${encodeURIComponent(referer)}`
+  + `&origin=${encodeURIComponent(origin)}`
+  + `&sig=${signature(url, referer, origin, kind)}`;
+
 /** The path of a signed proxy link: /api/manifest?url=…&referer=…&origin=…&sig=… */
 function manifestPath(url, referer = '', origin = '') {
-  return `/api/manifest?url=${encodeURIComponent(url)}`
-    + `&referer=${encodeURIComponent(referer)}`
-    + `&origin=${encodeURIComponent(origin)}`
-    + `&sig=${signature(url, referer, origin)}`;
+  return '/api/manifest' + query(url, referer, origin, '');
 }
 
-/** Whether a request's url, referer and origin are the ones that were signed. */
-function verifyManifestQuery(query) {
+/**
+ * The path of a signed relay link for a media segment, key or init section:
+ * /api/segment/<name>?url=…&sig=… The name is the upstream file's own, so a
+ * player that reads the extension to decide what it is looking at sees one.
+ */
+// Extensions a player can learn something from. A chunk disguised as
+// .image, .unknown or .html (the last would meet the login guard on a server
+// with AUTH_KEY) is handed over as seg.ts, which is what it is.
+const MEDIA_EXT = /\.(ts|m4s|mp4|m4a|m4v|aac|mp3|ac3|ec3|vtt|webvtt|key|bin)$/i;
+
+function segmentPath(url, referer = '', origin = '') {
+  let name = 'seg.ts';
+  try {
+    const last = new URL(url).pathname.split('/').pop() || '';
+    const clean = last.replace(/[^A-Za-z0-9._-]/g, '').replace(/^\.+/, '').slice(-48);
+    if (MEDIA_EXT.test(clean)) name = clean;
+  } catch { /* not a url: the default name */ }
+  return `/api/segment/${name}` + query(url, referer, origin, 'segment');
+}
+
+function verifyQuery(q, kind) {
   const str = v => (typeof v === 'string' ? v : null);
-  const url = str(query.url);
-  const sig = str(query.sig);
-  const referer = query.referer === undefined ? '' : str(query.referer);
-  const origin = query.origin === undefined ? '' : str(query.origin);
+  const url = str(q.url);
+  const sig = str(q.sig);
+  const referer = q.referer === undefined ? '' : str(q.referer);
+  const origin = q.origin === undefined ? '' : str(q.origin);
   if (!url || !sig || referer === null || origin === null) return false;
-  const want = Buffer.from(signature(url, referer, origin));
+  const want = Buffer.from(signature(url, referer, origin, kind));
   const got = Buffer.from(sig);
   return want.length === got.length && crypto.timingSafeEqual(want, got);
 }
 
-module.exports = { manifestPath, verifyManifestQuery };
+/** Whether a request's url, referer and origin are the ones that were signed. */
+function verifyManifestQuery(q) { return verifyQuery(q, ''); }
+function verifySegmentQuery(q) { return verifyQuery(q, 'segment'); }
+
+module.exports = { manifestPath, segmentPath, verifyManifestQuery, verifySegmentQuery };

@@ -187,6 +187,8 @@ StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSp
 
 **A channel disappeared.** Channels with no streams across two checks at least 15 minutes apart are hidden, and they come back once they play again. `HIDE_EMPTY_CHANNELS=0` shows them all.
 
+**Streamed's streams buffer in Nuvio but play in a browser.** Streamed's CDN only answers clients that look like a browser, so the server fetches its video chunks for the player and relays them. Any host that behaves that way is found out by trying one chunk and relayed from then on; every other host's chunks go straight to the player. Relaying costs the server the stream's bandwidth, a few hundred kilobytes every few seconds per viewer (`PROXY_SEGMENT_HOSTS` in `.env.example`).
+
 **My saved settings were lost after an update.** Profiles are stored in `DATA_DIR`. Compose keeps them on the `aiosports-data` volume. With `docker run`, add `-v aiosports-data:/data -e DATA_DIR=/data`.
 
 **Port 7000 is already in use.** Change the left side of `"7000:7000"` in `docker-compose.yml`, for example to `"7100:7000"`.

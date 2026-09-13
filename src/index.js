@@ -138,6 +138,8 @@ app.disable('x-powered-by');
 const RATE_RULES = [
   { prefix: '/img', perMinute: 6000 },
   { prefix: '/api/manifest', perMinute: 1200 },
+  // A live viewer fetches a segment every few seconds: twenty-odd a minute.
+  { prefix: '/api/segment', perMinute: 1200 },
   { prefix: '/api/proxy-embed', perMinute: 60 }
 ];
 const rateHits = new Map();   // "rule|address" -> { start, count }
@@ -987,9 +989,11 @@ app.get('/img/matchup', async (req, res) => {
 // ─── Shared safe HTTP client (impit + undici fallback) ───────────────────────
 // Works on Windows, Linux x64/ARM64, Alpine/musl. If impit native binary is
 // absent, all fetches silently use undici — streams continue to work.
-const { safeFetch: _safeFetch } = require('./impitClient');
+const { safeFetch: _safeFetch, getImpit: _getImpit } = require('./impitClient');
 const { assertPublicUrl, publicAgent } = require('./netGuard');
-const { manifestPath, verifyManifestQuery } = require('./manifestLink');
+const { verifyManifestQuery, verifySegmentQuery } = require('./manifestLink');
+const { rewritePlaylist } = require('./playlistRewrite');
+const { relayHostsFor, isRelayedHost } = require('./segmentPolicy');
 
 // A playlist is kilobytes. Anything past this is not one.
 const MANIFEST_MAX_BYTES = 2 * 1024 * 1024;
@@ -1139,40 +1143,12 @@ app.get('/api/manifest', async (req, res) => {
           throw new Error('Upstream returned non-m3u8 body');
         }
 
-        // Rewrite the manifest
-        const lines = out.split('\n');
-        const rewritten = lines.map(line => {
-          const l = line.trim();
-          if (!l || l.startsWith('#')) return line;
-
-          let absoluteUrl = l;
-          try {
-            // Relative to where the playlist was actually served from, which
-            // after a redirect is not the address that was asked for.
-            const chunkUrl = new URL(l, finalUrl);
-            const manifestUrl = new URL(targetUrl);
-
-            manifestUrl.searchParams.forEach((val, key) => {
-              if (!chunkUrl.searchParams.has(key)) {
-                chunkUrl.searchParams.set(key, val);
-              }
-            });
-            absoluteUrl = chunkUrl.toString();
-          } catch (err) {
-            absoluteUrl = l;
-          }
-
-          if (absoluteUrl.includes('.m3u8')) {
-            return manifestPath(absoluteUrl, referer, origin);
-          }
-
-          if ((absoluteUrl.includes('.image') || absoluteUrl.includes('.js')) && !absoluteUrl.includes('.ts') && !absoluteUrl.includes('.m3u8')) {
-            absoluteUrl += '#.ts';
-          }
-          return absoluteUrl;
-        });
-
-        const rewrittenResult = rewritten.join('\n');
+        // Every address made absolute, sub-playlists and the media of hosts
+        // that refuse a player pointed back here (playlistRewrite.js). Which
+        // hosts those are is known, or found out once per host by trying a
+        // chunk (segmentPolicy.js).
+        const hosts = await relayHostsFor(out, targetUrl, finalUrl, referer, origin);
+        const rewrittenResult = rewritePlaylist(out, { targetUrl, finalUrl, referer, origin, hosts });
         manifestCacheSet(cacheKey, rewrittenResult);
         return rewrittenResult;
       })().finally(() => {
@@ -1227,6 +1203,181 @@ app.get('/api/manifest', async (req, res) => {
     return res.status(502).send('Manifest proxy error');
   }
 });
+
+// ─── Segment relay ───────────────────────────────────────────────────────────
+// Media for the hosts that refuse a player's own TLS handshake -- see
+// playlistRewrite.js for which and why. Each chunk is fetched with the same
+// browser-fingerprint client the playlist was, and its bytes are piped to the
+// player as they arrive: nothing is held beyond a socket's worth, and a player
+// that goes away takes its upstream request with it. A chunk is a few hundred
+// kilobytes every few seconds per viewer, which is the bandwidth this costs.
+const SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
+const SEGMENT_MAX_INFLIGHT = 24;
+// A household: a TV and a couple of phones, a chunk or two in flight each.
+const SEGMENT_MAX_INFLIGHT_PER_ADDRESS = 6;
+const SEGMENT_HEADERS_TIMEOUT_MS = 10000;
+const SEGMENT_IDLE_TIMEOUT_MS = 15000;
+// A chunk is a few seconds of video. One that takes a minute cannot play live
+// anyway, and this is the one bound a slow reader cannot keep pushing back.
+const SEGMENT_MAX_MS = 60000;
+const SEGMENT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+// What relayed bytes may be called. Anything else is served as bytes, and
+// with the same headers the other routes give somebody else's content, so a
+// body that turned out to be HTML is never a page on this origin.
+const SEGMENT_TYPES = /^(video|audio)\/|^application\/(mp4|octet-stream)$/i;
+const { Readable: _Readable, Transform: _Transform, promises: _streamPromises } = require('stream');
+let segmentsInFlight = 0;
+const segmentsByAddress = new Map();   // address -> in flight
+
+const hostOfUrl = u => { try { return new URL(u).hostname.toLowerCase(); } catch (e) { return ''; } };
+/** The same CDN: "lb2.strmd.st" and "cdn7.strmd.st". */
+const sameCdn = (a, b) => a.split('.').slice(-2).join('.') === b.split('.').slice(-2).join('.');
+
+/**
+ * Release a body nothing will read. A stream dropped before its end can emit
+ * 'error' -- undici's does -- and unheard, that ends the process.
+ */
+function dropBody(body) {
+  if (!body || typeof body.destroy !== 'function') return;
+  if (typeof body.on === 'function') body.on('error', () => {});
+  try { body.destroy(); } catch (e) { /* already gone */ }
+}
+
+/** One hop of a segment fetch: status, a header reader and a Node stream body. */
+async function fetchSegmentHop(url, headers, signal) {
+  const impit = _getImpit();
+  if (impit) {
+    // The signal ends the wait; the timeout ends the native request behind
+    // it, which would otherwise run on to the upstream's own patience.
+    const r = await impit.fetch(url, { headers, signal, redirect: 'manual', timeout: SEGMENT_MAX_MS });
+    return {
+      status: r.status,
+      header: name => r.headers.get(name) || '',
+      body: r.body && typeof r.body.getReader === 'function' ? _Readable.fromWeb(r.body) : r.body
+    };
+  }
+  const { request } = require('undici');
+  const r = await request(url, { headers, signal, dispatcher: publicAgent, headersTimeout: SEGMENT_HEADERS_TIMEOUT_MS });
+  return {
+    status: r.statusCode,
+    header: name => { const v = r.headers[name.toLowerCase()]; return Array.isArray(v) ? v[0] : (v || ''); },
+    body: r.body
+  };
+}
+
+async function relaySegment(req, res) {
+  // Only links this server minted (manifestLink.js): anything else was an open
+  // relay fetching whatever it was given from the owner's connection. And only
+  // for a host whose media is relayed as things stand: a link for any other is
+  // stale, or the relay has been switched off since it was minted.
+  if (!verifySegmentQuery(req.query)) return res.status(403).send('Invalid stream link');
+  const firstHost = hostOfUrl(req.query.url);
+  if (!isRelayedHost(firstHost)) return res.status(403).send('Not a relayed host');
+
+  const address = String(req.ip || '').replace(/^::ffff:/, '');
+  const mine = segmentsByAddress.get(address) || 0;
+  if (segmentsInFlight >= SEGMENT_MAX_INFLIGHT || mine >= SEGMENT_MAX_INFLIGHT_PER_ADDRESS) {
+    res.setHeader('Retry-After', '1');
+    return res.status(503).send('Busy');
+  }
+  segmentsInFlight++;
+  segmentsByAddress.set(address, mine + 1);
+
+  const control = new AbortController();
+  let timer = null;
+  let cap = null;
+  let stopped = '';   // why this relay was cut short, when it was
+  // Aborting the fetch covers the wait for headers; once the body is flowing
+  // it is the pipeline that has to be torn down, which destroying our own
+  // stream in it does on either client.
+  const stop = (why) => { stopped = why; control.abort(); if (cap) cap.destroy(new Error(why)); };
+  const arm = (ms, why) => { clearTimeout(timer); timer = setTimeout(() => stop(why), ms); };
+  const deadline = setTimeout(() => stop('took too long'), SEGMENT_MAX_MS);
+  // A player that gives up while the upstream is still answering must not
+  // leave that fetch running to nobody.
+  res.on('close', () => { if (!res.writableFinished) control.abort(); });
+  try {
+    const headers = { 'User-Agent': SEGMENT_UA };
+    if (req.query.referer) headers.Referer = req.query.referer;
+    if (req.query.origin) headers.Origin = req.query.origin;
+    if (typeof req.headers.range === 'string') headers.Range = req.headers.range;
+
+    // Redirects followed one hop at a time, so every address is checked, not
+    // just the first -- and kept to the CDN, or a host relayed anyway. A CDN
+    // has no reason to send a chunk anywhere else.
+    let url = req.query.url;
+    let upstream = null;
+    arm(SEGMENT_HEADERS_TIMEOUT_MS, 'no headers from upstream');
+    for (let hop = 0; hop <= MANIFEST_MAX_REDIRECTS; hop++) {
+      const host = hostOfUrl(url);
+      if (hop > 0 && !(isRelayedHost(host) || sameCdn(host, firstHost))) return res.status(502).send('Segment unavailable');
+      await assertPublicUrl(url);
+      upstream = await fetchSegmentHop(url, headers, control.signal);
+      const location = upstream.header('location');
+      if (upstream.status >= 300 && upstream.status < 400 && location) {
+        dropBody(upstream.body);
+        url = new URL(location, url).toString();
+        upstream = null;
+        continue;
+      }
+      break;
+    }
+    if (!upstream) return res.status(502).send('Too many redirects');
+    if (upstream.status >= 400) {
+      dropBody(upstream.body);
+      // A 403 or 404 is the upstream's answer about this chunk, and a player
+      // handles either; anything else is this relay's problem to report.
+      return res.status(upstream.status === 403 || upstream.status === 404 ? upstream.status : 502).send('Segment unavailable');
+    }
+    // A body known to be over the cap is refused before a byte of it moves,
+    // rather than promised in full and cut off part way.
+    if (Number(upstream.header('content-length')) > SEGMENT_MAX_BYTES) {
+      dropBody(upstream.body);
+      return res.status(502).send('Segment too large');
+    }
+
+    res.status(upstream.status === 206 ? 206 : 200);
+    const type = String(upstream.header('content-type') || 'video/mp2t').split(';')[0].trim();
+    res.setHeader('Content-Type', SEGMENT_TYPES.test(type) ? type : 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    for (const name of ['content-length', 'content-range', 'accept-ranges']) {
+      const v = upstream.header(name);
+      if (v) res.setHeader(name, v);
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    let sent = 0;
+    arm(SEGMENT_IDLE_TIMEOUT_MS, 'upstream went quiet');
+    cap = new _Transform({
+      transform(chunk, enc, cb) {
+        sent += chunk.length;
+        if (sent > SEGMENT_MAX_BYTES) return cb(new Error('segment too large'));
+        arm(SEGMENT_IDLE_TIMEOUT_MS, 'upstream went quiet');
+        cb(null, chunk);
+      }
+    });
+    await _streamPromises.pipeline(upstream.body, cap, res);
+  } catch (err) {
+    // The pipeline destroys `res` on any error, so its state says nothing
+    // about who left. A player that went away is not worth a line in the log;
+    // a relay this server cut short, or an upstream that failed, is.
+    const gone = !stopped && err && (err.code === 'ERR_STREAM_PREMATURE_CLOSE' || err.name === 'AbortError');
+    if (!gone) console.error('[SegmentRelay]', stopped || (err && err.message));
+    if (!res.headersSent) res.status(502).send('Segment relay error');
+    else if (!res.writableEnded) res.destroy();
+  } finally {
+    clearTimeout(timer);
+    clearTimeout(deadline);
+    control.abort();
+    segmentsInFlight--;
+    const left = (segmentsByAddress.get(address) || 1) - 1;
+    if (left > 0) segmentsByAddress.set(address, left); else segmentsByAddress.delete(address);
+  }
+}
+app.get('/api/segment', relaySegment);
+app.get('/api/segment/:name', relaySegment);
 
 // ─── /api/proxy-embed — CORS-safe embed HTML fetcher (SSRF-protected) ────────
 // Fetches the HTML of a sports embed page on behalf of the client browser.
