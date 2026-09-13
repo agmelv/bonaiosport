@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.3 (2026-09-13)
+
+A quiet release. A restart no longer costs the server minutes of work, the stream relay handles keyed streams, and a dropped connection gets a second try.
+
+### Bug Fixes
+
+* **streams:** answer a chunk that has gone as a 404 so a player skips it instead of choking on it, and relay keys and init sections under names that say what they are ([6ac3c09](https://github.com/mlp2069/aiosports/commit/6ac3c09))
+* **providers:** try a connection the host cut off once more before giving up on it ([8906837](https://github.com/mlp2069/aiosports/commit/8906837))
+
+### Performance Improvements
+
+* **cache:** keep finished cards, fetched logos, the catalog and the logo and fixture indexes on the data volume, and serve the saved catalog the moment the server is up, so a restart no longer redraws every cover, refetches every logo or re-reads every source ([f5e7cc8](https://github.com/mlp2069/aiosports/commit/f5e7cc8))
+* **cache:** stop the card warmer's own reads from minting streams, which was most of a restart's cpu: 33 matches minted and 52 decrypts, for tokens nobody would use ([a04bbb9](https://github.com/mlp2069/aiosports/commit/a04bbb9))
+
 ## v1.0.2 (2026-09-13)
 
 A local release. Hardened for a public launch, then the channels of your own cities, and streamed's streams playing in nuvio the way they play in a browser. The manifest id changed to community.aiosports: reinstall the addon in your player.
