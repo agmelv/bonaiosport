@@ -861,8 +861,12 @@ async function handleCatalog(type, id, extra, config, opts = {}) {
   }
 
   // Fire-and-forget, before the mapping work, so the warming has the longest
-  // possible head start on the click it is meant to cover.
-  prewarmTopMatches(filteredMatches, conf);
+  // possible head start on the click it is meant to cover. Not for the card
+  // warmer's own reads (revalidate: false): nobody is about to click, and the
+  // tokens minted would expire before anyone did. Measured on a restart, that
+  // was 33 matches minted, 52 decrypts each in a spawned process and 250 dead
+  // streams verified -- three minutes at most of both cores, for nothing.
+  if (opts.revalidate !== false) prewarmTopMatches(filteredMatches, conf);
 
   // Per-tab ordering, applied after the sort above so it is the last word.
   const catOpts = (conf.catalogOptions && conf.catalogOptions[id]) || {};
