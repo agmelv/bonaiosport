@@ -8,7 +8,7 @@
 [![GitHub](https://img.shields.io/badge/GitHub-AIOSports-181717?logo=github&logoColor=white)](https://github.com/mlp2069/aiosports)
 [![Upstream](https://img.shields.io/badge/forked_from-rajhodedara%2Flive--sport--plugin-6e7681?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.1-brightgreen.svg)](https://github.com/mlp2069/aiosports/releases/latest)
+[![Version](https://img.shields.io/badge/version-v1.0.1-brightgreen.svg)](https://github.com/mlp2069/aiosports/releases/latest)
 
 > 🍴 **THIS IS A FORK.**
 > The upstream project is [rajhodedara/live-sport-plugin](https://github.com/rajhodedara/live-sport-plugin) and all credit for it belongs there. This fork is [mlp2069/aiosports](https://github.com/mlp2069/aiosports), self-hosted, and differs in ways the instructions below assume:
