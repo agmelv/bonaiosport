@@ -1,4 +1,6 @@
 const container = require('./container');
+const { stationOrder } = require('./services/StationLabel');
+const { parseMarkets, marketsSetting } = require('./services/LocalMarkets');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -600,14 +602,10 @@ async function handleStream(type, id, config) {
   // not want either kind promoted, so the list falls back to pure quality
   // order. Only the grouping goes -- score still decides, because unranked is
   // not what "no preference between direct and web" asks for.
-  // Within one score -- on a network tile, one quality -- local stations read A
-  // to Z by city. Rows without a station keep their order: the sort is stable.
-  const byStation = (a, b) => {
-    if (!a.stationSort && !b.stationSort) return 0;
-    if (!a.stationSort) return 1;
-    if (!b.stationSort) return -1;
-    return a.stationSort < b.stationSort ? -1 : a.stationSort > b.stationSort ? 1 : 0;
-  };
+  // Within one score -- on a network tile, one quality -- local stations read
+  // the viewer's own cities first, then A to Z by city. Rows without a station
+  // keep their order: the sort is stable.
+  const byStation = stationOrder(parseMarkets(marketsSetting(config)));
   const order = config && config.streamOrder;
   const webFirst = order === 'web';
   const groupByKind = order !== 'none';

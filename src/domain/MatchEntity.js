@@ -10,7 +10,7 @@ function toMillis(value) {
 }
 
 class MatchEntity {
-  constructor({ id, title, category, date, timestamp, status, popular, sources, league, team1, team2, thumbnail_url, poster, logo, background, genre, region, baseTitle }) {
+  constructor({ id, title, category, date, timestamp, status, popular, sources, league, team1, team2, thumbnail_url, poster, logo, background, genre, region, baseTitle, market, station, logoName }) {
     this.id = id || '';
     this.title = title || 'Unknown Match';
     this.category = category || 'other';
@@ -36,6 +36,13 @@ class MatchEntity {
     // A 24/7 channel's country (channelRegions), and its name without one.
     this.region = region || '';
     this.baseTitle = baseTitle || '';
+    // A local station's city ("Chicago, IL") and call sign, for the 📍 Local
+    // tab and the tile's description. Empty for everything else.
+    this.market = market || '';
+    this.station = station || '';
+    // The name to find this channel's logo under when its own is not it:
+    // "FOX 32 Chicago" wears the FOX mark.
+    this.logoName = logoName || '';
   }
 }
 

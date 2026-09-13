@@ -42,11 +42,14 @@ const manifest = {
     { type: 'tv', id: 'nuvio_sports_channels', name: '📺 Channels', extra: [{ name: 'genre', options: GENRES, isRequired: false }, { name: 'search', isRequired: false }] },
 
     { type: 'tv', id: 'nuvio_sports_upcoming', name: '⏱️ Upcoming', extra: [{ name: 'search', isRequired: false }] },
-    { type: 'tv', id: 'nuvio_sports_teams', name: '⭐ Your Teams', extra: [{ name: 'search', isRequired: false }] }
+    { type: 'tv', id: 'nuvio_sports_teams', name: '⭐ Your Teams', extra: [{ name: 'search', isRequired: false }] },
+    // The viewer's own cities' channels. Listed only when the config names a city.
+    { type: 'tv', id: 'nuvio_sports_local', name: '📍 Local', extra: [{ name: 'search', isRequired: false }] }
   ],
 
   config: [
     { key: 'teams', title: 'Favorite Teams (comma separated)', type: 'text' },
+    { key: 'markets', title: 'Local channels: your cities (comma separated)', type: 'text' },
     { key: 'sports', title: 'Enabled Sports (comma separated)', type: 'text', default: 'all' },
     {
       key: 'timezone',

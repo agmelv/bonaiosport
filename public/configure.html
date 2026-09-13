@@ -654,6 +654,10 @@
         <label>Favorite Teams (Comma Separated)</label>
         <input type="text" id="teams" placeholder="e.g. Arsenal, Lakers, Ferrari">
       </div>
+      <div class="input-group">
+        <label>Local Channels: Your Cities (Comma Separated)</label>
+        <input type="text" id="markets" placeholder="e.g. Chicago, Knoxville TN, Phoenix">
+      </div>
     </div>
 
     <div class="section">
@@ -812,7 +816,7 @@
 
           <label class="checkbox-label active" id="expPersonalLabel" style="margin-top: 14px;">
             <input type="checkbox" id="expPersonal" checked>
-            Include my teams and timezone
+            Include my teams, cities and timezone
           </label>
           <p class="hint" id="expPersonalHint"></p>
 
@@ -885,6 +889,7 @@
     const btn = document.getElementById('installBtn');
     const copyBtn = document.getElementById('copyBtn');
     const input = document.getElementById('teams');
+    const marketsInput = document.getElementById('markets');
     const checkboxes = document.querySelectorAll('#sportsGrid input[type="checkbox"]');
     const sourcesGrid = document.getElementById('sourcesGrid');
     const streamOrderRow = document.getElementById('streamOrder');
@@ -1104,7 +1109,7 @@
     // in this list either. The rule matches the server's exactly: the id is the
     // sport, Other Football rides with American Football, and the tabs that
     // belong to no single sport always stay.
-    const ALWAYS_SHOWN = new Set(['live', 'upcoming', 'teams', 'channels']);
+    const ALWAYS_SHOWN = new Set(['live', 'upcoming', 'teams', 'channels', 'local']);
     const SPORT_FOR_CATALOG = { other_football: 'american_football' };
 
     function sportOf(catalogId) {
@@ -1120,11 +1125,13 @@
       // than leaving it in the list also takes it out of the drag order, so
       // there is no row to reorder that would not appear either way.
       const hasTeams = !!(input && input.value.trim());
+      // Local is the same: nothing to show until a city is named.
+      const hasMarkets = !!(marketsInput && marketsInput.value.trim());
       let visible = 0;
       for (const item of catalogItems()) {
         const key = String(item.dataset.id).replace(/^nuvio_sports_/, '');
         const sport = sportOf(item.dataset.id);
-        const offBySport = (sport && !on.has(sport)) || (key === 'teams' && !hasTeams);
+        const offBySport = (sport && !on.has(sport)) || (key === 'teams' && !hasTeams) || (key === 'local' && !hasMarkets);
         item.dataset.sportOff = offBySport ? '1' : '';
         if (offBySport) {
           item.style.display = 'none';
@@ -1541,6 +1548,9 @@
     if (existingConfig.teams) {
       input.value = existingConfig.teams;
     }
+    if (existingConfig.markets) {
+      marketsInput.value = existingConfig.markets;
+    }
     
     if (existingConfig.sports) {
       if (existingConfig.sports === 'none') {
@@ -1577,8 +1587,10 @@
     // from any manifest whose config names no teams, so a bare /manifest.json
     // is missing exactly the one tab that has to appear the moment someone
     // types a team above. Whether the row is then shown is decided here, by
-    // applySportFilter, against what is actually in the box.
-    const probeConfig = btoa(unescape(encodeURIComponent(JSON.stringify({ teams: '_' }))))
+    // applySportFilter, against what is actually in the box. The placeholder
+    // city is there for the same reason: Local is dropped from any manifest
+    // whose config names none.
+    const probeConfig = btoa(unescape(encodeURIComponent(JSON.stringify({ teams: '_', markets: '_' }))))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     fetch('/' + probeConfig + '/manifest.json')
       .then(r => r.json())
@@ -1633,6 +1645,7 @@
 
     function updateLink() {
       const teams = input.value.trim();
+      const markets = marketsInput.value.trim();
       const selectedSports = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
       // DOM order is the user's order, so read the rows rather than the
       // original checkbox list.
@@ -1657,6 +1670,7 @@
 
       const config = {};
       if (teams) config.teams = teams;
+      if (markets) config.markets = markets;
       if (tz) config.timezone = tz;
 
       if (selectedSports.length < checkboxes.length) {
@@ -1988,14 +2002,14 @@
     // this is a single allow-list rather than two deny-lists that fall behind
     // the settings they are meant to cover.
     const KNOWN_KEYS = [
-      'teams', 'timezone', 'sports', 'sources', 'sourceOrder', 'streamOrder', 'timeFormat',
+      'teams', 'markets', 'timezone', 'sports', 'sources', 'sourceOrder', 'streamOrder', 'timeFormat',
       'addonName', 'addonLogo', 'addonDescription', 'catalogOrder', 'catalogNames', 'catalogOptions'
     ];
     // Not secret -- this addon holds no keys or tokens -- but personal: together
     // they say roughly where someone lives and what they follow. In by default,
     // because a backup missing them is not a backup; behind a switch, because a
     // file meant for a stranger should not carry them.
-    const PERSONAL_KEYS = ['teams', 'timezone'];
+    const PERSONAL_KEYS = ['teams', 'markets', 'timezone'];
     const CATALOG_KEYS = ['catalogOrder', 'catalogNames', 'catalogOptions'];
     // The per-tab flags the page actually writes, and the only ones an import
     // will carry. EXCLUSIVE above still owns which of them can hold at once.
@@ -2094,7 +2108,7 @@
     // One line per setting, with its actual value. The switch below is only
     // safe as a default-on because this list makes the export visible first.
     const FIELD_LABELS = {
-      teams: 'Favourite teams', timezone: 'Timezone', sports: 'Sports', sources: 'Sources',
+      teams: 'Favourite teams', markets: 'Local channels', timezone: 'Timezone', sports: 'Sports', sources: 'Sources',
       sourceOrder: 'Source order', streamOrder: 'Stream order', timeFormat: 'Clock',
       addonName: 'Addon name', addonLogo: 'Addon logo', addonDescription: 'Addon description',
       catalogOrder: 'Tab order', catalogNames: 'Renamed tabs', catalogOptions: 'Per-tab settings'
@@ -2123,8 +2137,8 @@
       const on = expPersonal.checked;
       expPersonalLabel.classList.toggle('active', on);
       expPersonalHint.textContent = on
-        ? 'A complete backup. Anyone you send it to can see which teams you follow and roughly where you are.'
-        : 'Safe to hand to anyone. Teams and timezone are left out, and whoever imports it keeps their own. '
+        ? 'A complete backup. Anyone you send it to can see which teams you follow and which cities you live in.'
+        : 'Safe to hand to anyone. Teams, cities and timezone are left out, and whoever imports it keeps their own. '
           + 'Not a full backup of your own settings.';
     }
 
@@ -2225,6 +2239,12 @@
       if (teams !== null) {
         const v = cleanText(teams, 500);
         if (v) clean.teams = v;
+      }
+
+      const markets = str('markets');
+      if (markets !== null) {
+        const v = cleanText(markets, 300);
+        if (v) clean.markets = v;
       }
 
       const tz = str('timezone');
@@ -2405,6 +2425,7 @@
       if (when || from) line(impPreview, [when, from].filter(Boolean).join(' · '));
 
       line(impPreview, clean.teams ? 'Teams — ' + clean.teams : 'Teams — cleared');
+      line(impPreview, clean.markets ? 'Local channels — ' + clean.markets : 'Local channels — cleared');
 
       const totalSports = checkboxes.length;
       if (clean.sports === 'none') line(impPreview, 'Sports — none');
@@ -2645,6 +2666,12 @@
     // checkboxes follow, so the two halves of this page never disagree about
     // what the addon will actually carry.
     input.addEventListener('input', () => {
+      applySportFilter();
+      applyHideDisabled();
+      updateLink();
+    });
+    // The Local tab comes and goes with the cities box the same way.
+    marketsInput.addEventListener('input', () => {
       applySportFilter();
       applyHideDisabled();
       updateLink();

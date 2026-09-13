@@ -4,7 +4,10 @@ const { regionFromCode } = require('../channelRegions');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const { stationLabel } = require('../services/StationLabel');
+const { stationLabel, callSign } = require('../services/StationLabel');
+const {
+  wantedMarkets, resolveMarkets, stationName, networkOfTitles, networkHome, NETWORK_CHANNEL, NETWORK_NAME
+} = require('../services/LocalMarkets');
 
 /**
  * iptv-org — https://iptv-org.github.io/api/
@@ -30,6 +33,27 @@ const { stationLabel } = require('../services/StationLabel');
 // of working streams for them: dropping the category took NBC from 32 streams to
 // 3 and Fox from 27 to 3.
 const GENERAL_NETWORKS = /^(ABC|CBS|NBC|Fox|CW|MNT|Galavision|Telemundo(?: Internacional| Al Dia)?)$/i;
+const NETWORK_IDS = new Set(Object.values(NETWORK_CHANNEL));
+// The name each network's own tile carries, which is the name its logo is
+// looked up by.
+const LOGO_NAME = {
+  'Fox.us': 'Fox', 'ABC.us': 'ABC', 'CBS.us': 'CBS', 'NBC.us': 'NBC', 'CW.us': 'CW', 'MNT.us': 'MNT',
+  'PBS.us': 'PBS', 'Telemundo.us': 'Telemundo', 'Univision.us': 'Univision'
+};
+
+// How long the feed and city lists are kept. Stations move house rarely.
+const PLACES_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** The call sign a set of stream titles mention, or ''. */
+function callFromTitles(titles) {
+  for (const t of titles || []) {
+    for (const m of String(t || '').matchAll(/\b([KW][A-Z]{2,3}(?:-(?:TV|DT|CD|LD)\d*)?)\b/g)) {
+      const call = callSign(m[1]);
+      if (call) return call;
+    }
+  }
+  return '';
+}
 
 class IptvOrgProvider extends BaseProvider {
   constructor(opts) {
@@ -41,6 +65,11 @@ class IptvOrgProvider extends BaseProvider {
     // Logos left the channel record and live in their own file now, several
     // per channel with dimensions and an in-use flag.
     this.logosUrl = 'https://iptv-org.github.io/api/logos.json';
+    // Where each feed broadcasts (a station is a feed of its network's channel)
+    // and what each city code means. Together 1.5 MB, fetched once a day.
+    this.feedsUrl = 'https://iptv-org.github.io/api/feeds.json';
+    this.citiesUrl = 'https://iptv-org.github.io/api/cities.json';
+    this._places = null;
 
     // Which of iptv-org's categories are worth carrying. Sports is the point,
     // and news is what people turn to between games. "general" was carried for
@@ -67,10 +96,56 @@ class IptvOrgProvider extends BaseProvider {
     });
   }
 
+  /**
+   * The feed and city lists, indexed: which feeds broadcast to each city, and
+   * the record behind each "channel/feed" key. Kept a day. When the fetch
+   * fails the last copy stays in use, or, on a cold start, an empty one: the
+   * station labels fall back to their bundled table and no local tiles are
+   * listed until the next sync gets through.
+   */
+  async _loadPlaces() {
+    if (this._places && Date.now() - this._places.at < PLACES_TTL_MS) return this._places;
+    try {
+      const [feeds, cities] = await Promise.all([
+        this.proxyFetch(this.feedsUrl, { signal: AbortSignal.timeout(30000) }).then(r => r.json()),
+        this.proxyFetch(this.citiesUrl, { signal: AbortSignal.timeout(30000) }).then(r => r.json())
+      ]);
+      if (!Array.isArray(feeds) || !Array.isArray(cities)) throw new Error('unexpected shape');
+      const cityByCode = new Map();
+      for (const c of cities) if (c && c.country === this.country && c.code) cityByCode.set(c.code, c);
+      const feedByKey = new Map();
+      const feedsByCity = new Map();
+      const feedCount = new Map();
+      for (const f of feeds) {
+        if (!f || !f.channel || !f.id) continue;
+        feedByKey.set(`${f.channel}/${f.id}`, f);
+        for (const a of Array.isArray(f.broadcast_area) ? f.broadcast_area : []) {
+          if (!String(a).startsWith('ct/')) continue;
+          const code = String(a).slice(3);
+          if (!cityByCode.has(code)) continue;
+          if (!feedsByCity.has(code)) feedsByCity.set(code, []);
+          feedsByCity.get(code).push(f);
+          feedCount.set(code, (feedCount.get(code) || 0) + 1);
+        }
+      }
+      this._places = { at: Date.now(), cityByCode, feedByKey, feedsByCity, feedCount, cities: [...cityByCode.values()] };
+    } catch (err) {
+      console.warn(`[${this.name}] feed and city lists unavailable: ${err.message}`);
+      if (!this._places) {
+        this._places = { at: 0, cityByCode: new Map(), feedByKey: new Map(), feedsByCity: new Map(), feedCount: new Map(), cities: [] };
+      } else {
+        // Keep the old copy and try again in an hour rather than at once.
+        this._places.at = Date.now() - PLACES_TTL_MS + 60 * 60 * 1000;
+      }
+    }
+    return this._places;
+  }
+
   async getMatches() {
     try {
       const data = await this.fetchData.fire();
       if (!data || !Array.isArray(data.channels) || !Array.isArray(data.streams)) return [];
+      const places = await this._loadPlaces();
 
       // The best logo per channel. A card draws the mark into a square tile, so
       // a squarish one is worth more than a wide wordmark, and a bigger one
@@ -90,16 +165,24 @@ class IptvOrgProvider extends BaseProvider {
         const best = logoFor.get(l.channel);
         if (!best || logoScore(l) > logoScore(best)) logoFor.set(l.channel, l);
       }
+      const logoUrl = (channelId) => {
+        const best = logoFor.get(channelId);
+        const url = best && typeof best.url === 'string' ? best.url : '';
+        return url.startsWith('//') ? `https:${url}` : url;
+      };
 
       // A name index over every channel it has a logo for, in any country, kept
       // for channels other sources list. Primary names only: an alternate name
       // is how "US Open" came to match a local TV station's call sign. Each
       // entry remembers its country so the caller can insist on the right one.
       const byName = new Map();
-      const nameKey = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      const nameKey = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
         .toLowerCase().replace(/\+/g, 'plus').replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+      const chanById = new Map();
       for (const c of data.channels) {
-        if (!c || !c.name || !logoFor.has(c.id)) continue;
+        if (!c || !c.id) continue;
+        chanById.set(c.id, c);
+        if (!c.name || !logoFor.has(c.id)) continue;
         const k = nameKey(c.name);
         if (!byName.has(k)) byName.set(k, []);
         byName.get(k).push({ country: c.country, url: logoFor.get(c.id).url });
@@ -122,7 +205,68 @@ class IptvOrgProvider extends BaseProvider {
         if (cats.some(k => this.categories.has(k))) return true;
         return cats.includes('general') && GENERAL_NETWORKS.test(String(c.name).trim());
       });
-      if (!wanted.length) return [];
+      const wantedIds = new Set(wanted.map(c => c.id));
+
+      // iptv-org files a few stations' streams under the wrong network --
+      // "FOX 32 Chicago IL (WFLD)" sits under MNT. A feed whose stream titles
+      // name another network is listed on that network's tile instead. Only
+      // onto a tile that exists: a feed sent to a network not listed here
+      // (PBS) would otherwise vanish from both.
+      const homeOf = new Map();   // "channel/feed" -> the network channel its streams belong under
+      for (const [id, list] of streamsFor) {
+        if (!NETWORK_IDS.has(id)) continue;
+        const byFeed = new Map();
+        for (const s of list) {
+          const k = String(s.feed || '');
+          if (!byFeed.has(k)) byFeed.set(k, []);
+          byFeed.get(k).push(s);
+        }
+        for (const [feed, ss] of byFeed) {
+          // Streams with no feed are not one station: unrelated stations
+          // share the '' key, so one title cannot speak for all of them.
+          if (!feed) continue;
+          const home = networkHome(ss.map(s => s.title), id);
+          if (home && wantedIds.has(home)) homeOf.set(`${id}/${feed}`, home);
+        }
+      }
+      const streamsOf = (id) => {
+        const own = (streamsFor.get(id) || []).filter(s => !homeOf.has(`${id}/${String(s.feed || '')}`));
+        if (!NETWORK_IDS.has(id)) return own;
+        const adopted = [];
+        for (const [key, home] of homeOf) {
+          if (home !== id) continue;
+          const slash = key.indexOf('/');
+          const from = key.slice(0, slash), feed = key.slice(slash + 1);
+          for (const s of streamsFor.get(from) || []) if (String(s.feed || '') === feed) adopted.push(s);
+        }
+        return own.concat(adopted);
+      };
+
+      // The stations of the cities anyone here has asked for, each to be a tile
+      // of its own. A feed is one station; its streams are the ones filed on
+      // that feed, not the channel's national ones.
+      const markets = resolveMarkets(wantedMarkets(), places.cities, code => places.feedCount.get(code) || 0);
+      const localCandidates = [];
+      const candidateKeys = new Set();   // a feed broadcast to two wanted cities is one station
+      for (const market of markets) {
+        for (const f of places.feedsByCity.get(market.code) || []) {
+          if (candidateKeys.has(`${f.channel}/${f.id}`)) continue;
+          const ch = chanById.get(f.channel);
+          if (!ch || ch.closed || ch.country !== this.country) continue;
+          const cats = (Array.isArray(ch.categories) ? ch.categories : []).map(k => String(k).toLowerCase());
+          // Shopping and religious subchannels are not what "my local channels" means.
+          if (cats.includes('shop') || cats.includes('religious')) continue;
+          // A channel that is a tile already (CBS News Chicago) is not listed
+          // twice. A network's feed is a different station from the network.
+          if (wantedIds.has(f.channel) && !NETWORK_IDS.has(f.channel)) continue;
+          const streams = (streamsFor.get(f.channel) || []).filter(s => String(s.feed || '') === String(f.id));
+          if (!streams.length) continue;
+          candidateKeys.add(`${f.channel}/${f.id}`);
+          localCandidates.push({ market, feed: f, channel: ch, streams });
+        }
+      }
+
+      if (!wanted.length && !localCandidates.length) return [];
 
       // A listed stream is not a reachable one. Contributions are not pruned
       // when a host goes away, so a channel can carry several URLs and no way
@@ -131,11 +275,9 @@ class IptvOrgProvider extends BaseProvider {
       // 336 channels here, answered in about a second -- and a host coming back
       // brings its channels with it without anybody editing a list.
       const hosts = new Set();
-      for (const c of wanted) {
-        for (const s of streamsFor.get(c.id)) {
-          try { hosts.add(new URL(s.url).hostname); } catch (e) { /* not a url */ }
-        }
-      }
+      const noteHost = (s) => { try { hosts.add(new URL(s.url).hostname); } catch (e) { /* not a url */ } };
+      for (const c of wanted) for (const s of streamsOf(c.id)) noteHost(s);
+      for (const cand of localCandidates) for (const s of cand.streams) noteHost(s);
       const alive = new Set();
       await Promise.all([...hosts].map(async h => {
         try { await dns.lookup(h); alive.add(h); } catch (e) { /* gone */ }
@@ -145,14 +287,37 @@ class IptvOrgProvider extends BaseProvider {
         try { return alive.has(new URL(s.url).hostname); } catch (e) { return false; }
       };
 
+      // What iptv-org's feed list says about a stream's station, for its label.
+      const filedFor = (channel, feedId) => {
+        const f = places.feedByKey.get(`${channel}/${feedId}`);
+        if (!f) return undefined;
+        const area = (Array.isArray(f.broadcast_area) ? f.broadcast_area : []).find(a => String(a).startsWith('ct/'));
+        const c = area ? places.cityByCode.get(String(area).slice(3)) : null;
+        const state = c ? (String(c.subdivision || '').split('-')[1] || '') : '';
+        const city = c ? `${c.name === 'New York City' ? 'New York' : c.name}${state ? ', ' + state : ''}` : '';
+        const call = callSign(f.name);
+        return city || call ? [city, call] : undefined;
+      };
+      // A source, labelled with its station when `station` says whose it is.
+      const sourceOf = (s, station) => {
+        const st = station ? stationLabel({ ...station, streamTitle: s.title }) : null;
+        return {
+          source: 'iptv-org',
+          id: s.url,
+          url: s.url,
+          quality: s.quality || 'Auto',
+          user_agent: s.user_agent,
+          referrer: s.referrer,
+          ...(st ? { station: st.label, stationSort: st.sort } : {})
+        };
+      };
+
       const matches = [];
       for (const c of wanted) {
-        const usable = streamsFor.get(c.id).filter(reachable);
+        const usable = streamsOf(c.id).filter(reachable);
         if (!usable.length) continue;
 
-        const bestLogo = logoFor.get(c.id);
-        let logo = bestLogo && typeof bestLogo.url === 'string' ? bestLogo.url : '';
-        if (logo.startsWith('//')) logo = `https:${logo}`;
+        const logo = logoUrl(c.id);
         // A national network's iptv-org entry is dozens of local stations.
         const isNetwork = GENERAL_NETWORKS.test(String(c.name).trim());
 
@@ -172,26 +337,64 @@ class IptvOrgProvider extends BaseProvider {
           logo,
           // On a network tile each stream is a different local station, so it
           // says which one -- "Los Angeles, CA · KTTV" -- for the stream list.
-          sources: usable.map(s => {
-            const st = isNetwork
-              ? stationLabel({ channelId: c.id, channelName: String(c.name).trim(), streamTitle: s.title, feed: s.feed })
-              : null;
-            return {
-              source: 'iptv-org',
-              id: s.url,
-              url: s.url,
-              quality: s.quality || 'Auto',
-              user_agent: s.user_agent,
-              referrer: s.referrer,
-              ...(st ? { station: st.label, stationSort: st.sort } : {})
-            };
-          })
+          // A stream adopted from another network's entry keeps its own feed's
+          // record, which is where its city is filed.
+          sources: usable.map(s => sourceOf(s, isNetwork ? {
+            channelId: s.channel || c.id, channelName: String(c.name).trim(), feed: s.feed,
+            filed: filedFor(s.channel || c.id, s.feed)
+          } : null))
         }));
       }
 
-      console.log(`[${this.name}] ${matches.length} channels from ${wanted.length} listed `
+      // One tile per local station: "FOX 32 Chicago", "PHXTV", "CAN TV19".
+      const perMarket = new Map();
+      for (const { market, feed, channel, streams } of localCandidates) {
+        const usable = streams.filter(reachable);
+        if (!usable.length) continue;
+        const titles = usable.map(s => s.title);
+        const net = networkOfTitles(titles);
+        const networkId = net ? net.channelId : (NETWORK_NAME[feed.channel] ? feed.channel : '');
+        // A network affiliate wears its network's mark, found by name the way
+        // the network's own tile finds it. iptv-org's logos for the networks
+        // are not used: the "best" of Fox's is some affiliate's, and the same
+        // one is filed under NBC and MNT too.
+        const logo = networkId ? '' : logoUrl(feed.channel);
+        const title = stationName({ channelName: channel.name, channelId: feed.channel, titles, city: market.name });
+        // The feed is usually named for the station (KSAZTV); when it is not
+        // (KNXV's is "HD") the stream titles name it: "ABC 15 Phoenix AZ (KNXV)".
+        const call = callSign(feed.name) || callFromTitles(titles);
+        const filed = [market.label, call];
+        // The label's network is the tile's, so "FOX 32 Chicago" is not told
+        // its own stream is "(FOX)".
+        const asNetwork = net ? NETWORK_NAME[net.channelId] : (NETWORK_NAME[feed.channel] || channel.name);
+
+        matches.push(new MatchEntity({
+          id: `iptv_local_${feed.channel}_${feed.id}`,
+          title,
+          region: regionFromCode(channel.country),
+          baseTitle: title,
+          category: 'networks',
+          date: '0',
+          popular: '0',
+          league: 'Local TV',
+          genre: 'Local',
+          market: market.label,
+          station: call,
+          logoName: networkId ? LOGO_NAME[networkId] : '',
+          thumbnail_url: logo,
+          logo,
+          sources: usable.map(s => sourceOf(s, { channelId: feed.channel, channelName: asNetwork, feed: feed.id, filed }))
+        }));
+        perMarket.set(market.label, (perMarket.get(market.label) || 0) + 1);
+      }
+
+      console.log(`[${this.name}] ${matches.length - [...perMarket.values()].reduce((a, b) => a + b, 0)} channels from ${wanted.length} listed `
         + `(${hosts.size - alive.size} of ${hosts.size} stream hosts are gone, `
-        + `${matches.filter(m => m.logo).length} with a logo)`);
+        + `${matches.filter(m => m.logo).length} with a logo`
+        + (homeOf.size ? `, ${homeOf.size} station feeds moved to their own network` : '') + ')');
+      if (markets.length) {
+        console.log(`[${this.name}] local stations: ${markets.map(m => `${m.label} ${perMarket.get(m.label) || 0}`).join(', ')}`);
+      }
       return matches;
     } catch (error) {
       console.error(`[${this.name}] Error fetching channels:`, error.message);

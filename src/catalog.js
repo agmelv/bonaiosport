@@ -12,6 +12,7 @@ const channelLogoIndex = require('./services/ChannelLogoIndex');
 const { inferGenre } = require('./channelGenres');
 const channelHealth = require('./services/ChannelHealth');
 const { exclusionReason } = require('./channelExclusions');
+const { parseMarkets, marketsSetting, isLocalTo } = require('./services/LocalMarkets');
 
 // Titles that already name the visiting side first: "Rockies @ Yankees",
 // "Missouri at Kansas". Anything else ("A vs B", "A - B") conventionally names
@@ -453,7 +454,10 @@ function mapMatchToMetaPreview(match, config = {}) {
   // whose title lacks a separator. "NFL vs RedZone" splits like a fixture and
   // isn't one, which is why the channel with the best-looking artwork in the
   // catalog was the one showing none.
-  const channelLogo = isFixture ? null : getChannelLogo(match.title);
+  // A local station wears its network's mark: "FOX 32 Chicago" is looked up
+  // as FOX, the name its tile's logo is filed under.
+  const logoTitle = match.logoName || match.title;
+  const channelLogo = isFixture ? null : getChannelLogo(logoTitle);
   // A 24/7 channel, and the best logo anyone gave us for it: the provider's own
   // first, then the channel table, then whatever artwork came with the entry.
   const is247Channel = !isFixture && (match.category === 'networks' || !match.date);
@@ -472,10 +476,10 @@ function mapMatchToMetaPreview(match, config = {}) {
   // TSN: an audit of every cover found forty-odd channels wearing a sibling's
   // logo that way, and tv-logos had the right file for each.
   const exactLogo = is247Channel && !logoless
-    ? channelLogoIndex.lookup(match.title, match.region, { strict: true })
+    ? channelLogoIndex.lookup(logoTitle, match.region, { strict: true })
     : null;
   const indexedLogo = is247Channel && !logoless && !exactLogo && !matchLogo && !channelLogo
-    ? (channelLogoIndex.lookup(match.title, match.region) || iptvLogoFor(match.title))
+    ? (channelLogoIndex.lookup(logoTitle, match.region) || iptvLogoFor(logoTitle))
     : null;
   const channelMark = is247Channel && !logoless
     ? (exactLogo || matchLogo || channelLogo || indexedLogo || matchThumb)
@@ -675,10 +679,13 @@ function mapMatchToMetaPreview(match, config = {}) {
   }
 
   const leagueStr = match.league ? `🏆 League: ${match.league}\n` : '';
-  const statusStr = is247 
-    ? 'Live channel' 
+  // A local station says where it is and what it is called, which is also
+  // what lets a search for the city find it.
+  const marketStr = match.market ? `📍 ${match.market}${match.station ? ' · ' + match.station : ''}\n` : '';
+  const statusStr = is247
+    ? 'Live channel'
     : (isLive ? '🔴 LIVE NOW' : `Kickoff at ${timeString}${relativeTimeStr}`);
-  const desc = `${leagueStr}📅 Category: ${categoryLabel(match.category, match._competition)}\n⏰ Status: ${statusStr}`;
+  const desc = `${marketStr}${leagueStr}📅 Category: ${categoryLabel(match.category, match._competition)}\n⏰ Status: ${statusStr}`;
 
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
@@ -784,6 +791,15 @@ async function handleCatalog(type, id, extra, config, opts = {}) {
     // only to keep the tab off the home board, so it means no filter.
     const wantedGenre = extra && typeof extra.genre === 'string' && extra.genre !== 'All' ? extra.genre : null;
     if (wantedGenre) filteredMatches = filteredMatches.filter(m => channelGenre(m) === wantedGenre);
+  } else if (categoryMatch === 'local') {
+    // The viewer's own cities, from the "markets" setting: their stations'
+    // tiles, and any channel whose name says the city -- CBS News Chicago,
+    // Chicago Sports Network. Empty until a city is named.
+    const markets = parseMarkets(marketsSetting(conf));
+    filteredMatches = markets.length
+      ? matches.filter(m => isChannel(m) && !isTeamChannel(m) && !exclusionReason(m)
+        && !channelHealth.isDead(m.id) && isLocalTo(m, markets))
+      : [];
   } else if (categoryMatch === 'other') {
     filteredMatches = matches.filter(m => !TOP_LEVEL_CATEGORIES.includes(m.category) && !isChannel(m));
   } else if (categoryMatch !== 'catalog') {
@@ -835,7 +851,7 @@ async function handleCatalog(type, id, extra, config, opts = {}) {
   // Sport 10. Grouping by genre made "All" jump from sports to news partway
   // down; the genre picker is how to see one group. Before the per-tab shuffle
   // and reverse below, which still have the last word.
-  if (categoryMatch === 'channels') {
+  if (categoryMatch === 'channels' || categoryMatch === 'local') {
     filteredMatches.sort((a, b) =>
       String(a.title).localeCompare(String(b.title), 'en', { sensitivity: 'base', numeric: true }));
   }

@@ -249,7 +249,9 @@ app.use((req, res, next) => {
  */
 async function collectWarmUrls() {
   const { manifest } = require('./manifest');
-  const ids = (manifest.catalogs || []).map(c => c.id).filter(id => !/_teams$/.test(id));
+  // Your Teams and Local draw on a viewer's config; their tiles are in the
+  // other tabs already.
+  const ids = (manifest.catalogs || []).map(c => c.id).filter(id => !/_(teams|local)$/.test(id));
   const perCatalog = [];
   for (const id of ids) {
     try {
@@ -380,6 +382,12 @@ app.get('/api/config/saved', (req, res) => {
   });
 });
 
+// A change of cities starts a catalog sync, and a sync is the most expensive
+// thing this process does. One this way every few minutes at most, whatever a
+// script does to a profile's cities; the four-hourly sync picks up the rest.
+let lastMarketSyncAt = 0;
+const MARKET_SYNC_EVERY_MS = 5 * 60 * 1000;
+
 app.post('/api/config/save', express.json({ limit: '64kb' }), (req, res) => {
   // The configure page is what AUTH_KEY guards, and this is that page's save
   // button, so it is gated the same way: signed in, or the site is open anyway.
@@ -415,6 +423,7 @@ app.post('/api/config/save', express.json({ limit: '64kb' }), (req, res) => {
     });
   }
 
+  const marketsBefore = String((loadProfile(id) || {}).markets || '');
   try {
     // The key first: a profile written without one could never be changed.
     if (editKey) writeEditKey(id, editKey);
@@ -425,6 +434,18 @@ app.post('/api/config/save', express.json({ limit: '64kb' }), (req, res) => {
       error: 'Could not write the profile. ' +
              'Mount a volume at the data directory (see the README) or set DATA_DIR somewhere writable.'
     });
+  }
+
+  // A new city's stations are listed by the next sync. Start one now rather
+  // than leave the viewer who just typed it looking at an empty Local tab.
+  if (String(config.markets || '') !== marketsBefore && Date.now() - lastMarketSyncAt >= MARKET_SYNC_EVERY_MS) {
+    const cron = container.resolve('cronService');
+    // A sync already under way read the profiles before this save. The next
+    // revalidation picks the change up, and the cooldown is not spent on it.
+    if (!cron.syncing) {
+      lastMarketSyncAt = Date.now();
+      Promise.resolve(cron.runSync()).catch(err => console.warn('[profiles] re-sync after a market change failed:', err.message));
+    }
   }
 
   const base = getRequestBaseUrl(req);
@@ -1651,7 +1672,7 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     // a list kept alongside. The list fell behind as tabs were added, and the
     // failure was silent and backwards: College, Other Football and Channels
     // were dropped by any sports filter, including one that had them ticked.
-    const ALWAYS = new Set(['live', 'upcoming', 'teams', 'channels']);
+    const ALWAYS = new Set(['live', 'upcoming', 'teams', 'channels', 'local']);
     const SPORT_FOR_CATALOG = { other_football: 'american_football' };
 
     newManifest.catalogs = newManifest.catalogs.filter(c => {
@@ -1788,6 +1809,10 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   // Remove teams catalog if the user hasn't configured any teams
   if (typeof parsedConfig.teams !== 'string' || parsedConfig.teams.trim() === '') {
     newManifest.catalogs = newManifest.catalogs.filter(c => c.id !== 'nuvio_sports_teams');
+  }
+  // And the Local tab when no city is named: it could only ever be empty.
+  if (typeof parsedConfig.markets !== 'string' || parsedConfig.markets.trim() === '') {
+    newManifest.catalogs = newManifest.catalogs.filter(c => c.id !== 'nuvio_sports_local');
   }
 
   // A tab kept off the home board is published twice, because no single catalog

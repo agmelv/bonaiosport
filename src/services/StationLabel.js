@@ -6,8 +6,9 @@
  * ads and, for sport, sometimes its own game. They all used to read "Live
  * channel · 7". This names each one by where it is and its call sign --
  * "Los Angeles, CA · KTTV" -- from what iptv-org already says about the stream:
- * its title, and the city filed for its feed (src/services/data/us-stations.json,
- * built by scripts/build-us-stations.js). No I/O here.
+ * its title, and the city filed for its feed. The provider passes the filed
+ * city when it has iptv-org's feed list; src/services/data/us-stations.json
+ * (built by scripts/build-us-stations.js) answers when it does not. No I/O.
  */
 
 'use strict';
@@ -25,6 +26,18 @@ const STATES = new Set(('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA M
 // How a title names its network, and the name that network's tile uses.
 const NETWORK = { FOX: 'FOX', ABC: 'ABC', CBS: 'CBS', NBC: 'NBC', CW: 'CW', MNT: 'MNT', MYNETWORKTV: 'MNT', PBS: 'PBS' };
 
+/**
+ * A city name as a key: case, accents, punctuation and "Saint" do not count,
+ * and New York City is New York. Used wherever a typed city is compared with
+ * a filed one, so the two are always read the same way.
+ */
+function cityKey(s) {
+  const k = String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/\bsaint\b/g, 'st').replace(/[^a-z0-9]/g, '');
+  return k === 'newyorkcity' ? 'newyork' : k;
+}
+
+/** "KTTV-DT1", "wfld" -> "KTTV", "WFLD"; '' for anything that is not a call sign. */
 const callSign = raw => {
   const c = String(raw || '').toUpperCase().replace(/-(TV|DT|CD|LD|LP)\d*$/, '');
   return /^[KW][A-Z]{2,3}$/.test(c) ? c : '';
@@ -44,9 +57,10 @@ function fromTitle(title) {
 /**
  * A stream's station label, or null when nothing says where it is.
  * Returns { label, sort } -- sort puts named cities A to Z, then call signs
- * alone, then national feeds.
+ * alone, then national feeds. `filed` is ["City, ST", "CALL"] from iptv-org's
+ * feed list when the caller has it; the bundled table answers otherwise.
  */
-function stationLabel({ channelId, channelName, streamTitle, feed }) {
+function stationLabel({ channelId, channelName, streamTitle, feed, filed }) {
   const title = String(streamTitle || '').trim();
   const feedId = String(feed || '');
 
@@ -56,17 +70,17 @@ function stationLabel({ channelId, channelName, streamTitle, feed }) {
   }
 
   const parsed = fromTitle(title);
-  const filed = STATIONS[`${channelId}/${feedId}`] || [];
+  const onFile = Array.isArray(filed) ? filed : (STATIONS[`${channelId}/${feedId}`] || []);
   // A market in the title ("FOX 13 Seattle WA") beats the city of licence on
   // file ("Tacoma, WA"): it is the name a viewer knows the station by.
-  let city = parsed.city || filed[0] || '';
+  let city = parsed.city || onFile[0] || '';
   // Titles are typed by hand, and their states are wrong often enough to show:
   // "ABC 6 Austin TX" is KAAL in Austin, MN. The state on file comes from the
   // city's own record, so the title keeps its city and takes the filed state.
-  const filedState = (String(filed[0] || '').match(/, ([A-Z]{2})$/) || [])[1];
+  const filedState = (String(onFile[0] || '').match(/, ([A-Z]{2})$/) || [])[1];
   if (parsed.city && filedState) city = city.replace(/, [A-Z]{2}$/, `, ${filedState}`);
   city = city.replace(/^New York City,/, 'New York,');
-  let call = parsed.call || filed[1] || '';
+  let call = parsed.call || onFile[1] || '';
   if (!call) {
     const m = title.match(/\b([KW][A-Z]{2,3})(?:-(?:TV|DT|CD|LD)\d*)?\b/);
     if (m) call = m[1];
@@ -86,6 +100,28 @@ function stationLabel({ channelId, channelName, streamTitle, feed }) {
   return { label, sort: `${rank}|${city.toLowerCase()}|${call}` };
 }
 
+/**
+ * How streams with a station key order among themselves: the viewer's own
+ * cities first, then cities A to Z, then bare call signs, then national feeds.
+ * Streams without a key keep their place -- the sort that uses this is stable.
+ */
+function stationOrder(pinnedCities) {
+  const pinned = new Set((pinnedCities || []).map(m => cityKey(m && m.name !== undefined ? m.name : m)).filter(Boolean));
+  const keyOf = s => {
+    if (!s || !s.stationSort) return '';
+    const [, city = ''] = s.stationSort.split('|');
+    // '-' sorts before the '0', '1' and '2' that lead every other key.
+    return pinned.has(cityKey(city.split(',')[0])) ? `-|${s.stationSort}` : s.stationSort;
+  };
+  return (a, b) => {
+    const ka = keyOf(a), kb = keyOf(b);
+    if (!ka && !kb) return 0;
+    if (!ka) return 1;
+    if (!kb) return -1;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  };
+}
+
 // USA TV's CBS News local streams carry the station in a host tag.
 const CBS_NEWS = {
   BOS: 'Boston', CHI: 'Chicago', DAL: 'Texas', DEN: 'Colorado', DET: 'Detroit', LA: 'Los Angeles',
@@ -98,4 +134,4 @@ function cbsNewsLabel(tag) {
   return m && CBS_NEWS[m[1]] ? `CBS News ${CBS_NEWS[m[1]]}` : null;
 }
 
-module.exports = { stationLabel, cbsNewsLabel };
+module.exports = { stationLabel, stationOrder, cbsNewsLabel, callSign, cityKey, STATES };
