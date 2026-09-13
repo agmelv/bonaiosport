@@ -23,6 +23,13 @@ const StreamEntity = require('../domain/StreamEntity');
  * channel that both sources carry ends up as one entry holding both sets of
  * streams rather than two rows.
  */
+// The national broadcast networks iptv-org files under "general". The category
+// as a whole is city public-access and community channels, but these are the
+// same ABC, CBS, NBC and Fox tiles other sources list, and iptv-org carries dozens
+// of working streams for them: dropping the category took NBC from 32 streams to
+// 3 and Fox from 27 to 3.
+const GENERAL_NETWORKS = /^(ABC|CBS|NBC|Fox|CW|MNT|Galavision|Telemundo(?: Internacional| Al Dia)?)$/i;
+
 class IptvOrgProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
@@ -110,8 +117,9 @@ class IptvOrgProvider extends BaseProvider {
         if (!c || c.closed || !c.name) return false;
         if (c.country !== this.country) return false;
         if (!streamsFor.has(c.id)) return false;
-        const cats = Array.isArray(c.categories) ? c.categories : [];
-        return cats.some(k => this.categories.has(String(k).toLowerCase()));
+        const cats = Array.isArray(c.categories) ? c.categories.map(k => String(k).toLowerCase()) : [];
+        if (cats.some(k => this.categories.has(k))) return true;
+        return cats.includes('general') && GENERAL_NETWORKS.test(String(c.name).trim());
       });
       if (!wanted.length) return [];
 
