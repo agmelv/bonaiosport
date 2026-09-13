@@ -1,5 +1,5 @@
 /**
- * Nuvio Live Sports - Cloudflare Worker Proxy
+ * AIOSports - optional Cloudflare Worker proxy
  * 
  * Instructions:
  * 1. Go to https://dash.cloudflare.com and sign up/log in.
@@ -7,7 +7,8 @@
  * 3. Name it "nuvio-proxy" (or anything) and deploy.
  * 4. Click "Edit Code", paste this entire script, and click "Deploy".
  * 5. Copy your worker's URL (e.g., https://nuvio-proxy.yourname.workers.dev)
- * 6. Set this URL as the CF_PROXY_URL environment variable in your Nuvio deployment!
+ * 6. Set this URL as CF_PROXY_URL in your AIOSports .env and restart. To use several
+ *    workers, separate their URLs with commas.
  */
 
 export default {
@@ -392,13 +393,3 @@ export default {
     }
   }
 };
-
-// Trigger deployment
-
-// Trigger deployment 2
-
-// Trigger deployment 3
-// Force deploy CF workers
-// Force trigger for proxy 5 deployment
-// Fix wrangler prompt
-// Trigger proxy 5 deployment

@@ -1,5 +1,8 @@
-// Hardcoded CF proxy pool — add more URLs to multiply free-tier limits
-const CF_PROXY_POOL = [];
+// Optional Cloudflare Worker proxies (cloudflare-worker/index.js), from
+// CF_PROXY_URL: one worker URL, or several separated by commas to spread the
+// requests across free-tier limits. Unset, requests go out directly.
+const CF_PROXY_POOL = String(process.env.CF_PROXY_URL || '')
+  .split(',').map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
 
 // Safe impit wrapper — falls back to undici when impit native binary is
 // unavailable (ARM64 VPS, Alpine/musl Linux, certain Windows Server builds).
