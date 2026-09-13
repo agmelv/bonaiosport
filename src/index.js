@@ -641,21 +641,32 @@ app.get('/img/event', async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
   const M = await firstImage([req.query.mark, req.query.mark2].filter(Boolean));
+  const coverParam = req.query.cover === '1';
   if (!M) {
-    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color), 'public, max-age=300');
+    // A channel whose logo did not arrive in time still gets a card, but not a
+    // cacheable one. A player loading a whole tab at once can miss logos under
+    // the burst, and a placeholder it keeps -- players keep images far past any
+    // max-age -- is a logo that never shows up.
+    return imageService.sendCard(req, res, imageService.svgPlaceholder(text, color),
+      coverParam ? 'no-store' : 'public, max-age=300');
   }
   // A channel cover sits its logo straight on flat grey, so a logo that ships
   // on its own solid rectangle has that rectangle taken out first.
-  const cover = req.query.plate === '0' && req.query.notext === '1';
+  const cover = coverParam || (req.query.plate === '0' && req.query.notext === '1');
   const entry = cover
     ? ((await imageService.knockoutBackground(M.entry.buffer)) || M.entry)
     : M.entry;
+  // The logo's own size, so the cover never draws it larger than it is.
+  const size = coverParam ? await imageService.imageSize(entry.buffer) : { width: 0, height: 0 };
   return imageService.sendCard(
     req, res,
     imageService.svgEvent(text, entry, color, {
       kicker: req.query.kicker || '',
       plate: req.query.plate !== '0',
-      name: req.query.notext !== '1'
+      name: req.query.notext !== '1',
+      cover: coverParam,
+      markW: size.width,
+      markH: size.height
     }),
     'public, max-age=86400, stale-while-revalidate=604800'
   );

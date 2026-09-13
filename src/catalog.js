@@ -538,9 +538,9 @@ function mapMatchToMetaPreview(match, config = {}) {
       text: prettifyName(match.title), mark: channelMark, kicker: '24/7', color,
       // A channel logo is drawn to stand on its own; the white tile a sport
       // badge needs reads as a sticker over the card.
-      plate: false,
-      // The logo already names the channel.
-      name: false
+      // A channel cover: the logo on flat grey with the channel's name under it.
+      // ESPN US and ESPN NZ share a logo, so the name is what tells them apart.
+      cover: true
     }) || buildImg(channelMark, posterText, color) || fallbackPoster;
     logo = channelMark;
   } else if (channelLogo) {

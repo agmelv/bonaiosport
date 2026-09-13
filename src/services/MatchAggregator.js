@@ -394,7 +394,11 @@ class MatchAggregator {
    * of inside every comparison removes ~50x of repeated work on large catalogs.
    */
   _precompute(e) {
-    const title = e && e.title ? String(e.title) : '';
+    // A channel is compared by its name without the region word, so "DAZN 1
+    // Germany" and a "DAZN 1" filed as DE are one channel. The region field is
+    // what keeps DE apart from ES, so the word adds nothing but a mismatch.
+    const byBase = e && (!e.date || e.category === 'networks') && e.region && e.baseTitle;
+    const title = byBase ? String(e.baseTitle) : (e && e.title ? String(e.title) : '');
     const id = e && e.id != null ? String(e.id) : '';
     return {
       id,
@@ -510,8 +514,6 @@ class MatchAggregator {
 
     // 6. Channel-identity path — at least one title is not a team-vs-team fixture
     //    (24/7 channels, court/track numbered events, "Team Live" listings).
-    if (p1.tokens.size === 0 || p2.tokens.size === 0) return false;
-
     // Digit signatures must agree: "beIN 1" vs "beIN 2", "Court 13" vs "Court 7"
     // are different channels/events even when the words are identical.
     if (p1.digits !== p2.digits) return false;
@@ -520,6 +522,9 @@ class MatchAggregator {
     //     a subset of the fixture tokens ("Real Madrid live" ⊂ "Real Madrid vs
     //     Barcelona"). This keeps single-team listings merging with the fixture.
     if (p1.teams || p2.teams) {
+      // An empty token set is a subset of every fixture, so a listing with no
+      // usable words never joins one here.
+      if (p1.tokens.size === 0 || p2.tokens.size === 0) return false;
       const channel = p1.teams ? p2 : p1;
       const fixture = p1.teams ? p1 : p2;
       for (const w of channel.tokens) if (!fixture.tokens.has(w)) return false;
@@ -528,6 +533,12 @@ class MatchAggregator {
 
     // 6b. Both channel-like: strict identity only. Distinct channels with shared
     //     branding must never merge.
+    //
+    // Guarded on `words`, not `tokens`. Tokens drop anything under three
+    // characters, so "CW" and "FX" had no tokens at all and returned here
+    // before being compared -- two listings of CW could never merge, and the
+    // tab showed CW three times.
+    if (p1.words.size === 0 || p2.words.size === 0) return false;
     if (p1.norm === p2.norm) return true;
     // On `words`, not `tokens`: tokens drop anything under three characters, so
     // "Spectrum SportsNet LA" and "Spectrum SportsNet" came through here as the

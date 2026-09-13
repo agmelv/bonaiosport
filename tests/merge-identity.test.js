@@ -79,5 +79,12 @@ t(false, same(rch('ESPN', 'US'), rch('ESPN', 'NZ')), 'ESPN US is not ESPN NZ')
 t(true,  same(rch('ESPN', 'US'), rch('ESPN', 'US')), 'the same channel in one region still merges')
 t(true,  same(rch('ESPN', ''),   rch('ESPN', 'US')), 'a listing that names no region still merges')
 
+console.log('--- short channel names, and region words in a name')
+t(true,  same(ch('CW'), ch('CW')), 'two listings of CW merge')
+t(false, same(ch('CW'), ch('FX')), 'CW is not FX')
+t(false, same(ch('FX'), ev('sf_fx', 'Arsenal vs Chelsea', 'football', D, [])), 'a short channel name does not join a fixture')
+t(true,  same({ ...rch('DAZN 1 Germany', 'DE'), baseTitle: 'DAZN 1' }, { ...rch('DAZN 1', 'DE'), baseTitle: 'DAZN 1' }), 'DAZN 1 Germany is DAZN 1 in DE')
+t(false, same({ ...rch('DAZN 1 Germany', 'DE'), baseTitle: 'DAZN 1' }, { ...rch('DAZN 1', 'ES'), baseTitle: 'DAZN 1' }), 'DAZN 1 DE is not DAZN 1 ES')
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

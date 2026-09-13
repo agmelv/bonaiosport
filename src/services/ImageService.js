@@ -500,6 +500,16 @@ async function knockoutBackground(buffer) {
   return result;
 }
 
+/** An image's pixel size, or zeros when it cannot be read. */
+async function imageSize(buffer) {
+  try {
+    const m = await sharp(buffer, { failOn: 'none' }).metadata();
+    return { width: m.width || 0, height: m.height || 0 };
+  } catch (e) {
+    return { width: 0, height: 0 };
+  }
+}
+
 function svgEvent(text, entry, color, opts = {}) {
   // `plate` is the white tile the mark is seated on. A sport's badge needs it
   // -- those marks are line art that disappears on a dark card -- but a TV
@@ -509,7 +519,13 @@ function svgEvent(text, entry, color, opts = {}) {
   // which channel it is, so a channel cover drops it and lets the logo carry
   // the card on its own -- larger, and centred in the frame rather than
   // parked above where the name used to go.
-  const { w = 800, h = 450, kicker = '', plate: showPlate = true, name: showName = true } = opts;
+  // `cover` is a channel's card: flat grey, the logo, the channel's name under
+  // it. It implies no plate and a name. The older no-plate, no-name form still
+  // renders as a cover, so URLs a player has cached keep drawing.
+  const coverMode = !!opts.cover;
+  const { w = 800, h = 450, kicker = '' } = opts;
+  const showPlate = coverMode ? false : (opts.plate !== undefined ? opts.plate : true);
+  const showName = coverMode ? true : (opts.name !== undefined ? opts.name : true);
   const base = accentColor(color).slice(1);
   const seated = luminance(base) > 0.55 ? shade(base, -0.45)
     : luminance(base) > 0.32 ? shade(base, -0.28)
@@ -527,23 +543,47 @@ function svgEvent(text, entry, color, opts = {}) {
   // which is what keeps a dark logo from dissolving into a dark card.
   const markSize = 144;
   const mark = showPlate ? markSize : 176;
-  // A bare, nameless cover gives the logo a wide box in the middle of the card.
-  // preserveAspectRatio fits it inside, so a wordmark grows to the width and a
-  // round badge to the height, and neither is cropped.
-  const cover = !showPlate && !showName;
-  // A cover is the logo and nothing else, so it gets most of the frame: 40px
-  // of margin either side and a box tall enough for a round badge, centred in
-  // the card with room above it for the 24/7 line.
-  const boxW = cover ? 720 : mark;
-  const boxH = cover ? 320 : mark;
-  const boxX = cover ? (w - boxW) / 2 : plateX + (plate - mark) / 2;
-  const boxY = cover ? (h - boxH) / 2 : plateY + (plate - mark) / 2;
+  const cover = coverMode || (!showPlate && !showName);
+
+  // Where the logo goes. On a channel cover it is drawn at no more than its own
+  // size: a 512px ESPN wordmark stretched to 720px was visibly softer than the
+  // 500px crests on the sports cards beside it, so a logo is only ever scaled
+  // down. It sits above centre, leaving the lower part of the card for the
+  // channel's name.
+  let boxW = mark;
+  let boxH = mark;
+  let boxX = plateX + (plate - mark) / 2;
+  let boxY = plateY + (plate - mark) / 2;
+  if (cover) {
+    const maxW = coverMode ? 560 : 720;
+    const maxH = coverMode ? 190 : 320;
+    const nw = Number(opts.markW) || 0;
+    const nh = Number(opts.markH) || 0;
+    boxW = maxW;
+    boxH = maxH;
+    if (coverMode && nw > 0 && nh > 0) {
+      const scale = Math.min(maxW / nw, maxH / nh, 1);
+      boxW = Math.max(1, Math.round(nw * scale));
+      boxH = Math.max(1, Math.round(nh * scale));
+    }
+    boxX = Math.round((w - boxW) / 2);
+    boxY = Math.round((coverMode ? 180 : h / 2) - boxH / 2);
+  }
 
   const lines = wrapLines(text, 26, 3);
   const fs = lines.length >= 3 ? 34 : lines.length === 2 ? 40 : 44;
   const startY = 300;
   const textEls = lines.map((line, i) =>
     `<text x="50%" y="${(startY + i * (fs + 8)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${fs}" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#pdrop)">${escapeXml(line)}</text>`
+  ).join('\n  ');
+
+  // A cover's name: one clean line under the logo, two at most, no shadow.
+  // It is what tells ESPN US from ESPN NZ, whose logos are the same.
+  const coverLines = wrapLines(text, 24, 2);
+  const cfs = coverLines.length === 2 ? 34 : (String(text).length > 18 ? 38 : 44);
+  const coverTop = coverLines.length === 2 ? 322 : 344;
+  const coverTextEls = coverLines.map((line, i) =>
+    `<text x="50%" y="${(coverTop + i * (cfs + 10)).toFixed(1)}" font-family="Segoe UI, Arial, sans-serif" font-size="${cfs}" font-weight="700" letter-spacing="0.5" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
   ).join('\n  ');
 
   const uri = entry && entry.buffer
@@ -579,7 +619,7 @@ function svgEvent(text, entry, color, opts = {}) {
   ${kickerEl}
   ${uri ? `${showPlate ? `<rect x="${plateX.toFixed(1)}" y="${plateY}" width="${plate}" height="${plate}" rx="30" fill="#ffffff" fill-opacity="0.95" filter="url(#pdrop)"/>` : ''}
   <image x="${boxX.toFixed(1)}" y="${boxY.toFixed(1)}" width="${boxW}" height="${boxH}" preserveAspectRatio="xMidYMid meet" href="${uri}" xlink:href="${uri}"${showPlate || cover ? '' : ' filter="url(#pdrop)"'}/>` : ''}
-  ${showName ? textEls : ''}
+  ${coverMode ? coverTextEls : (showName ? textEls : '')}
 </svg>`;
 }
 
@@ -730,7 +770,7 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333' } = {}) {
  * Build the /img/event URL. Carries a second mark so a series logo that fails
  * to load still leaves the card its sport icon.
  */
-function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333', plate = true, name = true }) {
+function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '333333', plate = true, name = true, cover = false }) {
   if (!mark) return null;
   const q = [
     `text=${encodeURIComponent(text || '')}`,
@@ -741,6 +781,7 @@ function eventUrl(baseUrl, { text, mark, mark2 = null, kicker = null, color = '3
   if (kicker) q.push(`kicker=${encodeURIComponent(kicker)}`);
   if (!plate) q.push('plate=0');
   if (!name) q.push('notext=1');
+  if (cover) q.push('cover=1');
   q.push(`v=${RENDER_VERSION}`);
   return `${baseUrl}/img/event?${q.join('&')}`;
 }
@@ -815,6 +856,7 @@ module.exports = {
   svgPlaceholder,
   svgEvent,
   knockoutBackground,
+  imageSize,
   eventUrl,
   rasterize,
   sendCard,
