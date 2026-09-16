@@ -1077,8 +1077,40 @@ function favouriteMatches(m, favoriteTeams) {
   return false;
 }
 
+/**
+ * Whether one of a scoreboard fixture's two sides is the club asked for.
+ *
+ * The crest answers where ESPN published one. Where it did not, the spellings
+ * the index was keyed under do — and they have to match a whole name rather
+ * than appear inside one. Sixty percent of what the old test matched was of the
+ * second kind: "city" is inside "kansas city chiefs", "united" inside "west ham
+ * united", "rams" inside "ramsgate".
+ *
+ * The name arm is not redundant with the crest. ESPN files the same club under
+ * more than one crest id across its boards — Manchester City resolve to
+ * soccer/382, while their fixtures are keyed soccer/19257 — so a crest-only
+ * test loses half a correctly named club's games.
+ */
+function matchesScheduleSide(ev, want) {
+  if (want.crest) {
+    if (want.crest === ev.homeCrest || want.crest === ev.awayCrest) return true;
+    // A board that publishes no crests still names two clubs, and those names
+    // answer the same question. Without this, a viewer who writes the nickname
+    // loses a fixture the index only ever keyed under the full name -- the
+    // substring test got that one right by accident, and the accident is not
+    // worth keeping when the identity is available for the asking.
+    if (!ev.homeCrest && !ev.awayCrest) {
+      for (const side of [ev.home, ev.away]) {
+        const crest = teamLogoService.lookupTeam(side, null);
+        if (crest && teamLogoService.crestKey(crest) === want.crest) return true;
+      }
+    }
+  }
+  return ev.homeNames.includes(want.norm) || ev.awayNames.includes(want.norm);
+}
+
 function scheduleOnlyFixtures(favoriteTeams, matches, now) {
-  const wanted = favoriteTeams.map(t => teamLogoService.normalize(t)).filter(t => t.length >= 2);
+  const wanted = favoriteTeams.map(t => favouriteIdentity(t, null)).filter(w => w.norm.length >= 2);
   if (!wanted.length) return [];
   const events = scheduleEvents();
   if (!events.length) return [];
@@ -1090,8 +1122,7 @@ function scheduleOnlyFixtures(favoriteTeams, matches, now) {
     // The tab's own rule for whether a fixture is the viewer's, asked of the
     // names the index was keyed under, so a club answers to any of the
     // spellings ESPN knows it by rather than only to the one on a card.
-    const names = `${ev.away} ${ev.home}`;
-    if (!wanted.some(team => names.includes(team))) continue;
+    if (!wanted.some(w => matchesScheduleSide(ev, w))) continue;
     if (coveredByProvider(ev, pairs)) continue;
     picked.push(ev);
   }

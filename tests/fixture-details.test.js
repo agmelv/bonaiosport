@@ -62,7 +62,11 @@ const HAWKS = event(NOW + 2 * DAY, 'Saint Anselm Hawks', 'Bentley Falcons', {
   homeShort: 'Saint Anselm', awayShort: 'Bentley'
 });
 
-homeAway._seed([RAMS, PACKERS, HAWKS, ...BILLS], 'football/nfl');
+// A club whose city is inside its name, which is how a one-word favourite ends
+// up owning three hundred other people's fixtures.
+const CHIEFS = event(NOW + 5 * DAY, 'Kansas City Chiefs', 'Denver Broncos');
+
+homeAway._seed([RAMS, PACKERS, HAWKS, CHIEFS, ...BILLS], 'football/nfl');
 homeAway._persist();
 
 const preview = (m, conf) => catalog._mapMatchToMetaPreview(m, conf || {});
@@ -186,6 +190,16 @@ const CHANNEL_CUBS = {
     'even when the viewer names the club by nickname alone');
   const withChannel = await tab('teams', { teams: 'Chicago Cubs' }, [PROVIDER_CUBS, CHANNEL_CUBS]);
   t(1, withChannel.length, 'and a club\'s own 24/7 channel is not a game it is playing');
+
+  // The fixtures nobody streams yet are read the same way. A club's city is
+  // inside its name, so a one-word favourite used to collect every club that
+  // shares the word: "city" matched 357 of the 6,628 fixtures in a sampled
+  // scoreboard, every Kansas City Chiefs game among them.
+  const chiefs = pending(await tab('teams', { teams: 'Kansas City Chiefs' }));
+  t(1, chiefs.length, 'a club named in full still brings its scheduled fixture');
+  const city = pending(await tab('teams', { teams: 'City' }));
+  t(0, city.filter(m => /Chiefs/.test(m.name || '')).length,
+    'but a word their name merely contains does not make the fixture theirs');
 
   // ESPN indexes one event per board, per day, per pair of sides, so the two
   // halves of a doubleheader are a single entry naming the first of them, and
