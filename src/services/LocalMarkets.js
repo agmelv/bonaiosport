@@ -138,6 +138,32 @@ const NETWORK_NAME = {
 const TITLE_RE = /^(FOX|ABC|CBS|NBC|CW|MNT|MyNetworkTV|PBS|Telemundo|Univision)\s+(\d+(?:\.\d+)?)\b/i;
 
 /** The network and channel number a feed's stream titles spell out: "FOX 32 Chicago IL (WFLD)". */
+/**
+ * Every US city iptv-org files a feed against.
+ *
+ * resolveMarkets() answers "which cities did somebody ask for". This answers
+ * "which cities are there at all", so a station gets a tile of its own whether
+ * or not anybody named its city -- a viewer looking for FOX 32 Chicago should
+ * not have to know to type Chicago first. The shape is deliberately the one
+ * resolveMarkets returns, because the caller reads .code, .name and .label off
+ * both without caring which produced them.
+ *
+ * Cities with no feed are skipped rather than carried as empty markets: there
+ * are thousands of them and not one would produce a tile.
+ */
+function allMarkets(cities, feedsByCity) {
+  const out = [];
+  for (const c of cities || []) {
+    if (!c || c.country !== 'US' || !c.name || !c.code) continue;
+    const feeds = feedsByCity && typeof feedsByCity.get === 'function' ? feedsByCity.get(c.code) : null;
+    if (!feeds || !feeds.length) continue;
+    const state = String(c.subdivision || '').split('-')[1] || '';
+    const name = c.name === 'New York City' ? 'New York' : c.name;
+    out.push({ name, state, code: c.code, label: state ? `${name}, ${state}` : name });
+  }
+  return out;
+}
+
 function networkOfTitles(titles) {
   for (const t of titles || []) {
     const m = String(t || '').match(TITLE_RE);
@@ -262,6 +288,6 @@ function wantedMarkets() {
 }
 
 module.exports = {
-  parseMarkets, marketsSetting, resolveMarkets, stationName, isNewsStream, networkOfTitles, networkHome, isLocalTo, wantedMarkets,
+  parseMarkets, marketsSetting, resolveMarkets, allMarkets, stationName, isNewsStream, networkOfTitles, networkHome, isLocalTo, wantedMarkets,
   NETWORK_CHANNEL, NETWORK_NAME, stateCode, norm, MAX_MARKETS_CHARS, MAX_MARKETS
 };

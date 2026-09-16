@@ -11,7 +11,7 @@ const path = require('path');
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aiosports-markets-'));
 const {
-  parseMarkets, marketsSetting, resolveMarkets, stationName, isNewsStream, networkHome, isLocalTo, wantedMarkets, stateCode, MAX_MARKETS
+  parseMarkets, marketsSetting, resolveMarkets, allMarkets, stationName, isNewsStream, networkHome, isLocalTo, wantedMarkets, stateCode, MAX_MARKETS
 } = require('../src/services/LocalMarkets');
 const { stationOrder } = require('../src/services/StationLabel');
 
@@ -80,6 +80,35 @@ t('Fox.us', networkHome(['WFLD-DT1', 'FOX 32 Chicago IL (WFLD)'], 'MNT.us'), 'FO
 t(null, networkHome(['FOX 10 Phoenix AZ (KSAZ)'], 'Fox.us'), 'a feed where it belongs stays');
 t(null, networkHome(['KSAZ-DT1'], 'Fox.us'), 'a feed that says nothing stays');
 t(null, networkHome(['ABC 2 Portland OR (KATU)'], 'ESPN.us'), 'only the network channels are re-homed');
+
+console.log('--- every city with a feed, not only the ones somebody named');
+// resolveMarkets answers "which cities did somebody ask for"; allMarkets
+// answers "which cities are there", so a station is its own tile wherever it
+// is. Same shape, because the caller reads .code/.name/.label off either.
+const everyCity = [
+  { code: 'USCHI', name: 'Chicago', country: 'US', subdivision: 'US-IL' },
+  { code: 'USNYC', name: 'New York City', country: 'US', subdivision: 'US-NY' },
+  { code: 'USNOF', name: 'Nofeeds', country: 'US', subdivision: 'US-KS' },
+  { code: 'CATOR', name: 'Toronto', country: 'CA', subdivision: 'CA-ON' },
+  { code: 'USNST', name: 'Stateless', country: 'US' }
+];
+const cityFeeds = new Map([
+  ['USCHI', [{ channel: 'NBC.us', id: 'WMAQTV' }]],
+  ['USNYC', [{ channel: 'Fox.us', id: 'WNYW' }]],
+  ['CATOR', [{ channel: 'CBC.ca', id: 'X' }]],
+  ['USNST', [{ channel: 'PBS.us', id: 'Y' }]]
+]);
+const A = allMarkets(everyCity, cityFeeds);
+t(['USCHI=Chicago, IL', 'USNYC=New York, NY', 'USNST=Stateless'],
+  A.map(m => `${m.code}=${m.label}`), 'a market for every US city that has a feed');
+t('New York', (A.find(m => m.code === 'USNYC') || {}).name,
+  '"New York City" is called New York, the way resolveMarkets calls it');
+t(true, !A.some(m => m.code === 'CATOR'), 'a city outside the US is not one of ours');
+t(true, !A.some(m => m.code === 'USNOF'), 'a city with no feed would only ever be an empty tile');
+t('', (A.find(m => m.code === 'USNST') || {}).state, 'a city with no subdivision has no state, and its label is just the name');
+t([], allMarkets(everyCity, new Map()), 'no feeds anywhere is no markets');
+t([], allMarkets(null, cityFeeds), 'and no cities is no markets');
+t([], allMarkets(everyCity, null), 'nor an index that never loaded');
 
 console.log('--- the 📍 Local tab');
 const markets = parseMarkets('Chicago, Knoxville TN, Phoenix');

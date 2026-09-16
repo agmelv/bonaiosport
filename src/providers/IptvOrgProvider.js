@@ -6,7 +6,7 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { stationLabel, callSign } = require('../services/StationLabel');
 const {
-  wantedMarkets, resolveMarkets, stationName, isNewsStream, networkOfTitles, networkHome, NETWORK_CHANNEL, NETWORK_NAME
+  allMarkets, stationName, isNewsStream, networkOfTitles, networkHome, NETWORK_CHANNEL, NETWORK_NAME
 } = require('../services/LocalMarkets');
 
 /**
@@ -255,7 +255,12 @@ class IptvOrgProvider extends BaseProvider {
       // The stations of the cities anyone here has asked for, each to be a tile
       // of its own. A feed is one station; its streams are the ones filed on
       // that feed, not the channel's national ones.
-      const markets = resolveMarkets(wantedMarkets(), places.cities, code => places.feedCount.get(code) || 0);
+      // Every city iptv-org has a feed for, not only the ones a profile named.
+      // A station is its own tile wherever it is -- "FOX 32 Chicago", "NBC 5
+      // Chicago News" -- so the network tiles stop being a bag of forty
+      // stations. The cities a profile *did* name still decide the 📍 Local tab
+      // and which stations sort first; that reads the setting, not this list.
+      const markets = allMarkets(places.cities, places.feedsByCity);
       const localCandidates = [];
       const candidateKeys = new Set();   // a feed broadcast to two wanted cities is one station
       for (const market of markets) {
@@ -297,6 +302,26 @@ class IptvOrgProvider extends BaseProvider {
         try { return alive.has(new URL(s.url).hostname); } catch (e) { return false; }
       };
 
+      // The stations that will get a tile of their own below. Keyed on the feed
+      // the stream is *filed* under, which for a misfiled station is not the
+      // tile it ends up on: WFLD is filed under MNT and adopted onto FOX.
+      //
+      // Computed with `some(reachable)` -- the same test the loop below uses to
+      // decide whether to build the tile at all. Keying on the candidate list
+      // instead would trim a stream off the network tile whose station then
+      // never appeared, and it would be gone from both.
+      const promoted = new Set();
+      for (const cand of localCandidates) {
+        if (cand.streams.some(reachable)) promoted.add(`${cand.feed.channel}/${cand.feed.id}`);
+      }
+      const promotedAway = (s) => promoted.has(`${s.channel}/${String(s.feed || '')}`);
+
+      // What this actually takes off a network tile, which is *not*
+      // promoted.size: most promoted stations -- a city's own channel, a school
+      // district's -- were never on a network tile to be taken off one.
+      let trimmed = 0;
+      for (const c of wanted) for (const s of streamsOf(c.id)) if (reachable(s) && promotedAway(s)) trimmed++;
+
       // What iptv-org's feed list says about a stream's station, for its label.
       const filedFor = (channel, feedId) => {
         const f = places.feedByKey.get(`${channel}/${feedId}`);
@@ -324,7 +349,11 @@ class IptvOrgProvider extends BaseProvider {
 
       const matches = [];
       for (const c of wanted) {
-        const usable = streamsOf(c.id).filter(reachable);
+        // What is left once its stations have their own tiles: the national
+        // feed and its coastal variants ("Fox", "Fox West"). A network whose
+        // every stream was a local station has nothing left and is skipped,
+        // which is right -- CW and MNT are only ever local stations.
+        const usable = streamsOf(c.id).filter(s => reachable(s) && !promotedAway(s));
         if (!usable.length) continue;
 
         const logo = logoUrl(c.id);
@@ -405,8 +434,10 @@ class IptvOrgProvider extends BaseProvider {
         + `(${hosts.size - alive.size} of ${hosts.size} stream hosts are gone, `
         + `${matches.filter(m => m.logo).length} with a logo`
         + (homeOf.size ? `, ${homeOf.size} station feeds moved to their own network` : '') + ')');
-      if (markets.length) {
-        console.log(`[${this.name}] local stations: ${markets.map(m => `${m.label} ${perMarket.get(m.label) || 0}`).join(', ')}`);
+      if (perMarket.size) {
+        const stations = [...perMarket.values()].reduce((a, b) => a + b, 0);
+        console.log(`[${this.name}] local stations: ${stations} in ${perMarket.size} cities`
+          + `, ${trimmed} streams taken off a network's tile`);
       }
       return matches;
     } catch (error) {
