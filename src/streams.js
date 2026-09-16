@@ -14,9 +14,104 @@ const SOURCE_HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS) || 9
 // handleStream -- and is kept as the point past which a partial list would be
 // served, should that ever be wanted again.
 
+const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'streamfree': 8, 'timstreams': 9, 'usatv': 10, 'sportyhunter': 12, 'streamsports': 13, 'iptv-org': 14, 'embedindia': 15 };
+
+// What each source is called on a stream row.
+//
+// The name is the whole of what the viewer knows about where a row came from,
+// and it is the one thing on the list they can act on: a provider that failed
+// them last night is a provider they skip tonight. So every source the addon
+// resolves needs its own entry here. admin, echo, delta and golf are the names
+// streamed.pk gives its own feeds, so they read as the site they belong to.
+const PROVIDER_NAMES = {
+  streamedpk: 'Streamed.pk',
+  admin: 'Streamed.pk', echo: 'Streamed.pk', delta: 'Streamed.pk', golf: 'Streamed.pk',
+  watchfooty: 'WatchFooty', cdnlive: 'CDNLiveTV',
+  streamsports99: 'StreamSports99', streamsports: 'StreamSports',
+  streamic: 'Streamic', streamfree: 'StreamFree', timstreams: 'TimStreams',
+  sportyhunter: 'SportyHunter', usatv: 'USA TV', 'iptv-org': 'Direct IPTV',
+  embedindia: 'EmbedIndia', embedst: 'Embed.st'
+};
+
+// A source nothing here has a name for. Vague, and deliberately so: a row that
+// borrows the name of a provider it did not come from is worse than a row that
+// admits it does not know, because the viewer has no way to tell it is wrong.
+const UNKNOWN_PROVIDER = 'Live stream';
+
+/** What a source is called on screen, or '' when the source itself is unknown. */
+function sourceLabel(source) {
+  if (!source) return '';
+  // A YAML provider is whatever the file that defined it was called, which is
+  // also what the configure page shows against it.
+  if (source.startsWith('yaml_')) return source.slice('yaml_'.length) || UNKNOWN_PROVIDER;
+  return PROVIDER_NAMES[source] || UNKNOWN_PROVIDER;
+}
+
+// How each provider's streams have been answering lately.
+//
+// Verification already pings every playlist before it is served, so which
+// providers are handing out links that play and which are handing out dead ones
+// is measured on every mint -- it was simply thrown away afterwards. Kept per
+// provider rather than per URL, because a token expiring is one stream and a
+// provider whose whole edge is down is every stream it will offer next.
+//
+// The counts halve every quarter of an hour, so an outage fades within the hour
+// and only a provider that keeps failing stays marked down. None of it is
+// written to disk: a restart re-learns this in minutes, and a verdict formed
+// before a restart describes tokens that no longer exist.
+const HEALTH_HALF_LIFE_MS = 15 * 60 * 1000;
+const sourceHealthTally = new Map();
+
+function decayTally(entry, now) {
+  const factor = Math.pow(0.5, (now - entry.at) / HEALTH_HALF_LIFE_MS);
+  entry.successes *= factor;
+  entry.failures *= factor;
+  entry.at = now;
+  return entry;
+}
+
+/** Record one verification outcome against the provider it belongs to. */
+function noteOutcome(source, ok) {
+  if (!source) return;
+  const now = Date.now();
+  const entry = sourceHealthTally.get(source) || { successes: 0, failures: 0, lastFailAt: 0, at: now };
+  decayTally(entry, now);
+  if (ok) {
+    entry.successes += 1;
+  } else {
+    entry.failures += 1;
+    entry.lastFailAt = now;
+  }
+  sourceHealthTally.set(source, entry);
+}
+
+/** A provider's recent record, in the shape the scorer reads, or undefined. */
+function sourceHealth(source) {
+  const entry = source && sourceHealthTally.get(source);
+  if (!entry) return undefined;
+  const { successes, failures, lastFailAt } = decayTally(entry, Date.now());
+  return { successes, failures, lastFailAt };
+}
+
+/**
+ * Which provider a verification outcome counts against, or '' for none.
+ *
+ * The stream carries its own source, and the cache key names it for anything
+ * minted before it did. Nothing is counted under `opts.strict`, which is the
+ * channel sweep: that sweep walks every channel there is on a timer, including
+ * the ones it already believes are dead -- deciding that is the whole of what
+ * it is for -- so its failures say nothing about whether a provider is
+ * answering a viewer. Counted, they would mark down whichever provider carries
+ * the most channels, and iptv-org carries hundreds, on the strength of streams
+ * nobody ever asked for.
+ */
+function tallySource(s, cacheKey, opts = {}) {
+  if (opts.strict) return '';
+  return (s && s._source) || (cacheKey ? String(cacheKey).split(':')[0] : '');
+}
+
 // Source selection (shared by handleStream and prewarmMatch)
 function selectSources(matchSources, config) {
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'streamfree': 8, 'timstreams': 9, 'usatv': 10, 'sportyhunter': 12, 'streamsports': 13, 'iptv-org': 14, 'embedindia': 15 };
 
   // A user-defined order, set in the configure page, outranks the built-in
   // priorities entirely — it is an explicit preference, where SOURCE_PRIORITY
@@ -206,6 +301,9 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
     // We only pre-flight check direct streams (m3u8 urls). Web player links are kept blindly.
     if (!s.url || s.url.includes('/watch?')) return s;
 
+    // Which provider is answering for this row, for the tally.
+    const source = tallySource(s, cacheKey, opts);
+
     let targetUrl = s.url;
     let referer = '';
     let origin = '';
@@ -263,6 +361,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         if (opts.report) opts.report.errors++;
         console.log(`[Filter] Dropped timeout/error stream: ${redactUrl(targetUrl)} - ${fetchErr.message}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
+        noteOutcome(source, false);
         return null;
       }
 
@@ -273,6 +372,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         if (opts.report && res.status >= 500) opts.report.errors++;
         console.log(`[Filter] Dropped dead stream (${res.status}): ${redactUrl(targetUrl)}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
+        noteOutcome(source, false);
         return null;
       }
 
@@ -282,6 +382,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         if (opts.report) opts.report.errors++;
         console.log(`[Filter] Dropped throttled stream (${res.status}): ${redactUrl(targetUrl)}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
+        noteOutcome(source, false);
         return null;
       }
 
@@ -290,6 +391,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       if (!bodySample.includes('#EXT')) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${redactUrl(targetUrl)}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
+        noteOutcome(source, false);
         return null;
       }
 
@@ -302,10 +404,12 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       }
 
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
+      noteOutcome(source, true);
       return s;
     } catch (err) {
       if (opts.report) opts.report.errors++;
       console.log(`[Filter] Dropped timeout/error stream: ${redactUrl(targetUrl)} - ${err.message}`);
+      noteOutcome(source, false);
       return null;
     }
   }));
@@ -318,8 +422,24 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
+  const streamScorer = container.resolve('streamScorer');
   const minted = await resolveSource(src, match, config, opts);
-  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, opts);
+  const verified = await verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, opts);
+
+  // Scored again, now that something has looked at the stream.
+  //
+  // The first score is struck before verification, when the only evidence is
+  // the sentence the provider wrote, so a stream that turns out to be 1080p was
+  // ranked on whether its provider happened to say so. Verification has since
+  // read the master playlist and written the real size and bitrate onto the
+  // row, and the checks above have said whether this provider is answering at
+  // all -- both of which the score should reflect, since this is the score the
+  // cache keeps and every later request sorts on.
+  for (const s of verified) {
+    const source = s._source || src.source;
+    s.score = streamScorer.calculateScore(s, source, sourceHealth(source));
+  }
+  return verified;
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
@@ -346,6 +466,75 @@ async function prewarmMatch(match, config, topN = 12) {
 }
 
 
+/**
+ * The host a row will really be played from, seen through our own links.
+ *
+ * A stream that goes out as an /api/manifest or /api/segment link carries the
+ * upstream it stands for in its `url` parameter, and that upstream is the
+ * machine that buffers or does not. Our own hostname says nothing about any of
+ * them, so it is read out of the query first and only used when there is none.
+ */
+function upstreamHost(s) {
+  const raw = s && s.url;
+  if (!raw) return '';
+  try {
+    const link = new URL(String(raw), 'http://addon.invalid');
+    const inner = link.searchParams.get('url');
+    if (inner) {
+      try { return new URL(inner).hostname; } catch (e) { /* not a url: ours below */ }
+    }
+    return link.hostname;
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Spread the head of the list across hosts.
+ *
+ * Five rows from five providers are often five links to the same edge server,
+ * and when that server is having a bad minute all five have it together: the
+ * viewer works down the list and every attempt fails the same way, having
+ * looked like five separate chances. Taking the best row per host in turn puts
+ * a genuinely different machine second, so the second choice is a second
+ * chance. Only the head is alternated: by the time the best row of every host
+ * has been offered the viewer has already tried every machine there is, so a
+ * further round buys no new chance and would only push a good row below a
+ * markedly worse one from a thinner host. Everything after that head keeps the
+ * score order it arrived in. Where every host is already different this
+ * changes nothing, and it never drops a row or renames one -- the set that
+ * goes out is the set that came in, in a different order.
+ */
+function spreadHosts(rows) {
+  const queues = new Map();
+  rows.forEach((s, i) => {
+    // A row with no upstream of its own -- a web player link -- shares its fate
+    // with nobody, so it has no rotation to take part in and earns no place at
+    // the head: it stays where its score put it, below the rows that alternate.
+    const key = upstreamHost(s);
+    if (!key) return;
+    if (!queues.has(key)) queues.set(key, []);
+    queues.get(key).push(i);
+  });
+  const promoted = new Set();
+  const out = [];
+  for (const q of queues.values()) {
+    out.push(rows[q[0]]);
+    promoted.add(q[0]);
+  }
+  rows.forEach((s, i) => { if (!promoted.has(i)) out.push(s); });
+  return out;
+}
+
+// How many sources are resolved at once.
+//
+// All of them started together, and several mint a token and decrypt a player
+// page before they can answer at all. A dozen of those on a two-core host
+// contend for the same two cores, so each takes longer than it would have
+// alone and the deadline below can expire on work that was only ever waiting
+// for a core. Four keeps both cores busy without the queue eating itself.
+const SOURCE_CONCURRENCY = 4;
+
 async function handleStream(type, id, config) {
   if (type !== 'tv' || !id.startsWith('nuvio_sport_')) {
     return { streams: [] };
@@ -368,36 +557,30 @@ async function handleStream(type, id, config) {
 
   const resolveCache = container.resolve('streamResolveCache');
 
-  const resolvePromises = activeSources.map(async (src) => {
-    const key = `${src.source}:${matchId}:${src.id}`;
-    const minted = await resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config, key));
-    return minted.map((s) => ({ ...s, _cacheKey: key }));
-  });
-
   // Wait for the sources, but not for the worst of them.
   //
   // Every source was awaited to completion, so the spinner after Play lasted as
   // long as the slowest one even when a good source had answered in 300 ms --
   // measured at nearly eleven seconds on a match with several sources.
   //
-  // Nothing is discarded by giving up on the wait. Each promise is a
-  // resolveCache.getOrCreate, which stores its result whenever it finishes, so a
-  // straggler keeps going and lands in the cache regardless. It simply arrives
-  // for the next request instead of holding up this one.
+  // Nothing is discarded by giving up on the wait. Each source resolves through
+  // resolveCache.getOrCreate, which stores its result whenever it finishes, so
+  // a straggler keeps going and lands in the cache regardless -- as do the
+  // sources still queued behind it, which the workers below go on starting
+  // after this request has answered. They simply arrive for the next request
+  // instead of holding up this one.
   const collected = [];
-  let finished = 0;
   const startedAt = Date.now();
-  let markAllDone;
-  const allDone = new Promise(resolve => { markAllDone = resolve; });
 
-  for (const p of resolvePromises) {
-    p.then(
-      value => { if (Array.isArray(value)) collected.push(...value); },
-      () => { /* a failed source is one fewer option, not an error */ }
-    ).finally(() => {
-      if (++finished === resolvePromises.length) markAllDone();
-    });
-  }
+  const allDone = mapLimit(activeSources, SOURCE_CONCURRENCY, async (src) => {
+    const key = `${src.source}:${matchId}:${src.id}`;
+    try {
+      const minted = await resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config, key));
+      for (const s of minted) collected.push({ ...s, _cacheKey: key });
+    } catch (e) {
+      // a failed source is one fewer option, not an error
+    }
+  }).catch(() => {});
 
   // Wait for every source, capped by the hard deadline.
   //
@@ -420,10 +603,8 @@ async function handleStream(type, id, config) {
   // is to keep refreshing until it settles. Waiting costs seconds, and only on
   // a cold open -- a warmed match answers in well under a second, which is what
   // the prewarming in catalog.js is for.
-  if (finished < resolvePromises.length) {
-    const remaining = SOURCE_HARD_DEADLINE_MS - (Date.now() - startedAt);
-    if (remaining > 0) await Promise.race([allDone, sleep(remaining)]);
-  }
+  const remaining = SOURCE_HARD_DEADLINE_MS - (Date.now() - startedAt);
+  if (remaining > 0) await Promise.race([allDone, sleep(remaining)]);
 
   streams.push(...collected);
 
@@ -447,8 +628,8 @@ async function handleStream(type, id, config) {
         return resolved.map((s) => ({ ...s, _cacheKey: key }));
       }));
       warmed.flat().forEach((s) => {
-        s.score = streamScorer.calculateScore(s, 'streamfree');
         s._source = 'streamfree';
+        s.score = streamScorer.calculateScore(s, 'streamfree', sourceHealth('streamfree'));
         streams.push(s);
       });
     } catch (e) {
@@ -462,15 +643,6 @@ async function handleStream(type, id, config) {
     basketball: '🏀', american_football: '🏈', rugby: '🏉', networks: '📺'
   };
   const icon = sportIcons[match.category] || '📡';
-  
-  const niceNames = {
-    streamfree: 'StreamFree', timstreams: 'TimStreams',
-    sportyhunter: 'SportyHunter', streamsports: 'StreamSports',
-    'iptv-org': 'Direct IPTV', 'streamsports99': 'StreamSports99',
-    'streamic': 'Streamic',
-    'embedindia': 'EmbedIndia', 'embedst': 'Embed.st', 'streamedpk': 'Streamed.pk',
-    'usatv': 'USA TV'
-  };
 
   streams.forEach(s => {
     let quality = s.resolution || s.quality || 'Auto';
@@ -480,19 +652,21 @@ async function handleStream(type, id, config) {
     }
     
     const isWeb = !!s.externalUrl || s.name === 'Nuvio Web Player';
-    // The scorer attached the sourceName as _source in calculateScore? No, we didn't attach it.
-    // Wait, streamScorer doesn't attach sourceName to s.
-    // I can determine providerName from the string it already had.
-    let providerName = niceNames[s._source] || niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] || 'Streamed.pk';
-    
-    if (s.title && s.title.toLowerCase().includes('timstreams')) providerName = 'TimStreams';
-    else if (s.title && s.title.toLowerCase().includes('sporty')) providerName = 'SportyHunter';
-    else if (s.title && s.title.toLowerCase().includes('streamfree')) providerName = 'StreamFree';
-    else if (s.title && s.title.toLowerCase().includes('watchfooty')) providerName = 'WatchFooty';
-    else if (s.title && s.title.toLowerCase().includes('cdnlive')) providerName = 'CDNLiveTV';
-    else if (s.title && s.title.toLowerCase().includes('streamsports99')) providerName = 'StreamSports99';
-    else if (s.title && s.title.toLowerCase().includes('streamic')) providerName = 'Streamic';
-    else if (s.title && s.title.toLowerCase().includes('24/7')) providerName = 'Direct IPTV';
+
+    // The row is named after the source it came from, which resolveSource
+    // attaches to every stream it returns. Where a stream somehow arrives
+    // without one there is nothing left to read but the title the provider
+    // wrote, and two of them sign their work there; everything else gets the
+    // neutral name. Guessing a provider is worse than admitting none: the
+    // viewer's own strategy is "that site worked last night, try it again",
+    // and a row wearing somebody else's name quietly ruins it.
+    let providerName = sourceLabel(s._source);
+    if (!providerName) {
+      const said = String(s.title || '').toLowerCase();
+      if (said.includes('timstreams')) providerName = 'TimStreams';
+      else if (said.includes('sporty')) providerName = 'SportyHunter';
+      else providerName = UNKNOWN_PROVIDER;
+    }
 
     let originalTitle = s.title || '';
     let channelName = '';
@@ -617,6 +791,18 @@ async function handleStream(type, id, config) {
     }
     return (b.score - a.score) || byStation(a, b);
   });
+
+  // Then spread the hosts, within each kind's block so that which kind comes
+  // first stays the viewer's decision rather than an accident of which CDN a
+  // web player happened to point at.
+  const direct = () => spreadHosts(streams.filter(s => s.url));
+  const web = () => spreadHosts(streams.filter(s => !s.url));
+  const spread = !groupByKind ? spreadHosts(streams)
+    : webFirst ? [...web(), ...direct()]
+    : [...direct(), ...web()];
+  streams.length = 0;
+  streams.push(...spread);
+
   for (const s of streams) { delete s.station; delete s.stationSort; }
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
@@ -748,5 +934,15 @@ async function countChannelStreams(matchId) {
 module.exports = {
   handleStream,
   prewarmMatch,
-  countChannelStreams
+  countChannelStreams,
+  _sourceLabel: sourceLabel,
+  _PROVIDER_NAMES: PROVIDER_NAMES,
+  _SOURCE_PRIORITY: SOURCE_PRIORITY,
+  _noteOutcome: noteOutcome,
+  _sourceHealth: sourceHealth,
+  _tallySource: tallySource,
+  _upstreamHost: upstreamHost,
+  _spreadHosts: spreadHosts,
+  _mapLimit: mapLimit,
+  _SOURCE_CONCURRENCY: SOURCE_CONCURRENCY
 };
