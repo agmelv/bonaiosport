@@ -446,6 +446,26 @@ function _categoryFromCrests(match) {
   return _categoryOfCompetition(comp);
 }
 
+/**
+ * A fixture whose title is the separator and nothing else.
+ *
+ * Streamed.pk publishes the occasional "vs" with neither side filled in. It
+ * names no event, resolves to no teams and no competition, so it arrives as a
+ * blank grey tile in whichever tab its category happens to point at.
+ *
+ * Deliberately narrow. An event that simply has one name rather than two — a
+ * UFC card, a WWE show, a race meeting — is a real event people watch: of the
+ * nine fixtures in a sampled catalog that resolved to no matchup at all, eight
+ * were exactly that and only this one named nothing. Having no two sides is
+ * therefore not the test; having no name is.
+ */
+const NAMES_NOTHING = /^[^a-z0-9]*(?:vs?\.?|at|@)?[^a-z0-9]*$/i;
+function _namesNothing(match) {
+  if (!match) return false;
+  if (match.team1 || match.team2) return false;
+  return NAMES_NOTHING.test(String(match.title || ''));
+}
+
 class MatchAggregator {
   constructor({ streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, totalSportekProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, usaTvProvider, iptvOrgProvider, cacheService, yamlProviders }) {
     this.providers = [streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, totalSportekProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, usaTvProvider, iptvOrgProvider, ...(yamlProviders || [])];
@@ -837,6 +857,9 @@ class MatchAggregator {
     }
 
     const activeMatches = finalMatches.filter(match => {
+      // Dropped here rather than in the tabs: a tile that names no event is not
+      // any one tab's problem.
+      if (_namesNothing(match)) return false;
       let kickoff = 0;
       if (match.date) {
         const parsed = Number(match.date);
@@ -884,4 +907,4 @@ class MatchAggregator {
 }
 
 module.exports = MatchAggregator;
-module.exports._internal = { _compoundify, _stripNoise, _tokenize, _teamsSimilar, _tryExtractTeams, _categoryOfCompetition, _categoryFromCrests };
+module.exports._internal = { _compoundify, _stripNoise, _tokenize, _teamsSimilar, _tryExtractTeams, _categoryOfCompetition, _categoryFromCrests, _namesNothing };

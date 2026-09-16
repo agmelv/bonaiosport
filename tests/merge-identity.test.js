@@ -27,6 +27,21 @@ const t = (want, got, label) => {
   console.log(`  ${ok ? 'PASS' : '*** FAIL'}  ${label}  (want ${want}, got ${got})`);
 };
 
+console.log('--- a listing that names no event at all');
+// Having one name rather than two is ordinary and must survive: a sampled
+// catalog held nine fixtures no matchup resolved for, and eight of them were
+// real events people watch. Only the ninth named nothing.
+const { _namesNothing } = require('../src/services/MatchAggregator')._internal;
+t(true, _namesNothing({ title: 'vs' }), 'the separator on its own names nothing');
+t(true, _namesNothing({ title: ' VS. ' }), 'however it is spelled or spaced');
+t(true, _namesNothing({ title: '@' }), 'and an at-sign is no better');
+t(false, _namesNothing({ title: 'AEW Wednesday Night Dynamite' }), 'a show with one name is a real event');
+t(false, _namesNothing({ title: 'Millbridge Speedway 💥' }), 'so is a race meeting');
+t(false, _namesNothing({ title: 'WTA 500 Guadlajara / WTA 250 Sao Paulo 🎾' }), 'so are two tournaments on one card');
+t(false, _namesNothing({ title: 'Braves @ Cubs' }), 'and a fixture with two sides certainly is');
+t(false, _namesNothing({ title: 'vs', team1: { name: 'Chicago Cubs' } }),
+  'a title that says nothing is kept when a side says something');
+
 console.log('--- the bug: different college games sharing a US channel embed');
 const usa1 = ev('ts_howard-bison-v-indiana-hoosiers-401858439', 'Howard Bison @ Indiana Hoosiers',
                 'american_football', D, ['https://epiembeds.online/embed/big10-usa']);
