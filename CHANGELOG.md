@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0 (2026-09-16)
+
+A sources release, and a short one. Adding a site is only worth the code if it can be up when the others are down — and most of the ones worth checking are not: they land on embeds this addon already resolves, or were seized over the summer, or are parked. TotalSportek is the exception, on infrastructure nothing else here touches, so a bad minute on one edge is not a bad minute on both. It is on by default and can be turned off like any other source in `/configure`.
+
+### Features
+
+* **providers:** add totalsportek, whose playlists come off a chain no other source here reaches, so its streams fail at different times to theirs; the listing is read once per sync and the five-hop walk down to a playlist waits until a viewer opens a tile, since the pages it needs are a hundred and ten of them at some 142 KB each ([463482e](https://github.com/mlp2069/aiosports/commit/463482e))
+
 ## v1.1.0 (2026-09-15)
 
 A fixtures release. The scoreboards this addon reads had stopped answering the way it was asking, and nothing said so: most of the catalog had quietly lost which side was at home and which badge belonged on the card. Repairing that turned out to pay for the rest, because the same responses already carried the kickoff, the venue and the channel showing the game, and all of it was being thrown away. So a tile now names the network, shows a kickoff worth trusting, and — for the teams you follow — appears days before any site has posted a link. Stream rows say which site they really came from, and are ordered by what was measured rather than what was claimed.

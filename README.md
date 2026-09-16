@@ -4,7 +4,7 @@
 
 # AIOSports
 
-[![Version](https://img.shields.io/badge/version-v1.0.3-brightgreen.svg)](https://github.com/mlp2069/aiosports/releases/latest)
+[![Version](https://img.shields.io/badge/version-v1.2.0-brightgreen.svg)](https://github.com/mlp2069/aiosports/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Forked from](https://img.shields.io/badge/forked_from-rajhodedara%2Flive--sport--plugin-6e7681?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
 [![Ko-fi](https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mlp20)
@@ -186,7 +186,7 @@ What a network station streams free is its 24/7 **news** channel (FOX LOCAL, NBC
 
 ## Sources
 
-StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSports99, Streamic, USA TV and iptv-org. You can turn each one on or off and set the order its streams are listed in, all in `/configure`.
+StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSports99, Streamic, TotalSportek, USA TV and iptv-org. You can turn each one on or off and set the order its streams are listed in, all in `/configure`.
 
 ## FAQ and troubleshooting
 
