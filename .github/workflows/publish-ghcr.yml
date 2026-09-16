@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+      # A branch for changes to this file. Building the image is the only way to
+      # find out whether a change to how it is built works, and finding out on
+      # main means every discovery is published as :latest.
+      - 'ci/**'
     # A release tag publishes the same image under its version as well.
     tags:
       - 'v*'
@@ -14,15 +18,140 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  # Each architecture is built on a runner of that architecture, and neither
+  # knows about the other. The alternative is one runner emulating the other
+  # through QEMU, which turns an npm install and a bundler run into the better
+  # part of an hour on every push; arm64 runners are free to public
+  # repositories, so there is nothing to buy by accepting that.
+  #
+  # Neither job tags anything. A tag can only name one image, and the thing a
+  # viewer pulls has to be the index naming both -- so the halves are pushed by
+  # digest here and the merge job below is what gives them a name.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Name this platform for the artifact it uploads
+        run: echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+        env:
+          platform: ${{ matrix.platform }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          # Scoped per platform: one cache shared by both would have each build
+          # evicting the other's layers on every run.
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+      # The one test that cannot be written anywhere else. sharp and impit are
+      # native binaries, and whether they load on a given architecture is not
+      # something the unit tests can answer -- they run on whatever built them.
+      # This runner is the architecture in question, so it simply starts the
+      # image and asks.
+      #
+      # impit is checked by name because its absence is silent by design: the
+      # addon falls back to undici and keeps serving, having lost only the
+      # browser TLS handshake that one of the stream hosts refuses to talk
+      # without. A quiet fallback on arm64 would look exactly like success here.
+      - name: Start the image that was just built, on this architecture
+        run: |
+          set -euo pipefail
+          ref="${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}"
+          echo "running $ref"
+          docker run -d --name smoke -e DATA_DIR=/data -p 7000:7000 "$ref"
+
+          ok=
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:7000/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+
+          # `|| true` because of pipefail above: head closes the pipe as soon as
+          # it has its sixty lines, docker logs dies of it, and the step would
+          # fail over a healthy image having said too much.
+          echo "--- first 60 lines of the log"
+          docker logs smoke 2>&1 | head -60 || true
+
+          if [ -z "$ok" ]; then
+            echo "::error::the image did not answer /health on ${{ matrix.platform }}"
+            exit 1
+          fi
+          echo "health: $(curl -fsS http://127.0.0.1:7000/health)"
+
+          if docker logs smoke 2>&1 | grep -q 'impit native client loaded successfully'; then
+            echo "impit: native client loaded on ${{ matrix.platform }}"
+          elif docker logs smoke 2>&1 | grep -q 'impit unavailable'; then
+            echo "::error::impit fell back to undici on ${{ matrix.platform }}; the hosts that require a browser handshake would stop resolving"
+            exit 1
+          else
+            echo "::error::the image said nothing about impit either way; the check above needs revisiting"
+            exit 1
+          fi
+
+          docker rm -f smoke >/dev/null
+
+      - name: Export the digest for the merge below
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload the digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # What actually gets a name. Both halves are already in the registry; this
+  # writes the index that points a single tag at each of them, so `docker pull`
+  # on an Ampere box and on an x86 one resolve the same tag to different images.
+  merge:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Download the digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -44,12 +173,16 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,prefix=
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create the manifest list and push it
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${REGISTRY}/${IMAGE_NAME}@sha256:%s " *)
+
+      # Printed so a failed pull on someone's server can be checked against what
+      # was actually published, rather than against what this file intended.
+      - name: Show what was published
+        run: |
+          docker buildx imagetools inspect \
+            "${REGISTRY}/${IMAGE_NAME}:${{ steps.meta.outputs.version }}"

@@ -83,7 +83,7 @@ If the manifest id or the tabs changed in a release, the release notes say so. I
 
 ### Prebuilt image
 
-Every push to `main` publishes `ghcr.io/mlp2069/aiosports:latest`. It is **linux/amd64 only**. On a Raspberry Pi or another ARM machine, build from source with the Quick start steps instead.
+Every push to `main` publishes `ghcr.io/mlp2069/aiosports:latest` for **linux/amd64 and linux/arm64**. The command below is the same on either: Docker reads your machine's architecture and pulls the matching one. That covers an Oracle Cloud Ampere instance, a Raspberry Pi 4 or 5, and an Apple Silicon Mac, as well as an ordinary x86 server.
 
 ```bash
 docker run -d --name aiosports -p 7000:7000 \
