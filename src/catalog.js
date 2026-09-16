@@ -1,7 +1,10 @@
+const fs = require('fs');
+const path = require('path');
 const container = require('./container');
 const { getChannelLogo } = require('./services/ChannelLogoService');
 const { prewarmMatch, countChannelStreams } = require('./streams');
-const { BASE_URL } = require('./config');
+const { BASE_URL, DATA_DIR } = require('./config');
+const MatchEntity = require('./domain/MatchEntity');
 const imageService = require('./services/ImageService');
 const teamLogoService = require('./services/TeamLogoService');
 const homeAway = require('./services/HomeAwayService');
@@ -22,6 +25,20 @@ const VISITOR_FIRST = /\s(?:@|at)\s/i;
 // Matches the suffix the manifest puts on a search twin, escaped from the
 // constant so the two can never drift apart.
 const SEARCH_TWIN_SUFFIX_RE = new RegExp(SEARCH_TWIN_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$');
+
+// How far a provider's kickoff may sit from ESPN's before the card stops
+// believing it. A few minutes is rounding, or a listing written before the
+// broadcast window was fixed; a whole hour is a provider that read the wrong
+// zone, and the providers do that often enough to be worth overruling.
+const KICKOFF_DRIFT_MS = 15 * 60 * 1000;
+
+// And how far it may sit before the two are not the same game at all. The index
+// answers per board, per day and per team pair, so two meetings of the same two
+// sides on one day — a doubleheader, which baseball plays routinely — are a
+// single entry naming the first of them. A provider that read the wrong zone is
+// out by whole hours, three at the most, since that is the width of the country;
+// a second game is further out than that, because the first one has to finish.
+const KICKOFF_MISMATCH_MS = 3 * 60 * 60 * 1000;
 
 /**
  * Warm the fixtures a viewer is most likely to open, while they are still
@@ -56,7 +73,9 @@ function prewarmTopMatches(matches, conf) {
   if (prewarmRunning || now - lastPrewarmAt < PREWARM_EVERY_MS) return;
   lastPrewarmAt = now;
 
-  const live = matches.filter(m => m && m.date && isMatchLive(m)).slice(0, PREWARM_MATCHES);
+  // A fixture ESPN listed and nobody streams has nothing to warm: no source to
+  // scrape, no token to mint.
+  const live = matches.filter(m => m && m.date && !m._scheduleOnly && isMatchLive(m)).slice(0, PREWARM_MATCHES);
   // Popular channels too. A channel has no kickoff, so the live filter above
   // never picks one, and the busiest channels are the slowest to open cold:
   // ESPN carries sixteen Streamed.pk feeds that each need a WASM decrypt, and a
@@ -399,6 +418,10 @@ function mapMatchToMetaPreview(match, config = {}) {
   let orientedByEspn = false;
   let isFixture = false;
   let leagueLogo = null;
+  // Everything else the scoreboard knows about this fixture: the kickoff it
+  // has, and the networks carrying it. Null for a channel and for anything ESPN
+  // does not list, which is what keeps both off the tile below.
+  let espn = null;
   if (matchup) {
     const known = homeAway.orient(matchup.a, matchup.b, matchup.aLogo, matchup.bLogo, match.category, match.date);
     orientedByEspn = !!known;
@@ -406,6 +429,18 @@ function mapMatchToMetaPreview(match, config = {}) {
     isFixture = orientedByEspn || (matchup.aLogos.length > 0 && matchup.bLogos.length > 0);
 
     if (isFixture) {
+      // Looked up before the sides are swapped below, though the index answers
+      // either order — the two names and the two crests are the same pair.
+      espn = homeAway.details(matchup.a, matchup.b, matchup.aLogo, matchup.bLogo, match.category, match.date);
+      // A record whose kickoff is further off than any clock error can account
+      // for is the other meeting of these two sides that day, and everything it
+      // carries belongs to that other game: its hour, and the network showing
+      // it. The second game of a doubleheader was being given the first game's
+      // evening on its tile and the first game's channel on the line below.
+      if (espn && espn.start > 0 && Math.abs(espn.start - parseInt(match.date, 10)) > KICKOFF_MISMATCH_MS) {
+        espn = null;
+      }
+
       // Visitor on the left, the way a scoreboard reads. ESPN is the source;
       // without it the title's own separator is the fallback — "A at B" and
       // "A @ B" name the visitor first, "A vs B" and "A - B" the host.
@@ -638,7 +673,16 @@ function mapMatchToMetaPreview(match, config = {}) {
   let releasedIso = null;
   
   if (match.date && !isNaN(parseInt(match.date)) && parseInt(match.date) > 0) {
-     const dateObj = new Date(parseInt(match.date));
+     const provided = parseInt(match.date);
+     // Whose clock the card reads by. A provider disagreeing with ESPN by more
+     // than a rounding error has typed the wrong hour — every one of them does
+     // it — and ESPN is the schedule of record. Only the card changes:
+     // match.date is what the aggregator merged on, what the sort below orders
+     // by and what the cache is keyed to, so moving it would move all three.
+     const shown = espn && espn.start > 0 && Math.abs(espn.start - provided) > KICKOFF_DRIFT_MS
+       ? espn.start
+       : provided;
+     const dateObj = new Date(shown);
      releasedIso = dateObj.toISOString();
      timeString = formatKickoff(dateObj, config && config.timezone, !(config && config.timeFormat === '24'));
      
@@ -686,10 +730,22 @@ function mapMatchToMetaPreview(match, config = {}) {
     ? `📍 ${match.market}${match.station ? ' · ' + match.station : ''}\n`
       + (match.newsStream ? '📡 The station\'s free news stream, not its broadcast. Games are on their own tiles.\n' : '')
     : '';
+  // Which television network is carrying the game, which is the one thing about
+  // a fixture a viewer cannot work out from anywhere else on the tile. It is a
+  // line of information and not an offer: a network station's free stream is
+  // its news channel rather than the broadcast, which is what the station tiles
+  // above say out loud, so nothing here is something to open.
+  const netStr = espn && espn.net.length && !is247 ? `📡 On ${espn.net.join(', ')}\n` : '';
+  // A fixture ESPN lists that no provider has posted a link to yet. Saying so is
+  // the point of listing it at all — the alternative was a tab that stayed empty
+  // until an hour before kickoff.
+  const pendingStr = match._scheduleOnly
+    ? '⏳ No streams listed yet — they usually appear near kickoff\n'
+    : '';
   const statusStr = is247
     ? 'Live channel'
     : (isLive ? '🔴 LIVE NOW' : `Kickoff at ${timeString}${relativeTimeStr}`);
-  const desc = `${marketStr}${leagueStr}📅 Category: ${categoryLabel(match.category, match._competition)}\n⏰ Status: ${statusStr}`;
+  const desc = `${pendingStr}${marketStr}${leagueStr}${netStr}📅 Category: ${categoryLabel(match.category, match._competition)}\n⏰ Status: ${statusStr}`;
 
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
@@ -718,6 +774,288 @@ function mapMatchToMetaPreview(match, config = {}) {
   }
 
   return metaPreview;
+}
+
+// ─── ESPN's own schedule ──────────────────────────────────────────────────────
+
+/**
+ * The fixtures ESPN lists, read back out of the index HomeAwayService keeps.
+ *
+ * That index answers which side of a named fixture is at home. The ⭐ tab needs
+ * the other question — what is this viewer's team playing next — for games no
+ * site has posted a link to yet, and the same index holds that answer: one
+ * record per event, and every key naming it says which two teams meet, on which
+ * board, on which day.
+ *
+ * It is read from the file the index is persisted to, since that is the copy
+ * reachable from here. A file written under a shape this build does not know
+ * yields nothing at all, which costs the tab the fixtures nobody streams and
+ * leaves every other thing on it as it was.
+ */
+const SCHEDULE_FILE = path.join(DATA_DIR, 'homeaway.json');
+const SCHEDULE_VERSION = 2;
+// As far ahead as a fixture nobody streams is worth a tile. Past a week it stops
+// being what a viewer's team is doing next and becomes the rest of the season.
+const SCHEDULE_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+// The most such fixtures one request may add. Somebody who named a dozen clubs
+// would otherwise push the games that do have a stream off the end of the tab.
+const SCHEDULE_MAX = 40;
+
+// Which tab a board's fixtures belong in. ESPN files by sport and competition
+// while the catalog files by the tab a card sits in, and the college boards are
+// where the two differ: a college game belongs with the college games whichever
+// ball it is played with.
+const BOARD_CATEGORY = {
+  'football/nfl': 'american_football',
+  'football/cfl': 'american_football',
+  'australian-football/afl': 'american_football',
+  'football/college-football': 'college',
+  'basketball/nba': 'basketball',
+  'basketball/wnba': 'basketball',
+  'basketball/mens-college-basketball': 'college',
+  'baseball/mlb': 'baseball',
+  'baseball/college-baseball': 'college',
+  'hockey/nhl': 'hockey',
+  'soccer/all': 'football'
+};
+
+// ESPN serves every crest from the same 500-pixel path, which is also how the
+// bundled table spells them, so the key the index stores rebuilds into a URL the
+// rest of the catalog already knows how to name and draw.
+function crestUrl(key) {
+  const at = String(key || '').indexOf('/');
+  if (at < 1) return null;
+  return `https://a.espncdn.com/i/teamlogos/${key.slice(0, at)}/500/${key.slice(at + 1)}.png`;
+}
+
+// The index is keyed by normalized names — lowercase, punctuation gone — and a
+// card has to show a viewer something they recognise. ESPN's own spelling comes
+// from the crest wherever there is one; this is what is left for the college
+// fixtures, whose crests are in no name table.
+function titleCase(name) {
+  return String(name || '').replace(/\b[a-z]/g, c => c.toUpperCase());
+}
+
+/** UTC calendar day of a ms timestamp, spelled as the index's keys spell it. */
+function utcDay(ms) {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+let scheduleCache = { at: 0, size: 0, events: [], reading: false };
+
+function scheduleEvents() {
+  // There is no file at all until a refresh has written one, which is a tab
+  // without these fixtures rather than a tab that fails.
+  let stat;
+  try { stat = fs.statSync(SCHEDULE_FILE); } catch (e) { return []; }
+  // Parsed once per refresh rather than once per request: this is megabytes of
+  // JSON, and every device in the house polls the tab.
+  if (stat.mtimeMs === scheduleCache.at && stat.size === scheduleCache.size) return scheduleCache.events;
+  // The index is rewritten every twenty minutes, and the card warmer is not
+  // asked for this tab, so the request that finds the file changed is always
+  // somebody's. Reading it there holds the loop shut for the length of the
+  // parse, with every other catalog, stream and image request queued behind it
+  // on a two-core host. The copy in hand is one refresh old at worst and
+  // describes fixtures days out, so it answers now and the file is read on the
+  // next turn of the loop instead. A first read has nothing to answer with and
+  // is worth waiting for.
+  if (!scheduleCache.events.length) {
+    scheduleCache = { at: stat.mtimeMs, size: stat.size, events: readSchedule(), reading: false };
+    return scheduleCache.events;
+  }
+  if (!scheduleCache.reading) {
+    scheduleCache.reading = true;
+    setImmediate(() => {
+      try {
+        const fresh = fs.statSync(SCHEDULE_FILE);
+        scheduleCache = { at: fresh.mtimeMs, size: fresh.size, events: readSchedule(), reading: false };
+      } catch (e) {
+        scheduleCache.reading = false;
+      }
+    });
+  }
+  return scheduleCache.events;
+}
+
+function readSchedule() {
+  let saved;
+  try { saved = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf8')); } catch (e) { return []; }
+  if (!saved || saved.v !== SCHEDULE_VERSION) return [];
+  if (!Array.isArray(saved.events) || !Array.isArray(saved.keys)) return [];
+
+  const byEvent = new Map();
+  for (const entry of saved.keys) {
+    if (!Array.isArray(entry)) continue;
+    const [key, at] = entry;
+    const rec = saved.events[at];
+    if (!rec || typeof key !== 'string') continue;
+    const [kind, board, day, pair] = key.split(':');
+    if (!pair) continue;
+    let ev = byEvent.get(at);
+    // The kickoff is copied out rather than the record kept: the index is
+    // already resident in this process, and holding a second reference to every
+    // record here would keep the whole parsed copy alive until the next refresh
+    // replaces it. A tile needs the hour and the two sides; the networks, the
+    // venue and the status all come back through details() at the time a card
+    // is drawn.
+    if (!ev) {
+      byEvent.set(at, ev = {
+        board, day, start: Number(rec.start) || 0,
+        homeCrest: '', awayCrest: '', home: '', away: '',
+        homeNames: new Set(), awayNames: new Set()
+      });
+    }
+    const [left, right] = pair.split('|');
+    if (kind === 'L') {
+      // A crest pair is sorted, so which of the two is at home is a question
+      // only the record answers.
+      if (rec.home === left) { ev.homeCrest = left; ev.awayCrest = right; }
+      else if (rec.home === right) { ev.homeCrest = right; ev.awayCrest = left; }
+    } else if (kind === 'N') {
+      // Home first, away second. Every spelling the index was keyed under is
+      // kept, because the one a feed writes is rarely the one ESPN leads with —
+      // a provider's "Saint Anselm" against the scoreboard's "Saint Anselm
+      // Hawks" — and these are what say whether somebody already streams this
+      // fixture. Keeping only one of them left that question to the crests,
+      // which an event ESPN published no logo for does not have.
+      if (left) ev.homeNames.add(left);
+      if (right) ev.awayNames.add(right);
+      // The longest spelling is the one ESPN calls the club, and the one a card
+      // shows: the shorter keys are its nickname, its city and its
+      // abbreviation, none of which read as a team.
+      if (left && left.length > ev.home.length) ev.home = left;
+      if (right && right.length > ev.away.length) ev.away = right;
+    }
+  }
+  // An event with no name key and no kickoff has nothing to match a viewer's
+  // spelling against and nothing to put on a tile.
+  const out = [];
+  for (const ev of byEvent.values()) {
+    if (!ev.home || !ev.away || !(ev.start > 0)) continue;
+    ev.homeNames = [...ev.homeNames];
+    ev.awayNames = [...ev.awayNames];
+    out.push(ev);
+  }
+  return out;
+}
+
+// Named so it can never collide with a provider's own id, and so the same
+// fixture is the same id on every request.
+function scheduleId(ev) {
+  const part = s => String(s).replace(/[^a-z0-9]+/gi, '').slice(0, 24);
+  return `espn_${part(ev.board)}_${ev.day}_${part(ev.awayCrest || ev.away)}_${part(ev.homeCrest || ev.home)}`;
+}
+
+function scheduleFixture(ev) {
+  const awayLogo = crestUrl(ev.awayCrest);
+  const homeLogo = crestUrl(ev.homeCrest);
+  const away = teamLogoService.canonicalName(awayLogo) || titleCase(ev.away);
+  const home = teamLogoService.canonicalName(homeLogo) || titleCase(ev.home);
+  const fixture = new MatchEntity({
+    id: scheduleId(ev),
+    title: `${away} @ ${home}`,
+    category: BOARD_CATEGORY[ev.board] || 'other',
+    date: ev.start,
+    // Only fixtures still to come are built, and saying so keeps one that
+    // kicks off while a page sits open from being called live by the clock
+    // when there is still nothing to watch.
+    status: 'upcoming',
+    sources: [],
+    team1: { name: away, logo: awayLogo || '' },
+    team2: { name: home, logo: homeLogo || '' }
+  });
+  // What the tile says instead of offering a stream, set after construction the
+  // way the aggregator sets its own extras.
+  fixture._scheduleOnly = true;
+  return fixture;
+}
+
+/**
+ * The fixtures the providers between them already list, as pairs of sides.
+ *
+ * Both a crest pair and a name pair: the feeds and ESPN rarely spell a club the
+ * same way, so the crests are what usually answer, while a fixture nothing could
+ * resolve still has its names to be compared by.
+ */
+function providerPairs(matches, now) {
+  const pairs = new Set();
+  for (const m of matches) {
+    const t = parseInt(m.date, 10) || 0;
+    // Only the window the schedule is read for. A season of finished fixtures
+    // has nothing here to collide with.
+    if (t <= now - 86400000 || t > now + SCHEDULE_AHEAD_MS + 86400000) continue;
+    const pair = teamLogoService.resolveMatchup(m);
+    if (!pair) continue;
+    const day = utcDay(t);
+    const na = teamLogoService.normalize(pair.a);
+    const nb = teamLogoService.normalize(pair.b);
+    if (na && nb && na !== nb) pairs.add(`${day}:${[na, nb].sort().join('|')}`);
+    const ca = teamLogoService.crestKey(pair.aLogo);
+    const cb = teamLogoService.crestKey(pair.bLogo);
+    if (ca && cb && ca !== cb) pairs.add(`${day}:${[ca, cb].sort().join('|')}`);
+  }
+  return pairs;
+}
+
+function coveredByProvider(ev, pairs) {
+  // Every spelling ESPN knows this fixture by against the one the provider
+  // used, since a feed writing the club's short name is the ordinary case and
+  // the full name the exception. A fixture listed twice — once playable, once
+  // saying nobody streams it — is the one thing this has to prevent, and the
+  // cross product is a few dozen string joins for a viewer's own fixtures.
+  const names = [];
+  for (const h of ev.homeNames) {
+    for (const a of ev.awayNames) {
+      if (h !== a) names.push([h, a].sort().join('|'));
+    }
+  }
+  const crests = ev.homeCrest && ev.awayCrest ? [ev.homeCrest, ev.awayCrest].sort().join('|') : null;
+  // A provider's clock and ESPN's can straddle midnight, so the neighbouring
+  // days count too — the same tolerance the index itself is looked up under.
+  for (const off of [0, -1, 1]) {
+    const day = utcDay(ev.start + off * 86400000);
+    if (crests && pairs.has(`${day}:${crests}`)) return true;
+    for (const pair of names) if (pairs.has(`${day}:${pair}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Fixtures ESPN lists for a viewer's own teams that no provider covers, nearest
+ * kickoff first.
+ */
+function scheduleOnlyFixtures(favoriteTeams, matches, now) {
+  const wanted = favoriteTeams.map(t => teamLogoService.normalize(t)).filter(t => t.length >= 2);
+  if (!wanted.length) return [];
+  const events = scheduleEvents();
+  if (!events.length) return [];
+
+  const pairs = providerPairs(matches, now);
+  const picked = [];
+  for (const ev of events) {
+    if (ev.start <= now || ev.start > now + SCHEDULE_AHEAD_MS) continue;
+    // The tab's own rule for whether a fixture is the viewer's, asked of the
+    // names the index was keyed under, so a club answers to any of the
+    // spellings ESPN knows it by rather than only to the one on a card.
+    const names = `${ev.away} ${ev.home}`;
+    if (!wanted.some(team => names.includes(team))) continue;
+    if (coveredByProvider(ev, pairs)) continue;
+    picked.push(ev);
+  }
+  // Nearest first and then the cap: somebody who named a dozen clubs should
+  // lose next weekend's fixtures rather than tonight's.
+  picked.sort((a, b) => a.start - b.start);
+  return picked.slice(0, SCHEDULE_MAX).map(scheduleFixture);
+}
+
+/** One of those fixtures by the id its tile carries, for the page behind it. */
+function scheduleFixtureById(id) {
+  if (!String(id || '').startsWith('espn_')) return null;
+  for (const ev of scheduleEvents()) {
+    if (scheduleId(ev) === id) return scheduleFixture(ev);
+  }
+  return null;
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -764,6 +1102,13 @@ async function handleCatalog(type, id, extra, config, opts = {}) {
         const titleWords = m.title.toLowerCase();
         return favoriteTeams.some(team => titleWords.includes(team));
       });
+      // A viewer's team vanished from their own tab until some site posted a
+      // link, which is usually an hour before kickoff — so the tab was empty
+      // exactly when somebody was planning their week, and ESPN had known about
+      // the game for days. Appended here and nowhere else: no other tab is
+      // asked about a viewer's teams, and the list these join is the copy
+      // getMatches() handed out, which nothing writes back.
+      filteredMatches = filteredMatches.concat(scheduleOnlyFixtures(favoriteTeams, matches, Date.now()));
     } else {
       filteredMatches = []; // If no config, return empty
     }
@@ -913,7 +1258,9 @@ async function handleMeta(type, id, config) {
   const matchId = id.replace('nuvio_sport_', '');
   const cacheService = container.resolve('cacheService');
   const matches = cacheService.getMatches();
-  const match = matches.find(m => m.id === matchId);
+  // A fixture only the schedule knows about is in no catalog by design, and
+  // opening its tile should still show the fixture rather than an error.
+  const match = matches.find(m => m.id === matchId) || scheduleFixtureById(matchId);
 
   if (!match) {
     return { meta: null };
@@ -921,7 +1268,10 @@ async function handleMeta(type, id, config) {
 
   // Prewarm: mint tokens for this match's top sources while the user is still
   // on the detail page, so the eventual click is near-instant. Fire-and-forget.
-  try { prewarmMatch(match, config || {}).catch(() => {}); } catch (_) {}
+  // One nobody streams yet has no source to warm.
+  if (!match._scheduleOnly) {
+    try { prewarmMatch(match, config || {}).catch(() => {}); } catch (_) {}
+  }
 
   return { meta: mapMatchToMetaPreview(match, config || {}) };
 }
@@ -929,5 +1279,7 @@ async function handleMeta(type, id, config) {
 module.exports = {
   handleCatalog,
   handleMeta,
-  isMatchLive
+  isMatchLive,
+  _mapMatchToMetaPreview: mapMatchToMetaPreview,
+  _scheduleOnlyFixtures: scheduleOnlyFixtures
 };
