@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.4.0 (2026-09-16)
+
+⭐ Your Teams asked whether a fixture's title contained the name you typed. A feed writes "Braves @ Cubs" where you wrote "Chicago Cubs", so your own club never matched and the tab stood empty during your own game — while the same question handed a Chicago supporter Mercer Bears and California Golden Bears, who are other people's Bears entirely. A title is a sentence, not an identity, and the crests that settle it were on hand the whole time. The fixtures nobody streams yet were picked the same way, where a single word could collect three hundred other clubs' games. And dragging the sources into an order still changed nothing about the list that came back from them.
+
+### Features
+
+* **streams:** sort the list by your own source order as well as by the rating — the rating breaks ties inside each source, and the CDN rotation moves inside one too, since promoting a second host over the whole of your first-choice source undoes the order being asked for. Left unset, ordering your sources is what selects it, so the control that already existed starts meaning something without anyone having to find this one ([4e1f12a](https://github.com/mlp2069/aiosports/commit/4e1f12a))
+
+### Bug Fixes
+
+* **catalog:** read ⭐ Your Teams on who is playing rather than on what the title says, so a club answers to every spelling its feeds use and to nobody else's nickname — measured across 2,380 fixture-and-team pairs, nothing that belonged in the tab left it. A club's own 24/7 channel leaves it as well: it has no kickoff, so it is not a game, and it sat at the top on every day of the year ([765572c](https://github.com/mlp2069/aiosports/commit/765572c))
+* **catalog:** match the fixtures nobody streams yet on identity instead of on a substring. A club's city sits inside its name and a nickname is shared across leagues, so "city" was collecting 357 of 6,628 scheduled fixtures — every Kansas City Chiefs game among them — "united" 235, and "bears" 91. Both the crest and the keyed spellings are consulted, because ESPN files one club under more than one crest id and a crest-only test loses half of a correctly named club's games ([3e1bb71](https://github.com/mlp2069/aiosports/commit/3e1bb71))
+* **catalog:** drop a listing whose title is the separator alone — a "vs" with neither side filled in, arriving as a blank grey tile. Narrowly, because the obvious rule is wrong: of nine fixtures resolving to no matchup, eight were a UFC card, a wrestling show, a race meeting and two tennis tournaments, all of them real events that simply have one name rather than two ([2ff3521](https://github.com/mlp2069/aiosports/commit/2ff3521))
+
 ## v1.3.0 (2026-09-16)
 
 An ARM release. The published image was x86 only, so an Ampere box — an Oracle free-tier instance, a Raspberry Pi — had to build the whole thing from source before it could run any of this. It now ships for arm64 under the same tag, and the pull command does not change: Docker reads the machine it is on and fetches the half that fits it.

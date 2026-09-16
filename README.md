@@ -199,7 +199,9 @@ What a network station streams free is its 24/7 **news** channel (FOX LOCAL, NBC
 
 ## Sources
 
-StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSports99, Streamic, TotalSportek, USA TV and iptv-org. You can turn each one on or off and set the order its streams are listed in, all in `/configure`.
+StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSports99, Streamic, TotalSportek, USA TV and iptv-org. Turn each one on or off in `/configure`, and drag them into the order you prefer.
+
+**Sort Streams By** decides what that order is worth. *Rating* ranks every stream on what was measured about it — the resolution and bitrate read from the stream itself, and whether that source has been answering lately. *Source order* hands you your own order instead, best stream first within each source. Dragging the sources selects the second on its own; either can be chosen outright.
 
 ## FAQ and troubleshooting
 
