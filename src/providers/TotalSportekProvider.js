@@ -23,6 +23,22 @@ const ENDED_STATUSES = new Set(['ended', 'finished', 'ft']);
 // name a sport without reaching back into the second club's name.
 const LEAGUE_TAIL_WORDS = 3;
 
+// The words that actually name a sport or a competition, and the only ones the
+// tail above is read for.
+//
+// Most slugs have no competition on the end at all, so the tail is simply the
+// second club's name -- and club names are full of sports. Matching on
+// substrings the way categories are normally matched read the racing in Racing
+// de Santander as motor racing and filed a league fixture under it. Note what
+// is absent: racing, united, city, athletic, sporting, real. A word that names
+// as many clubs as it does sports names neither here.
+const LEAGUE_WORDS = new Set([
+  'football', 'soccer', 'basketball', 'baseball', 'hockey', 'rugby', 'cricket',
+  'tennis', 'golf', 'darts', 'boxing', 'mma', 'ufc', 'wwe', 'nxt', 'aew',
+  'nfl', 'nba', 'wnba', 'mlb', 'nhl', 'ncaa', 'mls',
+  'f1', 'formula', 'motogp', 'nascar', 'indycar'
+]);
+
 // The game pages carry both mirrors, and each one is a whole chain of its own.
 // Two is what the site publishes; the cap is here so a page that repeats a link
 // a dozen times cannot turn one tile into a dozen resolutions.
@@ -271,7 +287,14 @@ class TotalSportekProvider extends BaseProvider {
    */
   _categoryForSlug(slug) {
     const words = String(slug || '').replace(/-\d+$/, '').split('-').filter(Boolean);
-    return this._categoryFor(words.slice(-LEAGUE_TAIL_WORDS).join(' '));
+    const tail = words.slice(-LEAGUE_TAIL_WORDS);
+    // Only a tail that says it is a competition is read as one. Everything else
+    // is the second club's name, and naming a sport from it is worse than
+    // naming none: a fixture nobody could place still merges with the same game
+    // from a source that placed it, while one placed wrongly does not -- it
+    // stays a second tile with the streams divided between the two.
+    if (!tail.some(word => LEAGUE_WORDS.has(word))) return 'other';
+    return this._categoryFor(tail.join(' '));
   }
 
   /**

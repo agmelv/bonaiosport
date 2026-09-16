@@ -161,6 +161,24 @@ t(null, tsk._playerSrc(''), 'and neither is an empty one an error');
   t('other', provider._categoryForSlug('elche-vs-real-oviedo-4654633812'), 'two club names still name no sport');
   t('other', provider._categoryForSlug(''), 'and no slug at all is other');
 
+  // The case the rule above was written for and still got wrong: Racing at the
+  // START of a slug was tested and passed, because the tail never reached it.
+  // At the END it is the tail, and the fixture went out as motorsport -- which
+  // is how one game ended up as two tiles on the live catalog, a motorsport one
+  // and a football one, with the streams divided between them. A club's name is
+  // not a sport wherever in the slug it happens to sit.
+  t('other', provider._categoryForSlug('barcelona-vs-racing-de-santander-1575168414'),
+    'a club called Racing is not motor racing at the end of a slug either');
+  t('other', provider._categoryForSlug('real-madrid-vs-racing-club-9911'), 'nor in the middle of one');
+  t('other', provider._categoryForSlug('sporting-lisbon-vs-athletic-bilbao-4321'),
+    'and Sporting and Athletic name no sport between them');
+  // The tails that really are competitions still answer, which is the half of
+  // this that has to keep working.
+  t('football', provider._categoryForSlug('ipswich-town-vs-arsenal-england-league-cup-football-4654633803'),
+    'a tail that names the sport outright is still read');
+  t('basketball', provider._categoryForSlug('lakers-vs-celtics-nba-4654630012'),
+    'and a league acronym is enough on its own');
+
   console.log('--- one mirror going down does not take the other with it');
   // A breaker registry that memoizes by name the way the real service does,
   // with bestropes' breaker already open. An open breaker answers null through
