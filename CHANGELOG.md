@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.0 (2026-09-16)
+
+An ARM release. The published image was x86 only, so an Ampere box — an Oracle free-tier instance, a Raspberry Pi — had to build the whole thing from source before it could run any of this. It now ships for arm64 under the same tag, and the pull command does not change: Docker reads the machine it is on and fetches the half that fits it.
+
+### Features
+
+* **ci:** publish the image for linux/arm64 as well as linux/amd64, each half built on a runner of its own rather than one emulating the other, and each one started and asked for `/health` on its own architecture before the tag naming both is written — whether a native binary loads is not something a test can answer from the machine that compiled it ([02b7157](https://github.com/mlp2069/aiosports/commit/02b7157))
+* **docs:** say how to run it on an oracle ampere instance, including the part that catches people out — a port there has to be opened in the subnet's security list *and* on the machine, whose ubuntu images ignore `ufw` ([48938cf](https://github.com/mlp2069/aiosports/commit/48938cf))
+
 ## v1.2.2 (2026-09-16)
 
 The other half of the release before it. A fixture's sport was read off the last words of its address, and club names are full of sports: the tail of `barcelona-vs-racing-de-santander` is "racing de santander", which went out as motorsport. The wrong tab was again the smaller half — two rows that disagree about the sport are never merged, so that game was listed twice, once here and once from another source, with the streams divided between the two tiles. A fixture nobody can place merges perfectly well; only a confident wrong answer stops it, which makes naming no sport strictly better than guessing at one.
