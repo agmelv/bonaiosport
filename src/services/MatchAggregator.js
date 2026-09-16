@@ -398,6 +398,54 @@ function _categoryFromLeague(match) {
   return null;
 }
 
+// Every competition the crest table names, as the sport it is played at. The
+// soccer ones are the dotted slugs -- eng.1, uefa.europa, conmebol.libertadores
+// -- and there are seventy of them against thirty of everything else, so they
+// are recognised by their shape rather than listed one by one.
+const COMPETITION_CATEGORY = {
+  nfl: 'american_football', cfl: 'american_football', afl: 'american_football',
+  'college-football': 'college', 'mens-college-basketball': 'college',
+  'mens-college-hockey': 'college', 'womens-college-hockey': 'college',
+  nba: 'basketball', wnba: 'basketball',
+  mlb: 'baseball', nhl: 'hockey'
+};
+
+function _categoryOfCompetition(slug) {
+  if (!slug) return null;
+  if (Object.prototype.hasOwnProperty.call(COMPETITION_CATEGORY, slug)) return COMPETITION_CATEGORY[slug];
+  if (slug.startsWith('rugby-')) return 'rugby';
+  if (slug.includes('.')) return 'football';
+  return null;
+}
+
+/**
+ * The sport a fixture's own crests put it in, for a listing that never said.
+ *
+ * Some sites publish nothing but two club names and a kickoff, and a name is
+ * not a sport: "Elche vs Real Madrid" and "Yankees vs Twins" read alike. Those
+ * fixtures land in Other Sports, which is wrong twice over -- a viewer looking
+ * at Soccer does not see them, and the merge guards refuse to join two rows
+ * whose categories disagree, so the same game from a source that did name its
+ * sport sits beside this one with the streams divided between the two tiles.
+ *
+ * The crests already answer it. Both sides resolve to ESPN assets, and the
+ * bundled table says which competitions each of them plays in; the one they
+ * share is this fixture's. The answer is kept on the match because the pass
+ * that fills `_competition` in later skips anything that already has it, so
+ * asking now costs that pass the work rather than adding any.
+ */
+function _categoryFromCrests(match) {
+  let comp = null;
+  try {
+    const pair = teamLogos.resolveMatchup(match);
+    comp = pair ? leagueBadges.competitionFor(pair.aLogo, pair.bLogo) : null;
+  } catch (err) {
+    comp = null;
+  }
+  match._competition = comp;
+  return _categoryOfCompetition(comp);
+}
+
 class MatchAggregator {
   constructor({ streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, totalSportekProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, usaTvProvider, iptvOrgProvider, cacheService, yamlProviders }) {
     this.providers = [streamFreeProvider, timStreamsProvider, sportyHunterProvider, watchFootyProvider, totalSportekProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, usaTvProvider, iptvOrgProvider, ...(yamlProviders || [])];
@@ -591,6 +639,14 @@ class MatchAggregator {
 
         const trueCategory = _categoryFromLeague(match);
         if (trueCategory && match.category !== trueCategory) match.category = trueCategory;
+        // Only when nothing else could name it. A category a provider stated is
+        // its own evidence and is left alone; this is for the listings that
+        // publish two club names and a time, and whose fixtures would otherwise
+        // spend the evening in Other Sports.
+        if (!match.category || match.category === 'other') {
+          const byCrest = _categoryFromCrests(match);
+          if (byCrest) match.category = byCrest;
+        }
         // College games belong in College whatever the sport: a college hockey
         // fixture in the Hockey tab is the same misfiling as a college football
         // one beside the NFL.
@@ -828,4 +884,4 @@ class MatchAggregator {
 }
 
 module.exports = MatchAggregator;
-module.exports._internal = { _compoundify, _stripNoise, _tokenize, _teamsSimilar, _tryExtractTeams };
+module.exports._internal = { _compoundify, _stripNoise, _tokenize, _teamsSimilar, _tryExtractTeams, _categoryOfCompetition, _categoryFromCrests };

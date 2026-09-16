@@ -129,5 +129,49 @@ t(false, same(ch('FOX News'), ch('Fox Business')), 'FOX News is not Fox Business
 t(false, same(ch('ESPN 2 US'), ch('ESPN Deportes')), 'ESPN 2 is not ESPN Deportes')
 t(false, same(ch('ESPNU'), ch('ESPN')), 'ESPNU is not ESPN')
 
+// A listing that publishes two club names and a kickoff names no sport, and a
+// name is not one: "Elche vs Real Madrid" and "Yankees vs Twins" read alike.
+// Those fixtures went to Other Sports, where a viewer looking at Soccer never
+// saw them -- and, worse, where the merge guards refused to join them to the
+// same game from a source that had named its sport, so the streams sat split
+// across two tiles. The crests answer it: both sides are ESPN assets, and the
+// competition they share is the fixture's own.
+console.log('--- the sport a listing never named, read off the crests');
+const { _categoryOfCompetition, _categoryFromCrests } = MatchAggregator._internal;
+
+t('football', _categoryOfCompetition('eng.1'), 'a dotted slug is soccer, and seventy of them are');
+t('football', _categoryOfCompetition('uefa.europa'), 'a continental cup too');
+t('football', _categoryOfCompetition('conmebol.libertadores'), 'and one nobody thought to list');
+t('baseball', _categoryOfCompetition('mlb'), 'mlb is baseball');
+t('hockey', _categoryOfCompetition('nhl'), 'nhl is hockey');
+t('basketball', _categoryOfCompetition('nba'), 'nba is basketball');
+t('american_football', _categoryOfCompetition('nfl'), 'nfl is american football');
+t('american_football', _categoryOfCompetition('afl'), 'and the AFL keeps the house convention');
+t('rugby', _categoryOfCompetition('rugby-urc'), 'every rugby competition is rugby');
+t('college', _categoryOfCompetition('college-football'), 'college stays college whatever the ball');
+t('college', _categoryOfCompetition('mens-college-hockey'), 'including on ice');
+t(null, _categoryOfCompetition('something-nobody-has-heard-of'), 'an unknown competition names no sport');
+t(null, _categoryOfCompetition(''), 'and neither does nothing at all');
+// The table is a plain object and the slug comes from a data file, so the
+// lookup is guarded: without it every fixture would be filed under whatever
+// Object.prototype happens to answer to.
+t(null, _categoryOfCompetition('constructor'), 'a slug that names a prototype member is not a sport');
+t(null, _categoryOfCompetition('toString'), 'nor is another one');
+
+const unnamed = {
+  id: 'tsk_elche-vs-real-madrid-1', title: 'Elche vs Real Madrid', category: 'other',
+  date: String(D), team1: { name: 'Elche', logo: null }, team2: { name: 'Real Madrid', logo: null },
+  sources: []
+};
+t('football', _categoryFromCrests(unnamed), 'two club names and nothing else still name a sport');
+t(true, unnamed._competition !== undefined,
+  'and the competition is kept, so the pass that fills it in later does no work twice');
+
+const nobody = {
+  id: 'tsk_nobody-vs-nobody-2', title: 'Wolvercote Rangers vs Binsey Athletic', category: 'other',
+  date: String(D), sources: []
+};
+t(null, _categoryFromCrests(nobody), 'a fixture nobody has a crest for names nothing, rather than guessing');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
