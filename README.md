@@ -91,6 +91,19 @@ docker run -d --name aiosports -p 7000:7000 \
   --restart unless-stopped ghcr.io/mlp2069/aiosports:latest
 ```
 
+### Oracle Cloud, and other ARM servers
+
+An Ampere instance runs the command above unchanged -- there is no separate ARM tag to find, and nothing to build. Oracle's Always Free tier gives you four Ampere cores and 24 GB of memory, which is considerably more than this needs.
+
+The one thing that catches people out is not the addon. **A port on an Oracle instance has to be opened in two places**, and opening it in one leaves it shut:
+
+1. **The cloud side.** Add an ingress rule for TCP 7000 to the security list (or network security group) on your instance's subnet, in the console.
+2. **The machine itself.** Oracle's own images arrive with host firewall rules that drop nearly everything, and the Ubuntu images do not use `ufw` -- editing it there does nothing. The rules live in `/etc/iptables/rules.v4`.
+
+On that second one, mind where the rule goes: there is a `REJECT` line near the end, and anything added below it never matches. Copy the line that allows SSH, change the port on the copy, and leave the SSH line exactly where it is -- getting that wrong locks you out of the instance.
+
+If you would rather not expose a port at all, put the instance behind a Cloudflare Tunnel as described under [https](#stremio-needs-https). Nothing then listens publicly, and you get the https address Stremio needs in the same move.
+
 ### Node.js
 
 Node.js 22 or newer is required.
