@@ -159,10 +159,21 @@ Settings live in `.env`. Copy `.env.example` and edit it, and restart after a ch
 | 📺 Channels | Every 24/7 channel, A to Z, with a genre filter |
 | 🏏 🏀 🏒 ⚾ 🥊 ⛳ 🎾 🎯 | Cricket, basketball, hockey, baseball, MMA, golf, tennis, darts |
 | 🏅 Other Sports | Anything that fits no tab above |
-| ⏱️ Upcoming · ⭐ Your Teams | Everything ahead, and the teams you follow in `/configure` |
+| ⏱️ Upcoming · ⭐ Your Teams | Everything ahead, and the teams you follow in `/configure` (including games nobody streams yet -- see below) |
 | 📍 Local | The channels of the cities you name in `/configure` (see below) |
 
 In `/configure` you can hide, rename and reorder the tabs.
+
+### What a fixture tile knows
+
+Fixtures are matched against ESPN's scoreboards, which is where the visiting side, the league badge and a kickoff you can trust come from. Two things follow from that:
+
+- **the network carrying the game** is named on the tile -- `📡 On FOX`. It is a line of information, not something to open: what a network station streams free is its news channel, never the broadcast (see below);
+- **the kickoff shown is ESPN's** wherever a source site disagrees with it by more than a quarter of an hour. Source sites type the wrong hour often enough to be worth overruling, usually by reading a time zone wrong.
+
+A fixture ESPN has not listed keeps whatever its source said, and nothing on the tile changes.
+
+⭐ Your Teams goes one step further: it lists your teams' fixtures for the week ahead **even when no site has posted a stream yet**, marked `⏳ No streams listed yet`. Links usually appear within an hour or so of kickoff, and until then the tab used to be empty exactly when you were planning your week.
 
 ### Local channels
 
@@ -179,7 +190,9 @@ StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLive, StreamSp
 
 ## FAQ and troubleshooting
 
-**A fixture has no streams.** The source sites haven't posted one yet, or took it down. Streams often appear shortly before kickoff. Try again closer to the start, or pick another source's tile.
+**A fixture has no streams.** The source sites haven't posted one yet, or took it down. Streams often appear shortly before kickoff. Try again closer to the start, or pick another source's tile. A tile in ⭐ Your Teams marked `⏳ No streams listed yet` is this, said in advance: the game is on ESPN's schedule and no site has posted a link to it.
+
+**Two streams buffer at the same moment.** They are probably the same machine reached two ways. The list puts the best stream from each server at the top for that reason, so the second row down is a genuinely different server rather than a second link to the first one.
 
 **Stremio won't install the addon.** It needs an https address; see [Stremio needs https](#stremio-needs-https).
 

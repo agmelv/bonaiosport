@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.1.0 (2026-09-15)
+
+A fixtures release. The scoreboards this addon reads had stopped answering the way it was asking, and nothing said so: most of the catalog had quietly lost which side was at home and which badge belonged on the card. Repairing that turned out to pay for the rest, because the same responses already carried the kickoff, the venue and the channel showing the game, and all of it was being thrown away. So a tile now names the network, shows a kickoff worth trusting, and — for the teams you follow — appears days before any site has posted a link. Stream rows say which site they really came from, and are ordered by what was measured rather than what was claimed.
+
+### Features
+
+* **catalog:** name the network carrying a fixture on its tile, and show the scoreboard's kickoff where a source site disagrees with it by more than a quarter of an hour ([06a1d48](https://github.com/mlp2069/aiosports/commit/06a1d48))
+* **catalog:** list your own teams' fixtures for the week ahead in ⭐ Your Teams before any site has posted a stream for them, saying so on the tile ([06a1d48](https://github.com/mlp2069/aiosports/commit/06a1d48))
+* **streams:** rank a row on the resolution and bitrate verification actually read from it, and on how its provider has been answering lately, rather than on the sentence the provider wrote ([eadaa2c](https://github.com/mlp2069/aiosports/commit/eadaa2c))
+* **streams:** put the best row from each edge server at the top, so the second choice is a second chance instead of a second link to the machine that just stalled ([eadaa2c](https://github.com/mlp2069/aiosports/commit/eadaa2c))
+* **espn:** keep the kickoff, status, venue and television network the scoreboards were already carrying and the addon was discarding ([3a449c2](https://github.com/mlp2069/aiosports/commit/3a449c2))
+
+### Bug Fixes
+
+* **espn:** fetch the scoreboards a day and a month at a time, the forms espn still answers — the range form it retired had left eleven of eighty-four requests succeeding, and with them the home side and the league badge on every board but soccer ([3a449c2](https://github.com/mlp2069/aiosports/commit/3a449c2))
+* **streams:** stop a row whose source is unrecognised being labelled as another provider, which made a site look like one that had worked the night before ([eadaa2c](https://github.com/mlp2069/aiosports/commit/eadaa2c))
+* **catalog:** refuse a scoreboard record too far from a fixture's own hour to be the same game, so the second game of a doubleheader no longer wears the first one's time and channel ([06a1d48](https://github.com/mlp2069/aiosports/commit/06a1d48))
+
+### Performance Improvements
+
+* **espn:** fifty-five scoreboard requests where there were eighty-four, and one record per event shared by every key naming it instead of a copy written out under each ([3a449c2](https://github.com/mlp2069/aiosports/commit/3a449c2))
+* **streams:** resolve four sources at a time rather than all of them at once, so a dozen mints and decrypts stop contending for two cores and timing out on work that was only waiting for one ([eadaa2c](https://github.com/mlp2069/aiosports/commit/eadaa2c))
+
 ## v1.0.3 (2026-09-13)
 
 A quiet release. A restart no longer costs the server minutes of work, the stream relay handles keyed streams, and a dropped connection gets a second try.
