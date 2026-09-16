@@ -89,11 +89,33 @@ jobs:
           set -euo pipefail
           ref="${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}"
           echo "running $ref"
+
+          # Pulled on its own, and retried. `docker run` would fetch these two
+          # hundred megabytes itself, but a registry that hiccups then kills the
+          # step with docker's error rather than any of the checks below -- a
+          # release failing for a reason that has nothing to do with the image.
+          # This is that same fetch, given three chances and a voice.
+          pulled=
+          for attempt in 1 2 3; do
+            if docker pull -q "$ref" >/dev/null 2>&1; then pulled=1; break; fi
+            echo "pull attempt $attempt failed; retrying"
+            sleep 10
+          done
+          if [ -z "$pulled" ]; then
+            echo "::error::could not pull the image just pushed, after three attempts"
+            exit 1
+          fi
+
           docker run -d --name smoke -e DATA_DIR=/data -p 7000:7000 "$ref"
 
           ok=
           for _ in $(seq 1 90); do
             if curl -fsS --max-time 3 http://127.0.0.1:7000/health >/dev/null 2>&1; then ok=1; break; fi
+            if [ -z "$(docker ps -q -f name=smoke)" ]; then
+              echo "::error::the container exited before it ever answered"
+              docker logs smoke 2>&1 | tail -40 || true
+              exit 1
+            fi
             sleep 2
           done
 
