@@ -119,6 +119,30 @@ const PROVIDER_HAWKS = {
   date: String(NOW + 2 * DAY), sources: [{ source: 'x' }]
 };
 
+// The fixture this tab exists for, spelled the way the feeds spell it. The
+// viewer typed "Chicago Cubs" and the card says "Braves @ Cubs": not one word
+// of what they typed appears in the title, so asking whether the title
+// contained it left them without their own game on the night it was played.
+const PROVIDER_CUBS = {
+  id: 'prov3', title: 'Braves @ Cubs', category: 'baseball',
+  date: String(NOW + 2 * 3600000), sources: [{ source: 'x' }]
+};
+
+// Other people's Bears. The same question that lost the Cubs also handed a
+// Chicago supporter these two, which is the half of the bug that is easy to
+// reintroduce by loosening the match instead of grounding it.
+const PROVIDER_MERCER = {
+  id: 'prov4', title: 'Mercer Bears - Georgia Tech Yellow Jackets', category: 'american_football',
+  date: String(NOW + 3 * 3600000), sources: [{ source: 'x' }]
+};
+
+// A club's own round-the-clock channel. No kickoff, so it is not a game, and it
+// sat at the top of this tab on every day of the year including the ones the
+// club was not playing.
+const CHANNEL_CUBS = {
+  id: 'chan1', title: 'Chicago Cubs', category: 'networks', sources: [{ source: 'x' }]
+};
+
 (async () => {
   const mine = await tab('teams', { teams: 'Rams' });
   t(1, pending(mine).length, 'the fixture ESPN lists for a team the viewer named');
@@ -143,6 +167,25 @@ const PROVIDER_HAWKS = {
   t(0, pending(short).length,
     'nor where the provider spells a side shorter than the scoreboard does and no crest resolves');
   t(1, short.length, 'that one too is the provider\'s tile alone');
+
+  console.log('--- the tab is read on who is playing, not on what the title says');
+  const cubs = await tab('teams', { teams: 'Chicago Cubs' }, [PROVIDER_CUBS]);
+  t(1, cubs.length, 'a club answers to the short name its feed writes');
+  const longhand = await tab('teams', { teams: 'Cubs' }, [PROVIDER_CUBS]);
+  t(1, longhand.length, 'and to the short name the viewer writes');
+  // Counted by who is in them rather than how many there are: this profile's
+  // club has a real fixture in the seeded scoreboard, so the tab is rightly not
+  // empty. What it must not contain is somebody else's Bears.
+  const bears = await tab('teams', { teams: 'Chicago Bears' }, [PROVIDER_MERCER]);
+  console.log('    bears tab holds:', JSON.stringify(bears.map(m => m.name)));
+  t(0, bears.filter(m => /Mercer/.test(m.name || '')).length,
+    'while another club sharing the nickname is not theirs');
+  const bare = await tab('teams', { teams: 'Bears' }, [PROVIDER_MERCER]);
+  console.log('    bare tab holds:', JSON.stringify(bare.map(m => m.name)));
+  t(0, bare.filter(m => /Mercer/.test(m.name || '')).length,
+    'even when the viewer names the club by nickname alone');
+  const withChannel = await tab('teams', { teams: 'Chicago Cubs' }, [PROVIDER_CUBS, CHANNEL_CUBS]);
+  t(1, withChannel.length, 'and a club\'s own 24/7 channel is not a game it is playing');
 
   // ESPN indexes one event per board, per day, per pair of sides, so the two
   // halves of a doubleheader are a single entry naming the first of them, and

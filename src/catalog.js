@@ -1025,6 +1025,58 @@ function coveredByProvider(ev, pairs) {
  * Fixtures ESPN lists for a viewer's own teams that no provider covers, nearest
  * kickoff first.
  */
+// Identity for one name the viewer typed, memoised: the filter asks this of
+// every fixture in the catalog, and the answer only depends on the name and the
+// sport it is being read in.
+const favIdentityCache = new Map();
+function favouriteIdentity(fav, category) {
+  const key = `${fav}|${category || ''}`;
+  let id = favIdentityCache.get(key);
+  if (!id) {
+    // The sport first, since "Cubs" is a baseball club before it is anything
+    // else; without one, any league may answer.
+    const crest = teamLogoService.lookupTeam(fav, category) || teamLogoService.lookupTeam(fav, null);
+    id = {
+      norm: teamLogoService.normalize(fav),
+      crest: crest ? teamLogoService.crestKey(crest) : null
+    };
+    favIdentityCache.set(key, id);
+  }
+  return id;
+}
+
+/**
+ * Whether a fixture is one the viewer asked for.
+ *
+ * Asking whether the title contained the name was both too strict and too
+ * loose. Too strict: the feeds write "Braves @ Cubs" where the viewer wrote
+ * "Chicago Cubs", so the club they actually follow never appeared — their own
+ * tab was empty during their own game. Too loose: "Bears" then also matched
+ * Mercer and California, who are other people's Bears entirely.
+ *
+ * Identity settles both. Each side resolves to ESPN's crest, and two clubs are
+ * the same club when they wear the same badge — whatever either feed called
+ * them. Where no crest resolves, which is the small colleges ESPN publishes no
+ * logo for, the side's own name has to match outright rather than merely appear
+ * somewhere in the sentence.
+ */
+function favouriteMatches(m, favoriteTeams) {
+  const pair = teamLogoService.resolveMatchup(m);
+  if (!pair) return false;
+  const sides = [{ name: pair.a, logo: pair.aLogo }, { name: pair.b, logo: pair.bLogo }];
+  for (const fav of favoriteTeams) {
+    const id = favouriteIdentity(fav, m.category);
+    for (const side of sides) {
+      const crest = side.logo ? teamLogoService.crestKey(side.logo) : null;
+      if (id.crest && crest && id.crest === crest) return true;
+      if (teamLogoService.normalize(side.name) === id.norm) return true;
+      const canon = side.logo ? teamLogoService.canonicalName(side.logo) : null;
+      if (canon && teamLogoService.normalize(canon) === id.norm) return true;
+    }
+  }
+  return false;
+}
+
 function scheduleOnlyFixtures(favoriteTeams, matches, now) {
   const wanted = favoriteTeams.map(t => teamLogoService.normalize(t)).filter(t => t.length >= 2);
   if (!wanted.length) return [];
@@ -1098,10 +1150,11 @@ async function handleCatalog(type, id, extra, config, opts = {}) {
   } else if (categoryMatch === 'teams') {
     if (typeof conf.teams === 'string' && conf.teams.trim()) {
       const favoriteTeams = conf.teams.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
-      filteredMatches = matches.filter(m => {
-        const titleWords = m.title.toLowerCase();
-        return favoriteTeams.some(team => titleWords.includes(team));
-      });
+      // Fixtures only. A club's own 24/7 channel is not a game it is playing,
+      // and it sat at the top of this tab every day of the year whether the
+      // club was playing or not — the one tile guaranteed never to be what
+      // somebody opening ⭐ Your Teams came for.
+      filteredMatches = matches.filter(m => !isChannel(m) && favouriteMatches(m, favoriteTeams));
       // A viewer's team vanished from their own tab until some site posted a
       // link, which is usually an hour before kickoff — so the tab was empty
       // exactly when somebody was planning their week, and ESPN had known about
