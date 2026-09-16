@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.1 (2026-09-16)
+
+Cleaning up after the release before it. A site that lists two club names and a kickoff has not said what sport is being played, so fifty-four fixtures landed in Other Sports — twenty-six of them major league baseball. The wrong tab was the smaller half: two rows that disagree about the sport are never merged, so the same game from a source that did name its sport sat on a second tile with the streams divided between them. The crests settle it, and they were already on hand.
+
+### Bug Fixes
+
+* **catalog:** read a fixture's sport off its two crests when the listing never named one, before the merge rather than after — so a game does not sit in Other Sports, and does not sit there as a second tile beside the same game from a source that knew what it was ([a425bc0](https://github.com/mlp2069/aiosports/commit/a425bc0))
+
 ## v1.2.0 (2026-09-16)
 
 A sources release, and a short one. Adding a site is only worth the code if it can be up when the others are down — and most of the ones worth checking are not: they land on embeds this addon already resolves, or were seized over the summer, or are parked. TotalSportek is the exception, on infrastructure nothing else here touches, so a bad minute on one edge is not a bad minute on both. It is on by default and can be turned off like any other source in `/configure`.
