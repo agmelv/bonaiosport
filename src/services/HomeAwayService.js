@@ -49,8 +49,11 @@ const CATEGORY_BOARDS = {
 
 const ALL_BOARDS = [...new Set(Object.values(CATEGORY_BOARDS).flat())];
 
-// pair key -> normalized name of whichever side is at home
+// pair key -> the record of the event it names. One record is shared by every
+// key that names the same event, which is most of them: a fixture whose two
+// sides have six name variants each is thirty-six keys and one record.
 let index = new Map();
+let records = [];
 let fetchedAt = 0;
 let inFlight = null;
 let lastStats = null;
@@ -59,12 +62,26 @@ let lastStats = null;
 // one that waits on ESPN. Served stale and refreshed behind it, as always.
 const INDEX_FILE = require('path').join(require('../config').DATA_DIR, 'homeaway.json');
 
+// The version the file on disk is written under. A file an older build left
+// behind holds a different shape entirely, and reading it as this one would
+// hand every card a record with no kickoff and no networks. Refusing it costs
+// one refresh, which the background loop was going to make anyway.
+const FILE_VERSION = 2;
+
 function restore() {
   try {
     const saved = JSON.parse(require('fs').readFileSync(INDEX_FILE, 'utf8'));
-    if (!saved || !Array.isArray(saved.index) || !(Number(saved.fetchedAt) > 0)) return;
+    if (!saved || saved.v !== FILE_VERSION) return;
+    if (!Array.isArray(saved.events) || !Array.isArray(saved.keys)) return;
+    if (!(Number(saved.fetchedAt) > 0)) return;
     if (Date.now() - Number(saved.fetchedAt) > STALE_SERVE_MS) return;
-    index = new Map(saved.index);
+    const next = new Map();
+    for (const [key, at] of saved.keys) {
+      const rec = saved.events[at];
+      if (rec) next.set(key, rec);
+    }
+    index = next;
+    records = saved.events;
     fetchedAt = Math.min(Number(saved.fetchedAt), Date.now());
     lastStats = saved.stats || null;
   } catch (e) { /* first run, or unreadable */ }
@@ -74,8 +91,17 @@ function persist() {
   try {
     const fs = require('fs');
     fs.mkdirSync(require('path').dirname(INDEX_FILE), { recursive: true });
+    // The records once, the keys as offsets into them. Writing a record out
+    // under every key that names it is what made this file a megabyte, and the
+    // sharing is the point of it: restoring must not clone it back apart.
+    const at = new Map(records.map((rec, i) => [rec, i]));
+    const keys = [];
+    for (const [key, rec] of index) {
+      const i = at.get(rec);
+      if (i !== undefined) keys.push([key, i]);
+    }
     const tmp = INDEX_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ fetchedAt, stats: lastStats, index: [...index] }));
+    fs.writeFileSync(tmp, JSON.stringify({ v: FILE_VERSION, fetchedAt, stats: lastStats, events: records, keys }));
     fs.renameSync(tmp, INDEX_FILE);
   } catch (e) { /* memory only, as before */ }
 }
@@ -141,14 +167,15 @@ function nameVariants(team) {
 // The catalog lists fixtures up to ~10 weeks ahead, so orientation has to cover
 // that whole horizon: a window of a few days left two thirds of soccer guessing.
 const HORIZON_DAYS = 70;
-const NEAR_DAYS = 9;         // dense enough to need one request per day
-const FAR_CHUNK = 5;         // sparse out here, but kept under the response cap
-const SPARSE_CHUNK = 14;     // boards that never approach the response cap
+const NEAR_DAYS = 9;         // as far out as a board is worth fetching a day at a time
 
-// soccer/all carries an order of magnitude more events than any other board and
-// is the only one that hits ESPN's response cap; the rest are fetched in wider
-// chunks because they never come close.
-const DENSE_BOARDS = new Set(['soccer/all']);
+// Boards a whole-month request does not answer for. soccer/all runs past the
+// response cap inside a single month, and college football's month view is
+// simply short: twenty-five games where the same month fetched a day at a time
+// has sixty. Every other board was measured complete by the month — nfl, mlb
+// and nhl each returned every event their per-day union held — so asking for
+// their days as well would be sixty requests for nothing.
+const PER_DAY_BOARDS = new Set(['soccer/all', 'football/college-football']);
 
 function stampFor(now, offsetDays) {
   const d = new Date(now + offsetDays * 86400000);
@@ -156,26 +183,40 @@ function stampFor(now, offsetDays) {
 }
 
 /**
+ * The calendar months the horizon touches, as YYYYMM.
+ *
+ * Yesterday's month is in, not today's alone: on the first of a month a fixture
+ * played last night is still on the catalog, and a board fetched only by month
+ * would otherwise have no record of it.
+ */
+function monthsFor(now) {
+  const first = new Date(now - 86400000);
+  const last = new Date(now + HORIZON_DAYS * 86400000);
+  const from = first.getUTCFullYear() * 12 + first.getUTCMonth();
+  const to = last.getUTCFullYear() * 12 + last.getUTCMonth();
+  const out = [];
+  for (let n = from; n <= to; n++) out.push(`${Math.floor(n / 12)}${String((n % 12) + 1).padStart(2, '0')}`);
+  return out;
+}
+
+/**
  * The requests a refresh makes.
  *
- * Per-day for the busy near window on dense boards, because ESPN caps a
- * response at `limit` and silently drops the overflow — soccer/all over six
- * days returns 400 as one range but 914 fetched a day at a time, and every
- * dropped event is a fixture that falls back to a guess.
+ * ESPN retired the `dates=A-B` range form and now answers 400 for it on every
+ * board, so nothing here builds one. A single month covers a board's whole
+ * horizon in three requests instead of five ranges, and the two boards a month
+ * comes back short for are fetched a day at a time across the near window as
+ * well — every event dropped from a response is a fixture that falls back to a
+ * guess about which side is at home.
  */
 function plan(now) {
   const jobs = [];
+  const months = monthsFor(now);
   for (const board of ALL_BOARDS) {
-    if (DENSE_BOARDS.has(board)) {
+    if (PER_DAY_BOARDS.has(board)) {
       for (let i = -1; i <= NEAR_DAYS; i++) jobs.push({ board, dates: stampFor(now, i) });
-      for (let s = NEAR_DAYS + 1; s <= HORIZON_DAYS; s += FAR_CHUNK) {
-        jobs.push({ board, dates: `${stampFor(now, s)}-${stampFor(now, Math.min(s + FAR_CHUNK - 1, HORIZON_DAYS))}` });
-      }
-    } else {
-      for (let s = -1; s <= HORIZON_DAYS; s += SPARSE_CHUNK) {
-        jobs.push({ board, dates: `${stampFor(now, s)}-${stampFor(now, Math.min(s + SPARSE_CHUNK - 1, HORIZON_DAYS))}` });
-      }
     }
+    for (const dates of months) jobs.push({ board, dates });
   }
   return jobs;
 }
@@ -226,7 +267,27 @@ async function fetchBoard(board, dates) {
   return events;
 }
 
-function addEvent(map, event, board) {
+/**
+ * The television networks ESPN says will carry a fixture, at most three.
+ *
+ * Spelled exactly as ESPN spells them: "Prime Video", "FOX" and "SportsNet LA"
+ * are what a viewer recognises, and normalising them would only produce a name
+ * that is on nobody's remote. The two lists ESPN keeps overlap almost entirely,
+ * which is why this is a de-duplication and not a concatenation.
+ */
+function networksOf(comp) {
+  const out = [];
+  const add = (name) => {
+    const n = typeof name === 'string' ? name.trim() : '';
+    if (!n || out.length >= 3 || out.includes(n)) return;
+    out.push(n);
+  };
+  for (const b of comp?.broadcasts || []) for (const n of b?.names || []) add(n);
+  for (const g of comp?.geoBroadcasts || []) add(g?.media?.shortName);
+  return out;
+}
+
+function addEvent(map, list, event, board) {
   const comp = event?.competitions?.[0];
   const competitors = comp?.competitors;
   if (!Array.isArray(competitors) || competitors.length !== 2) return 0;
@@ -258,25 +319,49 @@ function addEvent(map, event, board) {
   const leagueLogo = (uidLeague && LEAGUE_LOGOS[uidLeague[1]]) || event.__boardLogo || null;
   let added = 0;
 
-  // Crest pair first — the strongest key, since both sides of the comparison
-  // come from the same ESPN asset namespace.
   const hLogo = logoKey(home.team && home.team.logo);
   const aLogo = logoKey(away.team && away.team.logo);
+  const start = Date.parse(event.date);
+
+  // Everything the responses already carried and were throwing away. A card
+  // wants the kickoff ESPN has rather than the hour a provider typed, the
+  // network the game is on, and whether it has started; all of it arrived with
+  // the orientation and none of it cost a request.
+  const rec = {
+    // Whichever identity the crest key is compared against, so a crest lookup
+    // can tell the sides apart. The name keys cannot use it — one event is
+    // indexed under every variant of both names, and no single stored string
+    // is the one a caller will arrive with — so they say it in the key instead.
+    home: hLogo || normalize(home.team && home.team.displayName),
+    league: leagueLogo,
+    start: Number.isFinite(start) ? start : 0,
+    status: typeof comp?.status?.type?.state === 'string' ? comp.status.type.state : '',
+    net: networksOf(comp),
+    venue: (comp?.venue?.fullName) || (event.venue && event.venue.fullName) || ''
+  };
+
+  // The crest pair is the strongest key of the two, since both sides of the
+  // comparison come from the same ESPN asset namespace.
   if (hLogo && aLogo && hLogo !== aLogo) {
     const key = `L:${scope}:${pairKey(hLogo, aLogo)}`;
-    if (!map.has(key)) { map.set(key, { home: hLogo, league: leagueLogo }); added++; }
+    if (!map.has(key)) { map.set(key, rec); added++; }
   }
 
+  // Home side first in the key, away second. A sorted pair says which two teams
+  // met and nothing about which of them was at home, and the record shared by
+  // all of these keys cannot say it either — so the order the key hits in is
+  // the answer, and a lookup tries both.
   const homeNames = nameVariants(home.team);
   const awayNames = nameVariants(away.team);
   for (const h of homeNames) {
     for (const a of awayNames) {
       if (h === a) continue;
-      const key = `N:${scope}:${pairKey(h, a)}`;
+      const key = `N:${scope}:${h}|${a}`;
       // Within one board on one day, a duplicate really is the same event.
-      if (!map.has(key)) { map.set(key, { home: h, league: leagueLogo }); added++; }
+      if (!map.has(key)) { map.set(key, rec); added++; }
     }
   }
+  if (added) list.push(rec);
   return added;
 }
 
@@ -284,6 +369,7 @@ async function rebuild() {
   const jobs = plan(Date.now());
   const results = await pool(jobs, 8, ({ board, dates }) => fetchBoard(board, dates));
   const next = new Map();
+  const nextRecords = [];
   const stats = { requests: jobs.length, ok: 0, failed: [], events: 0, keys: 0, capped: [] };
 
   results.forEach((r, i) => {
@@ -294,14 +380,24 @@ async function rebuild() {
     if (r.value.length >= REQUEST_LIMIT) stats.capped.push(`${jobs[i].board}@${jobs[i].dates}`);
     for (const ev of r.value) {
       stats.events++;
-      stats.keys += addEvent(next, ev, jobs[i].board);
+      stats.keys += addEvent(next, nextRecords, ev, jobs[i].board);
     }
   });
+
+  // A board that stops answering costs every fixture on it its orientation and
+  // its league crest, and nothing downstream complains: the catalog falls back
+  // to the title's separator and the card still draws. That is how a live
+  // instance sat at eleven answered requests out of eighty-four for weeks
+  // without a line in the log, so a refresh that mostly fails now says so.
+  if (stats.ok * 4 < stats.requests) {
+    console.warn(`[HomeAway] only ${stats.ok} of ${stats.requests} scoreboard requests answered; orientation and league crests will be sparse`);
+  }
 
   // Every request failing means ESPN or egress is down, not that fixtures lost
   // their venues — keep whatever the last good index was.
   if (!stats.ok && index.size) return lastStats;
   index = next;
+  records = nextRecords;
   fetchedAt = Date.now();
   lastStats = stats;
   persist();
@@ -331,7 +427,8 @@ async function ensureFresh() {
 }
 
 /**
- * Orientation for a fixture, or null when ESPN doesn't list it.
+ * The event ESPN lists for this fixture, and whether the first side named is
+ * the home one. Null when ESPN doesn't list it.
  *
  * Scoped to the boards that answer for this category and to the fixture's own
  * day (±1, since the provider's clock and ESPN's can straddle midnight). Both
@@ -341,10 +438,8 @@ async function ensureFresh() {
  * Crest URLs are tried before names: the feed's team names and ESPN's rarely
  * agree letter-for-letter, but a resolved crest is the same asset on both
  * sides.
- *
- * Returns { away, home } as the caller's own strings, not normalized ones.
  */
-function orient(a, b, aLogo = null, bLogo = null, category = null, dateMs = null) {
+function lookup(a, b, aLogo, bLogo, category, dateMs) {
   if (!a || !b || !index.size) return null;
   if (Date.now() - fetchedAt > STALE_SERVE_MS) return null;
 
@@ -369,25 +464,67 @@ function orient(a, b, aLogo = null, bLogo = null, category = null, dateMs = null
   const na = normalize(a);
   const nb = normalize(b);
   const logoPair = la && lb && la !== lb ? pairKey(la, lb) : null;
-  const namePair = na && nb && na !== nb ? pairKey(na, nb) : null;
-  if (!logoPair && !namePair) return null;
+  const named = !!(na && nb && na !== nb);
+  if (!logoPair && !named) return null;
 
   for (const board of boards) {
     for (const day of days) {
       const scope = `${board}:${day}`;
       if (logoPair) {
         const rec = index.get(`L:${scope}:${logoPair}`);
-        if (rec && rec.home === la) return { away: b, home: a, leagueLogo: rec.league };
-        if (rec && rec.home === lb) return { away: a, home: b, leagueLogo: rec.league };
+        if (rec && rec.home === la) return { rec, homeIsA: true };
+        if (rec && rec.home === lb) return { rec, homeIsA: false };
       }
-      if (namePair) {
-        const rec = index.get(`N:${scope}:${namePair}`);
-        if (rec && rec.home === na) return { away: b, home: a, leagueLogo: rec.league };
-        if (rec && rec.home === nb) return { away: a, home: b, leagueLogo: rec.league };
+      if (named) {
+        // The name keys are written home-first, so which order answers is which
+        // side ESPN has at home.
+        const asA = index.get(`N:${scope}:${na}|${nb}`);
+        if (asA) return { rec: asA, homeIsA: true };
+        const asB = index.get(`N:${scope}:${nb}|${na}`);
+        if (asB) return { rec: asB, homeIsA: false };
       }
     }
   }
   return null;
+}
+
+/**
+ * Orientation for a fixture, or null when ESPN doesn't list it.
+ *
+ * Returns { away, home } as the caller's own strings, not normalized ones.
+ */
+function orient(a, b, aLogo = null, bLogo = null, category = null, dateMs = null) {
+  const hit = lookup(a, b, aLogo, bLogo, category, dateMs);
+  if (!hit) return null;
+  return hit.homeIsA
+    ? { away: b, home: a, leagueLogo: hit.rec.league }
+    : { away: a, home: b, leagueLogo: hit.rec.league };
+}
+
+/** What ESPN knows about a fixture beyond which side is at home. */
+function details(a, b, aLogo = null, bLogo = null, category = null, dateMs = null) {
+  const hit = lookup(a, b, aLogo, bLogo, category, dateMs);
+  if (!hit) return null;
+  const { start, status, net, venue, league } = hit.rec;
+  // The networks are copied out, not handed over: one record answers for every
+  // key that names the event, and a caller that sorted or trimmed the list in
+  // place would be editing the index.
+  return { start, status, net: Array.isArray(net) ? net.slice() : [], venue, leagueLogo: league };
+}
+
+/**
+ * For tests: build the index from fixture events, as a refresh would. Reaching
+ * ESPN is the one thing a test must not do, and everything below the request is
+ * worth exercising for real.
+ */
+function seed(events, board) {
+  const next = new Map();
+  const list = [];
+  for (const ev of events) addEvent(next, list, ev, board);
+  index = next;
+  records = list;
+  fetchedAt = Date.now();
+  return { keys: next.size, events: list.length };
 }
 
 function stats() {
@@ -396,4 +533,7 @@ function stats() {
 
 restore();
 
-module.exports = { ensureFresh, orient, stats, normalize, _rebuild: rebuild };
+module.exports = {
+  ensureFresh, orient, details, stats, normalize,
+  _rebuild: rebuild, _plan: plan, _seed: seed, _restore: restore, _persist: persist
+};
