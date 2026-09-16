@@ -110,6 +110,35 @@ t(['d1', 'd2', 'd3', 'w1', 'w2'], streams._spreadHosts(mixedRows).map(r => r.id)
 t(['d1', 'd2', 'd3', 'w1', 'w2'], streams._spreadHosts(mixedRows).map(r => r.id).sort(),
   'with every row still there, exactly once');
 
+console.log('--- the viewer\'s own source order is what they are handed');
+// This setting reached only selectSources() before, where it chose which
+// provider was asked first and nothing about what came back -- so dragging the
+// list rearranged the work and never the answer.
+t('rating', streams._sortMode({}), 'nothing said and nothing ordered: the rating decides');
+t('source', streams._sortMode({ sourceOrder: 'timstreams,cdnlive' }),
+  'ordering the sources is itself the request to be given that order');
+t('rating', streams._sortMode({ sourceOrder: 'timstreams,cdnlive', sortBy: 'rating' }),
+  'and saying otherwise outright still wins');
+t('source', streams._sortMode({ sortBy: 'source' }), 'as does asking for it with nothing ordered');
+t(null, streams._sourceRank({}), 'no order, no ranking');
+const rank = streams._sourceRank({ sourceOrder: 'timstreams,cdnlive' });
+t(0, rank({ _source: 'timstreams' }), 'the first named is first');
+t(1, rank({ _source: 'cdnlive' }), 'the second is second');
+t(2, rank({ _source: 'watchfooty' }), 'one they never placed sits behind every one they did');
+t(2, rank({}), 'and so does a row that names no source at all');
+
+const srcRows = [
+  { id: 't1', _source: 'timstreams', url: link('one.cdn.example') },
+  { id: 't2', _source: 'timstreams', url: link('one.cdn.example') },
+  { id: 'c1', _source: 'cdnlive', url: link('two.cdn.example') }
+];
+t(['t1', 't2', 'c1'], streams._spreadRows(srcRows, true).map(r => r.id),
+  'rotating hosts never lifts a second source over the whole of the first');
+t(['t1', 'c1', 't2'], streams._spreadRows(srcRows, false).map(r => r.id),
+  'where the rating decides, that rotation is free to reach across sources');
+t(['c1', 't1', 't2'], streams._spreadRows([srcRows[2], srcRows[0], srcRows[1]], true).map(r => r.id),
+  'and the sources come back in the order they were sorted into, not a fixed one');
+
 (async () => {
   console.log('--- the fan-out is capped');
   t(4, streams._SOURCE_CONCURRENCY, 'four sources are resolved at a time');

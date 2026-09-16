@@ -714,6 +714,15 @@
 
 
     <div class="section">
+      <h3>Sort Streams By</h3>
+      <p class="hint">Rating ranks every stream on what was measured about it — the resolution and bitrate read from the stream itself, and whether that source has been answering lately. Source order hands you your own order from above instead, best stream first within each source. Dragging your sources into an order selects this on its own:</p>
+      <div class="toggle-row" id="sortBy">
+        <button type="button" class="toggle" data-value="rating">⭐ Rating</button>
+        <button type="button" class="toggle" data-value="source">🎚️ Source order</button>
+      </div>
+    </div>
+
+    <div class="section">
       <h3>Stream Order</h3>
       <p class="hint">Direct streams play in the app. Web streams open a browser. Select which type of streams should be shown first, or tap the selected one again to clear it and leave them unordered:</p>
       <div class="toggle-row" id="streamOrder">
@@ -1354,6 +1363,32 @@
       return active ? active.dataset.value : 'none';
     };
 
+    // Two real choices and no third one, so this row has no clearing tap: what
+    // "neither" would even mean here is a list in no order at all.
+    const sortByRow = document.getElementById('sortBy');
+    sortByRow.addEventListener('click', (e) => {
+      const btn = e.target.closest('.toggle');
+      if (!btn) return;
+      e.preventDefault();
+      sortByRow.querySelectorAll('.toggle').forEach(t => t.classList.toggle('active', t === btn));
+      updateLink();
+    });
+    const sortByValue = () => {
+      const active = sortByRow.querySelector('.toggle.active');
+      return active ? active.dataset.value : '';
+    };
+    // What the addon does when the link says nothing: a viewer who has ordered
+    // their sources is given that order. Shown rather than left blank, so the
+    // setting reads the same way it will behave.
+    // The same question the save below asks: an order that still matches the
+    // built-in one is nobody's preference, and is not carried in the link.
+    const impliedSortBy = () =>
+      (sourceRows().map(row => row.dataset.value).join(',') !== DEFAULT_SOURCE_ORDER.join(',')
+        ? 'source'
+        : 'rating');
+    const paintSortBy = (value) => sortByRow.querySelectorAll('.toggle')
+      .forEach(t => t.classList.toggle('active', t.dataset.value === value));
+
     // Addon identity, edited in a dialog rather than by typing into the heading.
     // A heading that is secretly a text field is a heading people do not realise
     // they can change; a pencil says so.
@@ -1582,6 +1617,14 @@
     }
     refreshArrows();
 
+    // Painted here rather than only on a saved value: the rows have just been
+    // re-seated, so this is the first point the implied answer is the true one.
+    // A row showing neither choice would be the one honest reading of "unset"
+    // and the least useful, since the addon is never undecided.
+    paintSortBy(existingConfig.sortBy === 'rating' || existingConfig.sortBy === 'source'
+      ? existingConfig.sortBy
+      : impliedSortBy());
+
     // The tab list comes from the addon itself, asked for with no sports key so
     // nothing is filtered by a saved selection -- but with a placeholder team,
     // which is the only way to be handed every tab. The server drops My Teams
@@ -1693,6 +1736,10 @@
       // other two have to be carried because they differ from it.
       const order = streamOrderValue();
       if (order === 'web' || order === 'none') config.streamOrder = order;
+
+      // Carried only when it differs from what the addon would do anyway, so
+      // ordering your sources does not also lengthen the URL to say so.
+      if (sortByValue() && sortByValue() !== impliedSortBy()) config.sortBy = sortByValue();
 
       // 12-hour is the default, so only 24 needs carrying.
       if (timeFormatValue() === '24') config.timeFormat = '24';
@@ -2003,7 +2050,7 @@
     // this is a single allow-list rather than two deny-lists that fall behind
     // the settings they are meant to cover.
     const KNOWN_KEYS = [
-      'teams', 'markets', 'timezone', 'sports', 'sources', 'sourceOrder', 'streamOrder', 'timeFormat',
+      'teams', 'markets', 'timezone', 'sports', 'sources', 'sourceOrder', 'streamOrder', 'sortBy', 'timeFormat',
       'addonName', 'addonLogo', 'addonDescription', 'catalogOrder', 'catalogNames', 'catalogOptions'
     ];
     // Not secret -- this addon holds no keys or tokens -- but personal: together

@@ -508,6 +508,63 @@ function upstreamHost(s) {
  * changes nothing, and it never drops a row or renames one -- the set that
  * goes out is the set that came in, in a different order.
  */
+/**
+ * The viewer's own source order, as a rank over stream rows.
+ *
+ * Until now this setting reached only selectSources(), where it decided which
+ * provider was *asked* first and nothing about what came back — so dragging the
+ * list changed the order work happened in and never the order anybody saw.
+ */
+function sourceRank(config) {
+  const listed = config && typeof config.sourceOrder === 'string' && config.sourceOrder
+    ? config.sourceOrder.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  if (!listed.length) return null;
+  const rank = new Map(listed.map((s, i) => [s, i]));
+  // A source the viewer never placed sits behind every one they did, rather
+  // than sharing rank 0 with their first choice.
+  return (s) => {
+    const r = rank.get((s && s._source) || '');
+    return r === undefined ? listed.length : r;
+  };
+}
+
+/**
+ * Which of the two orders the list is built on.
+ *
+ * An explicit choice wins. Without one, a viewer who has dragged their sources
+ * into an order has already said which they want — that drag is not a hint
+ * about resolution scheduling, it is a preference about what to watch.
+ */
+function sortMode(config) {
+  const explicit = config && config.sortBy;
+  if (explicit === 'source' || explicit === 'rating') return explicit;
+  return config && typeof config.sourceOrder === 'string' && config.sourceOrder.trim()
+    ? 'source'
+    : 'rating';
+}
+
+/**
+ * Host rotation, applied inside one source rather than across them.
+ *
+ * Spreading CDNs is a tie-break, not an ordering: promoting a second host's row
+ * over the whole of the viewer's first-choice source would undo exactly the
+ * order they asked for. Rows arrive already sorted, so inserting in encounter
+ * order keeps the sources in theirs.
+ */
+function spreadRows(rows, bySource) {
+  if (!bySource) return spreadHosts(rows);
+  const groups = new Map();
+  for (const s of rows) {
+    const k = (s && s._source) || '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  const out = [];
+  for (const g of groups.values()) out.push(...spreadHosts(g));
+  return out;
+}
+
 function spreadHosts(rows) {
   const queues = new Map();
   rows.forEach((s, i) => {
@@ -786,11 +843,20 @@ async function handleStream(type, id, config) {
   const order = config && config.streamOrder;
   const webFirst = order === 'web';
   const groupByKind = order !== 'none';
+  const rank = sourceRank(config);
+  const bySource = sortMode(config) === 'source' && !!rank;
   streams.sort((a, b) => {
     if (groupByKind) {
       const aDirect = a.url ? 1 : 0;
       const bDirect = b.url ? 1 : 0;
       if (aDirect !== bDirect) return webFirst ? aDirect - bDirect : bDirect - aDirect;
+    }
+    if (bySource) {
+      const ra = rank(a);
+      const rb = rank(b);
+      // Within one source the rating still decides, so "my order" means which
+      // site to try first, not that its worst stream outranks its best.
+      if (ra !== rb) return ra - rb;
     }
     return (b.score - a.score) || byStation(a, b);
   });
@@ -798,9 +864,9 @@ async function handleStream(type, id, config) {
   // Then spread the hosts, within each kind's block so that which kind comes
   // first stays the viewer's decision rather than an accident of which CDN a
   // web player happened to point at.
-  const direct = () => spreadHosts(streams.filter(s => s.url));
-  const web = () => spreadHosts(streams.filter(s => !s.url));
-  const spread = !groupByKind ? spreadHosts(streams)
+  const direct = () => spreadRows(streams.filter(s => s.url), bySource);
+  const web = () => spreadRows(streams.filter(s => !s.url), bySource);
+  const spread = !groupByKind ? spreadRows(streams, bySource)
     : webFirst ? [...web(), ...direct()]
     : [...direct(), ...web()];
   streams.length = 0;
@@ -946,6 +1012,9 @@ module.exports = {
   _tallySource: tallySource,
   _upstreamHost: upstreamHost,
   _spreadHosts: spreadHosts,
+  _spreadRows: spreadRows,
+  _sourceRank: sourceRank,
+  _sortMode: sortMode,
   _mapLimit: mapLimit,
   _SOURCE_CONCURRENCY: SOURCE_CONCURRENCY
 };
