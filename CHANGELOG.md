@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.2 (2026-09-16)
+
+The other half of the release before it. A fixture's sport was read off the last words of its address, and club names are full of sports: the tail of `barcelona-vs-racing-de-santander` is "racing de santander", which went out as motorsport. The wrong tab was again the smaller half — two rows that disagree about the sport are never merged, so that game was listed twice, once here and once from another source, with the streams divided between the two tiles. A fixture nobody can place merges perfectly well; only a confident wrong answer stops it, which makes naming no sport strictly better than guessing at one.
+
+### Bug Fixes
+
+* **providers:** read a totalsportek address for its sport only where it names one outright, so a club called Racing is not motor racing and a game is not listed twice for it ([d9c0447](https://github.com/mlp2069/aiosports/commit/d9c0447))
+
 ## v1.2.1 (2026-09-16)
 
 Cleaning up after the release before it. A site that lists two club names and a kickoff has not said what sport is being played, so fifty-four fixtures landed in Other Sports — twenty-six of them major league baseball. The wrong tab was the smaller half: two rows that disagree about the sport are never merged, so the same game from a source that did name its sport sat on a second tile with the streams divided between them. The crests settle it, and they were already on hand.
