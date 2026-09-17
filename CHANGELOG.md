@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.4.1 (2026-09-16)
+
+A follow-up to v1.4.0. Every local station is now a tile of its own — FOX 32 Chicago, NBC 5 Chicago, ABC 15 Phoenix and about 350 more — instead of a row buried inside its network's tile. The release also reports its own version correctly again, and release builds no longer fail on their first attempt. No reinstall is needed.
+
+### Features
+
+* **channels:** give every local station its own tile, named for its city and channel number, across all 220 cities with a free stream rather than only the cities in your profile. the fox, nbc, abc and cbs tiles keep just their national feeds, and cw, mnt and pbs no longer have a tile of their own because every stream they carried was a local station ([337ac56](https://github.com/mlp2069/aiosports/commit/337ac56))
+
+### Bug Fixes
+
+* **manifest:** report the right version in the manifest, /api/version and the readme badge — v1.4.0 still announced itself as 1.3.0 ([8f0a023](https://github.com/mlp2069/aiosports/commit/8f0a023))
+* **ci:** wait for impit to report in before judging the image, instead of reading its log once the moment the server answers. that race is why the first v1.3.0 and v1.4.0 tag builds published no image and had to be re-cut ([a95dc76](https://github.com/mlp2069/aiosports/commit/a95dc76))
+
 ## v1.4.0 (2026-09-16)
 
 ⭐ Your Teams asked whether a fixture's title contained the name you typed. A feed writes "Braves @ Cubs" where you wrote "Chicago Cubs", so your own club never matched and the tab stood empty during your own game — while the same question handed a Chicago supporter Mercer Bears and California Golden Bears, who are other people's Bears entirely. A title is a sentence, not an identity, and the crests that settle it were on hand the whole time. The fixtures nobody streams yet were picked the same way, where a single word could collect three hundred other clubs' games. And dragging the sources into an order still changed nothing about the list that came back from them.
